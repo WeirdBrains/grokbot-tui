@@ -1,15 +1,10 @@
-//! Config and credential storage in `~/.grokbot-tui/`.
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::{Path, PathBuf};
+//! Typed view over the key-value preferences stored in the database.
+use std::collections::BTreeMap;
 
 pub const TOKEN_ENV: &str = "GROKBOT_TOKEN";
 
-/// API endpoint paths. **PLACEHOLDERS** — there is no confirmed Grok Bot API
-/// spec yet. Replace these once the real API is documented.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
+/// API endpoint paths. **PLACEHOLDERS** — no confirmed Grok Bot API spec yet.
+#[derive(Debug, Clone, PartialEq)]
 pub struct ApiPaths {
     pub whoami: String,
     pub bots: String,
@@ -32,14 +27,16 @@ impl Default for ApiPaths {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     /// PLACEHOLDER base URL.
     pub api_base_url: String,
     pub paths: ApiPaths,
     pub default_bot: Option<String>,
+    /// Last active bot id (restored on start).
+    pub active_bot: Option<String>,
     pub request_timeout_secs: u64,
+    pub sidebar_width: u16,
 }
 
 impl Default for Config {
@@ -48,152 +45,73 @@ impl Default for Config {
             api_base_url: "https://api.grokbot.example".into(),
             paths: ApiPaths::default(),
             default_bot: None,
+            active_bot: None,
             request_timeout_secs: 30,
+            sidebar_width: 24,
         }
     }
 }
 
-/// Paths for everything stored on disk.
-#[derive(Debug, Clone)]
-pub struct Store {
-    pub dir: PathBuf,
+/// Known preference keys with their defaults (empty = unset).
+pub fn default_prefs() -> Vec<(&'static str, String)> {
+    let c = Config::default();
+    vec![
+        ("api_base_url", c.api_base_url),
+        ("request_timeout_secs", c.request_timeout_secs.to_string()),
+        ("paths.whoami", c.paths.whoami),
+        ("paths.bots", c.paths.bots),
+        ("paths.history", c.paths.history),
+        ("paths.send", c.paths.send),
+        ("paths.revoke", String::new()),
+        ("default_bot", String::new()),
+        ("active_bot", String::new()),
+        ("ui.sidebar_width", c.sidebar_width.to_string()),
+    ]
 }
 
-impl Store {
-    pub fn default_location() -> Result<Self> {
-        let home = dirs::home_dir().context("cannot determine home directory")?;
-        Ok(Self {
-            dir: home.join(".grokbot-tui"),
-        })
-    }
-
-    pub fn at(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into() }
-    }
-
-    pub fn config_path(&self) -> PathBuf {
-        self.dir.join("config.toml")
-    }
-
-    pub fn credentials_path(&self) -> PathBuf {
-        self.dir.join("credentials")
-    }
-
-    fn ensure_dir(&self) -> Result<()> {
-        fs::create_dir_all(&self.dir)?;
-        set_mode(&self.dir, 0o700)
-    }
-
-    /// Load config, writing a default file on first run.
-    pub fn load_config(&self) -> Result<Config> {
-        let p = self.config_path();
-        if !p.exists() {
-            self.ensure_dir()?;
-            let cfg = Config::default();
-            fs::write(&p, toml::to_string_pretty(&cfg)?)?;
-            return Ok(cfg);
-        }
-        let s = fs::read_to_string(&p)?;
-        toml::from_str(&s).with_context(|| format!("parsing {}", p.display()))
-    }
-
-    /// Token resolution: `GROKBOT_TOKEN` env var wins, then the credentials file.
-    pub fn load_token(&self) -> Option<String> {
-        if let Ok(t) = std::env::var(TOKEN_ENV)
-            && !t.trim().is_empty()
-        {
-            return Some(t.trim().to_string());
-        }
-        self.load_stored_token()
-    }
-
-    pub fn load_stored_token(&self) -> Option<String> {
-        let t = fs::read_to_string(self.credentials_path()).ok()?;
-        let t = t.trim();
-        (!t.is_empty()).then(|| t.to_string())
-    }
-
-    pub fn save_token(&self, token: &str) -> Result<()> {
-        self.ensure_dir()?;
-        let p = self.credentials_path();
-        write_private(&p, token.trim())
-    }
-
-    /// Returns true if a stored credential was deleted.
-    pub fn delete_token(&self) -> Result<bool> {
-        let p = self.credentials_path();
-        if p.exists() {
-            fs::remove_file(p)?;
-            Ok(true)
-        } else {
-            Ok(false)
+impl Config {
+    pub fn from_prefs(p: &BTreeMap<String, String>) -> Self {
+        let d = Config::default();
+        let s = |k: &str, def: String| p.get(k).filter(|v| !v.is_empty()).cloned().unwrap_or(def);
+        let o = |k: &str| p.get(k).filter(|v| !v.is_empty()).cloned();
+        Config {
+            api_base_url: s("api_base_url", d.api_base_url),
+            paths: ApiPaths {
+                whoami: s("paths.whoami", d.paths.whoami),
+                bots: s("paths.bots", d.paths.bots),
+                history: s("paths.history", d.paths.history),
+                send: s("paths.send", d.paths.send),
+                revoke: o("paths.revoke"),
+            },
+            default_bot: o("default_bot"),
+            active_bot: o("active_bot"),
+            request_timeout_secs: o("request_timeout_secs")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(d.request_timeout_secs),
+            sidebar_width: o("ui.sidebar_width")
+                .and_then(|v| v.parse().ok())
+                .filter(|w| (10..=80).contains(w))
+                .unwrap_or(d.sidebar_width),
         }
     }
-}
-
-#[cfg(unix)]
-fn write_private(p: &Path, contents: &str) -> Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut f = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(p)?;
-    f.write_all(contents.as_bytes())?;
-    set_mode(p, 0o600)
-}
-
-#[cfg(not(unix))]
-fn write_private(p: &Path, contents: &str) -> Result<()> {
-    Ok(fs::write(p, contents)?)
-}
-
-#[cfg(unix)]
-fn set_mode(p: &Path, mode: u32) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(p, fs::Permissions::from_mode(mode))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_mode(_: &Path, _: u32) -> Result<()> {
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn default_config_written_and_roundtrips() {
-        let d = tempfile::tempdir().unwrap();
-        let s = Store::at(d.path().join("gb"));
-        let c = s.load_config().unwrap();
-        assert_eq!(c, Config::default());
-        assert!(s.config_path().exists());
-        assert_eq!(s.load_config().unwrap(), c);
-    }
-
-    #[test]
-    fn token_save_load_delete() {
-        let d = tempfile::tempdir().unwrap();
-        let s = Store::at(d.path().join("gb"));
-        assert!(s.load_stored_token().is_none());
-        s.save_token("  abc123\n").unwrap();
-        assert_eq!(s.load_stored_token().as_deref(), Some("abc123"));
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let m = fs::metadata(s.credentials_path())
-                .unwrap()
-                .permissions()
-                .mode();
-            assert_eq!(m & 0o777, 0o600);
-        }
-        assert!(s.delete_token().unwrap());
-        assert!(!s.delete_token().unwrap());
-        assert!(s.load_stored_token().is_none());
+    fn prefs_roundtrip_defaults_and_overrides() {
+        let mut m: BTreeMap<String, String> = default_prefs()
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        assert_eq!(Config::from_prefs(&m), Config::default());
+        m.insert("api_base_url".into(), "http://x".into());
+        m.insert("ui.sidebar_width".into(), "999".into());
+        m.insert("paths.revoke".into(), "/r".into());
+        let c = Config::from_prefs(&m);
+        assert_eq!(c.api_base_url, "http://x");
+        assert_eq!(c.sidebar_width, 24);
+        assert_eq!(c.paths.revoke.as_deref(), Some("/r"));
     }
 }

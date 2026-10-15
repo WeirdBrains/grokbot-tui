@@ -13,7 +13,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Constraint::Length(3),
     ])
     .areas(f.area());
-    let [side, body] = Layout::horizontal([Constraint::Length(24), Constraint::Min(10)]).areas(mid);
+    let [side, body] = Layout::horizontal([
+        Constraint::Length(app.config.sidebar_width),
+        Constraint::Min(10),
+    ])
+    .areas(mid);
 
     // Top bar
     let user = app

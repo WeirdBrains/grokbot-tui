@@ -3,19 +3,20 @@ mod api;
 mod app;
 mod commands;
 mod config;
+mod storage;
 mod ui;
 
 use anyhow::Result;
 use api::{ApiClient, HttpClient, MockClient};
 use app::{App, Focus};
 use clap::Parser;
-use config::Store;
 use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
     MouseButton, MouseEventKind,
 };
 use ratatui::crossterm::execute;
 use std::time::Duration;
+use storage::Store;
 
 #[derive(Parser)]
 #[command(name = "gb", version, about = "Terminal UI for Grok Bot")]
@@ -23,16 +24,23 @@ struct Cli {
     /// Use the offline mock API (fake bots, echo replies; any token except "bad" works).
     #[arg(long)]
     mock: bool,
-    /// Override the config directory (default ~/.grokbot-tui).
-    #[arg(long)]
-    config_dir: Option<std::path::PathBuf>,
+    /// Data directory holding context.db (default ~/.gb).
+    #[arg(long, value_name = "DIR")]
+    data_dir: Option<std::path::PathBuf>,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let store = match cli.config_dir {
-        Some(d) => Store::at(d),
-        None => Store::default_location()?,
+    let custom = cli.data_dir.is_some();
+    let store = Store::open(match cli.data_dir {
+        Some(d) => d,
+        None => Store::default_dir()?,
+    })?;
+    // One-time best-effort import from the pre-SQLite location.
+    let imported = if custom {
+        None
+    } else {
+        dirs::home_dir().and_then(|h| store.import_legacy(&h.join(".grokbot-tui")))
     };
     let config = store.load_config()?;
     let rt = tokio::runtime::Runtime::new()?;
@@ -42,6 +50,9 @@ fn main() -> Result<()> {
         Box::new(HttpClient::new(config.clone())?)
     };
     let mut app = App::new(api, store, config, rt.handle().clone(), cli.mock);
+    if let Some(msg) = imported {
+        app.info(msg);
+    }
     app.init();
 
     let mut term = ratatui::init();

@@ -78,10 +78,24 @@ pub fn registry() -> Registry {
                 run: history,
             },
             Command {
+                name: "prefs",
+                aliases: &["pref"],
+                usage: "/prefs [get <k>|set <k> <v>]",
+                help: "List, get, or set preferences",
+                run: prefs,
+            },
+            Command {
+                name: "memory",
+                aliases: &["mem"],
+                usage: "/memory [add <k> <v>|clear [k]]",
+                help: "Per-bot memory notes for the active bot",
+                run: memory,
+            },
+            Command {
                 name: "clear",
                 aliases: &[],
-                usage: "/clear",
-                help: "Clear the body (local only)",
+                usage: "/clear [saved]",
+                help: "Clear the body; `saved` also deletes the bot's stored transcript",
                 run: clear,
             },
             Command {
@@ -131,13 +145,15 @@ pub fn finish_login(app: &mut App, token: &str) {
         return;
     }
     match app.authenticate(token.to_string()) {
-        Ok(()) => match app.store.save_token(token) {
-            Ok(()) => app.info(format!(
-                "Token saved to {}",
-                app.store.credentials_path().display()
-            )),
-            Err(e) => app.error(format!("Logged in, but could not save token: {e:#}")),
-        },
+        Ok(()) => {
+            match app
+                .store
+                .save_credentials(token, app.user.as_ref(), &app.config.api_base_url)
+            {
+                Ok(()) => app.info(format!("Token saved to {}", app.store.db_path().display())),
+                Err(e) => app.error(format!("Logged in, but could not save token: {e:#}")),
+            }
+        }
         Err(e) => app.error(format!("Login failed: {e:#}")),
     }
 }
@@ -191,7 +207,86 @@ fn history(app: &mut App, _: &str) -> Result<()> {
     Ok(())
 }
 
-fn clear(app: &mut App, _: &str) -> Result<()> {
+fn prefs(app: &mut App, args: &str) -> Result<()> {
+    let mut it = args.splitn(3, char::is_whitespace);
+    match (it.next().unwrap_or(""), it.next(), it.next()) {
+        ("" | "list", None, None) => {
+            let list = app
+                .store
+                .list_prefs()?
+                .into_iter()
+                .map(|(k, v)| format!("  {k:<22} {v}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            app.info(format!("Preferences:\n{list}"));
+        }
+        ("get", Some(k), None) => {
+            let v = app.store.get_pref(k)?;
+            app.info(format!("{k} = {}", v.as_deref().unwrap_or("(unset)")));
+        }
+        ("set", Some(k), v) => {
+            let v = v.unwrap_or("").trim();
+            app.store.set_pref(k, v)?;
+            app.config = app.store.load_config()?;
+            let note = if k.starts_with("api_")
+                || k.starts_with("paths.")
+                || k == "request_timeout_secs"
+            {
+                " (restart gb for API changes to take effect)"
+            } else {
+                ""
+            };
+            app.info(format!("{k} = {v}{note}"));
+        }
+        _ => bail!("Usage: /prefs [list | get <key> | set <key> <value>]"),
+    }
+    Ok(())
+}
+
+fn memory(app: &mut App, args: &str) -> Result<()> {
+    let Some(bot) = app.active_bot().map(|b| b.id.clone()) else {
+        bail!("No active bot")
+    };
+    let mut it = args.splitn(3, char::is_whitespace);
+    match (it.next().unwrap_or(""), it.next(), it.next()) {
+        ("" | "list", None, None) => {
+            let items = app.store.list_memory(&bot)?;
+            let text = if items.is_empty() {
+                format!("No memory notes for {bot}.")
+            } else {
+                let l = items
+                    .iter()
+                    .map(|(k, v)| format!("  {k}: {v}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!("Memory for {bot}:\n{l}")
+            };
+            app.info(text);
+        }
+        ("add" | "set", Some(k), Some(v)) => {
+            app.store.set_memory(&bot, k, v.trim())?;
+            app.info(format!("Remembered {k} for {bot}."));
+        }
+        ("clear", k, None) => {
+            let n = app.store.clear_memory(&bot, k)?;
+            app.info(format!("Cleared {n} memory note(s) for {bot}."));
+        }
+        _ => bail!("Usage: /memory [list | add <key> <value> | clear [key]]"),
+    }
+    Ok(())
+}
+
+fn clear(app: &mut App, args: &str) -> Result<()> {
+    match args {
+        "" => {}
+        "saved" => {
+            let Some(id) = app.active_bot().map(|b| b.id.clone()) else {
+                bail!("No active bot")
+            };
+            app.store.clear_messages(&id)?;
+        }
+        _ => bail!("Usage: /clear [saved]"),
+    }
     app.clear_current();
     Ok(())
 }

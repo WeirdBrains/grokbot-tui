@@ -1,7 +1,8 @@
 //! Application state and input handling.
 use crate::api::{ApiClient, Bot, Message, Role, User};
 use crate::commands::{self, Registry};
-use crate::config::{Config, Store, TOKEN_ENV};
+use crate::config::{Config, TOKEN_ENV};
+use crate::storage::Store;
 use anyhow::Result;
 use ratatui::layout::Rect;
 use std::collections::HashMap;
@@ -133,7 +134,7 @@ impl App {
         self.active = None;
         self.logs.clear();
         self.scroll = 0;
-        match self.store.delete_token() {
+        match self.store.delete_credentials() {
             Ok(true) => self.info("Logged out; stored credential deleted.".into()),
             Ok(false) => self.info("Logged out (no stored credential).".into()),
             Err(e) => self.error(format!("Could not delete credential: {e:#}")),
@@ -149,7 +150,11 @@ impl App {
         match self.block(self.api.list_bots()) {
             Ok(b) => {
                 self.bots = b;
-                let want = self.config.default_bot.clone();
+                let want = self
+                    .config
+                    .active_bot
+                    .clone()
+                    .or(self.config.default_bot.clone());
                 let idx = want
                     .and_then(|w| self.find_bot(&w))
                     .or(if self.bots.is_empty() { None } else { Some(0) });
@@ -177,15 +182,34 @@ impl App {
         self.sidebar_cursor = i;
         self.scroll = 0;
         let id = self.bots[i].id.clone();
+        if self.config.active_bot.as_deref() != Some(id.as_str()) {
+            self.config.active_bot = Some(id.clone());
+            if let Err(e) = self.store.set_pref("active_bot", &id) {
+                self.error(format!("Could not save active bot: {e:#}"));
+            }
+        }
         if !self.logs.contains_key(&id) {
-            self.logs.insert(id.clone(), vec![]);
-            self.load_history(&id);
+            // Restore the ongoing chat from the local DB; fall back to server history.
+            match self.store.messages(&id) {
+                Ok(m) if !m.is_empty() => {
+                    self.logs
+                        .insert(id.clone(), m.into_iter().map(entry_from_msg).collect());
+                }
+                _ => {
+                    self.logs.insert(id.clone(), vec![]);
+                    self.load_history(&id);
+                }
+            }
         }
     }
 
+    /// Fetch server history and replace the locally stored transcript.
     pub fn load_history(&mut self, id: &str) {
         match self.block(self.api.history(id)) {
             Ok(h) => {
+                if let Err(e) = self.store.replace_messages(id, &h) {
+                    self.error(format!("Could not store history: {e:#}"));
+                }
                 let entries = h.into_iter().map(entry_from_msg).collect();
                 self.logs.insert(id.to_string(), entries);
             }
@@ -258,8 +282,17 @@ impl App {
             return;
         };
         self.push(EntryKind::User, text.clone());
+        let mine = Message {
+            role: Role::User,
+            text: text.clone(),
+        };
         match self.block(self.api.send(&bot.id, &text)) {
             Ok(m) => {
+                for msg in [&mine, &m] {
+                    if let Err(e) = self.store.append_message(&bot.id, msg) {
+                        self.error(format!("Could not save message: {e:#}"));
+                    }
+                }
                 let e = entry_from_msg(m);
                 self.push(e.kind, e.text);
             }
@@ -309,7 +342,7 @@ pub mod tests {
 
     pub fn test_app(rt: &tokio::runtime::Runtime) -> (App, tempfile::TempDir) {
         let d = tempfile::tempdir().unwrap();
-        let store = Store::at(d.path().join("gb"));
+        let store = Store::open(d.path().join("gb")).unwrap();
         let app = App::new(
             Box::new(MockClient::new()),
             store,
@@ -369,6 +402,50 @@ pub mod tests {
                 .text
                 .contains("Unknown command")
         );
+    }
+
+    #[test]
+    fn chat_restored_after_restart_and_prefs_memory() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("gb");
+        let mk = || {
+            let s = Store::open(&dir).unwrap();
+            let c = s.load_config().unwrap();
+            App::new(Box::new(MockClient::new()), s, c, rt.handle().clone(), true)
+        };
+        let mut app = mk();
+        type_line(&mut app, "/login t");
+        type_line(&mut app, "/bot scribe");
+        type_line(&mut app, "note this");
+        type_line(&mut app, "/memory add topic rust tui");
+        type_line(&mut app, "/prefs set ui.sidebar_width 30");
+        drop(app);
+
+        let mut app = mk(); // fresh mock server state, same DB
+        app.init();
+        assert_eq!(app.user.as_ref().unwrap().name, "mock-user");
+        assert_eq!(app.active_bot().unwrap().id, "scribe");
+        assert!(
+            app.current_log()
+                .iter()
+                .any(|e| e.text == "echo: note this")
+        );
+        assert_eq!(app.config.sidebar_width, 30);
+        type_line(&mut app, "/memory");
+        assert!(
+            app.current_log()
+                .last()
+                .unwrap()
+                .text
+                .contains("topic: rust tui")
+        );
+        type_line(&mut app, "/memory clear");
+        assert!(app.store.list_memory("scribe").unwrap().is_empty());
+        type_line(&mut app, "/clear saved");
+        assert!(app.store.messages("scribe").unwrap().is_empty());
+        type_line(&mut app, "/prefs bogus");
+        assert_eq!(app.current_log().last().unwrap().kind, EntryKind::Error);
     }
 
     #[test]
