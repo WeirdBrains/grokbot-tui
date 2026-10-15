@@ -9,7 +9,7 @@ A terminal UI for Grok Bot, written in Rust (2024 edition) with ratatui + crosst
 
 ```sh
 cargo run -- --mock          # offline: fake bots, echo replies; any token except "bad" logs in
-cargo run                    # real HTTP client (needs real endpoints in config.toml)
+cargo run                    # real HTTP client (set real endpoints with /prefs)
 cargo install --path .       # installs the `gb` binary
 gb --data-dir /tmp/gbtest    # use a different data directory (holds context.db)
 ```
