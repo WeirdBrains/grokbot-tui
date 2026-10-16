@@ -118,11 +118,11 @@ and `credentials` are imported once into the active account on a best-effort bas
 
 - **Login:** `/login` asks for a token (shown as `*`), validates it with `whoami`, then saves token,
   user id/name, and API base to the `credentials` table. Bad tokens are never saved. On startup the stored token is checked the same way.
-- **`GROKBOT_TOKEN`** env var overrides the stored credential, but **only for the account selected at startup**
+- **`GB_GROKBOT_TOKEN`** env var overrides the stored credential, but **only for the account selected at startup**
   (`--account` / `GB_ACCOUNT` / last active). After `/account use` to another account, that account's own stored credential is used.
   This stops one token from being sent to another account's server.
 - **Logout:** `/logout` calls the revoke endpoint if `paths.revoke` is set, deletes the `credentials` row,
-  for the active account only, and clears user, bots, and chats from memory. Stored transcripts and memory notes are kept. If `GROKBOT_TOKEN` is set it warns that you'll be logged back in on the next start.
+  for the active account only, and clears user, bots, and chats from memory. Stored transcripts and memory notes are kept. If `GB_GROKBOT_TOKEN` is set it warns that you'll be logged back in on the next start.
 - **Future:** OAuth device-code flow. `commands::finish_login` takes a token from anywhere, so a
   device flow can drop in there.
 

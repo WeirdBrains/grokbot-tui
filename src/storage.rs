@@ -134,7 +134,7 @@ pub struct Store {
     pub dir: PathBuf,
     conn: Connection,
     account: Account,
-    /// Account `GROKBOT_TOKEN` applies to (the one selected at startup).
+    /// Account `GB_GROKBOT_TOKEN` applies to (the one selected at startup).
     env_account: Option<i64>,
 }
 
@@ -408,7 +408,7 @@ impl Store {
 
     // ---- credentials (active account)
 
-    /// `GROKBOT_TOKEN` wins, but only for the account selected at startup; then the stored credential.
+    /// `GB_GROKBOT_TOKEN` wins, but only for the account selected at startup; then the stored credential.
     pub fn load_token(&self) -> Option<String> {
         if self.env_account == Some(self.account.id)
             && let Ok(t) = std::env::var(TOKEN_ENV)

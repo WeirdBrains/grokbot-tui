@@ -1,7 +1,7 @@
 //! Typed view over the key-value preferences stored in the database.
 use std::collections::BTreeMap;
 
-pub const TOKEN_ENV: &str = "GROKBOT_TOKEN";
+pub const TOKEN_ENV: &str = "GB_GROKBOT_TOKEN";
 pub const DEFAULT_ACCOUNT: &str = "default";
 
 /// Preference keys shared by all accounts. Every other key is account-scoped.
