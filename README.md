@@ -52,9 +52,9 @@ Keys: `Enter` submit · `Tab` toggle focus input/sidebar · `↑/↓` (or `j/k`)
 The screen never waits on the network. Every gateway call runs on a tokio task and posts its result back over a channel.
 Results that arrive after an account switch or logout are discarded.
 
-Only the **active bot** is polled (`getAgentTranscriptTail`, last 50 entries):
+Only the **active bot** is polled (`getAgentTranscriptTail`, last 100 entries):
 - after a send: about every 1 s, backing off to 8 s while waiting for the reply ("… is replying" spinner in the body title, up to 5 min);
-- otherwise: every 10 s, backing off to 60 s when nothing changes or on errors.
+- otherwise: every 1 s, backing off to 15 s when nothing changes or on errors. The visible feed is re-read from local SQLite every 100 ms (no network).
 
 ## Commands
 
