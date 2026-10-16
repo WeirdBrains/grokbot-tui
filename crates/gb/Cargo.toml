@@ -9,7 +9,7 @@ name = "gb"
 path = "src/main.rs"
 
 [dependencies]
-grokbot_api = { path = "../grokbot_api" }
+grokbot_api = { path = "../grokbot_api", features = ["desktop-session"] }
 ratatui = "0.29"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 serde = { version = "1", features = ["derive"] }

@@ -1,5 +1,5 @@
 //! Extensible slash-command registry. Add a [`Command`] to [`registry`].
-use crate::app::{App, EntryKind, InputMode};
+use crate::app::{App, EntryKind, InputMode, LoginSource};
 use crate::storage::Scope;
 use anyhow::{Context, Result, bail};
 
@@ -39,7 +39,7 @@ pub fn registry() -> Registry {
             Command {
                 name: "login",
                 aliases: &[],
-                usage: "/login gateway [url] | cursor",
+                usage: "/login gateway [url] | cursor | desktop [entry]",
                 help: "Log in the active account: gateway URL + token, or a Cursor access token",
                 run: login,
             },
@@ -155,7 +155,11 @@ fn login(app: &mut App, args: &str) -> Result<()> {
                     .into(),
             );
         }
-        _ => bail!("Usage: /login gateway [url]  |  /login cursor"),
+        (Some("desktop"), entry, None) => {
+            app.info("Reading the Grok Bot desktop app's saved session…".into());
+            app.start_desktop_login(entry.map(str::to_string), LoginSource::Interactive);
+        }
+        _ => bail!("Usage: /login gateway [url]  |  /login cursor  |  /login desktop [entry]"),
     }
     Ok(())
 }

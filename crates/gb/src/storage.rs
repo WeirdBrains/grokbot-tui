@@ -136,7 +136,24 @@ const V3: &str = "DROP TABLE credentials;
     DELETE FROM global_prefs WHERE key = 'legacy_imported';";
 
 /// Ordered migrations; index + 1 == resulting `PRAGMA user_version`.
-const MIGRATIONS: &[&str] = &[V1, V2, V3];
+/// v3 -> v4: allow login method 'desktop' and remember which desktop entry was chosen.
+const V4: &str = "CREATE TABLE credentials_v4 (
+        account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+        method TEXT NOT NULL CHECK (method IN ('gateway', 'cursor', 'desktop')),
+        gateway_url TEXT NOT NULL,
+        gateway_token TEXT NOT NULL,
+        gateway_headers TEXT NOT NULL DEFAULT '{}',
+        cursor_token TEXT,
+        desktop_entry TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO credentials_v4(account_id, method, gateway_url, gateway_token, gateway_headers, cursor_token, created_at, updated_at)
+        SELECT account_id, method, gateway_url, gateway_token, gateway_headers, cursor_token, created_at, updated_at FROM credentials;
+    DROP TABLE credentials;
+    ALTER TABLE credentials_v4 RENAME TO credentials;";
+
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginMethod {
@@ -144,6 +161,18 @@ pub enum LoginMethod {
     Gateway,
     /// Cursor access token exchanged via EnsureSandBox (re-exchanged on 401).
     Cursor,
+    /// Read from the desktop app's saved session (`/login desktop`; re-read on 401).
+    Desktop,
+}
+
+impl LoginMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LoginMethod::Gateway => "gateway",
+            LoginMethod::Cursor => "cursor",
+            LoginMethod::Desktop => "desktop",
+        }
+    }
 }
 
 /// A stored login for one account.
@@ -152,6 +181,8 @@ pub struct StoredLogin {
     pub method: LoginMethod,
     pub session: Session,
     pub cursor_token: Option<String>,
+    /// Desktop descriptor entry chosen with `/login desktop <entry>` (v2 multi-entry files).
+    pub desktop_entry: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -447,7 +478,7 @@ impl Store {
         let row = self
             .conn
             .query_row(
-                "SELECT method, gateway_url, gateway_token, gateway_headers, cursor_token FROM credentials WHERE account_id = ?1",
+                "SELECT method, gateway_url, gateway_token, gateway_headers, cursor_token, desktop_entry FROM credentials WHERE account_id = ?1",
                 [self.account.id],
                 |r| {
                     Ok((
@@ -456,16 +487,18 @@ impl Store {
                         r.get::<_, String>(2)?,
                         r.get::<_, String>(3)?,
                         r.get::<_, Option<String>>(4)?,
+                        r.get::<_, Option<String>>(5)?,
                     ))
                 },
             )
             .optional()?;
-        Ok(row.map(|(m, url, tok, hdrs, cur)| StoredLogin {
-            method: if m == "cursor" {
-                LoginMethod::Cursor
-            } else {
-                LoginMethod::Gateway
+        Ok(row.map(|(m, url, tok, hdrs, cur, de)| StoredLogin {
+            method: match m.as_str() {
+                "cursor" => LoginMethod::Cursor,
+                "desktop" => LoginMethod::Desktop,
+                _ => LoginMethod::Gateway,
             },
+            desktop_entry: de,
             session: Session {
                 gateway_url: url,
                 gateway_token: tok,
@@ -476,23 +509,21 @@ impl Store {
     }
 
     pub fn save_login(&self, l: &StoredLogin) -> Result<()> {
-        let method = match l.method {
-            LoginMethod::Gateway => "gateway",
-            LoginMethod::Cursor => "cursor",
-        };
+        let method = l.method.as_str();
         self.conn.execute(
-            "INSERT INTO credentials(account_id, method, gateway_url, gateway_token, gateway_headers, cursor_token)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO credentials(account_id, method, gateway_url, gateway_token, gateway_headers, cursor_token, desktop_entry)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(account_id) DO UPDATE SET method = excluded.method, gateway_url = excluded.gateway_url,
                gateway_token = excluded.gateway_token, gateway_headers = excluded.gateway_headers,
-               cursor_token = excluded.cursor_token, updated_at = datetime('now')",
+               cursor_token = excluded.cursor_token, desktop_entry = excluded.desktop_entry, updated_at = datetime('now')",
             params![
                 self.account.id,
                 method,
                 l.session.gateway_url,
                 l.session.gateway_token,
                 serde_json::to_string(&l.session.headers)?,
-                l.cursor_token
+                l.cursor_token,
+                l.desktop_entry
             ],
         )?;
         Ok(())
@@ -742,6 +773,7 @@ mod tests {
             method: LoginMethod::Gateway,
             session: Session::new("https://x.cursorvm.com", tok),
             cursor_token: None,
+            desktop_entry: None,
         }
     }
 
@@ -793,7 +825,7 @@ mod tests {
         let dir = d.path().join("gb");
         v1_db(&dir);
         let s = Store::open(&dir, None).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 3);
+        assert_eq!(s.schema_version().unwrap(), 4);
         assert_eq!(s.account().alias, "default");
         assert!(
             s.load_login().unwrap().is_none(),
@@ -843,7 +875,7 @@ mod tests {
             .unwrap();
         }
         let mut s = Store::open(&dir, Some("work")).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 3);
+        assert_eq!(s.schema_version().unwrap(), 4);
         assert_eq!(s.messages("b").unwrap(), vec![msg(Role::User, "work msg")]);
         assert!(s.get_pref("paths.send").unwrap().is_none());
         s.use_account("default").unwrap();
@@ -940,6 +972,7 @@ mod tests {
             session: Session::new("https://x.cursorvm.com", "gw")
                 .with_headers([("x-anyrun-network-token".to_string(), "n".to_string())].into()),
             cursor_token: Some("cur".into()),
+            desktop_entry: None,
         };
         s.save_login(&l).unwrap();
         assert_eq!(s.load_login().unwrap().unwrap(), l);
@@ -950,6 +983,42 @@ mod tests {
         );
         assert!(s.delete_credentials().unwrap());
         assert!(!s.delete_credentials().unwrap());
+    }
+
+    #[test]
+    fn desktop_login_roundtrips_entry() {
+        let (s, _d) = store();
+        let d = StoredLogin {
+            method: LoginMethod::Desktop,
+            desktop_entry: Some("work".into()),
+            ..login("d")
+        };
+        s.save_login(&d).unwrap();
+        assert_eq!(s.load_login().unwrap().unwrap(), d);
+    }
+
+    #[test]
+    fn migration_v3_to_v4_keeps_credentials() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("gb");
+        v1_db(&dir);
+        {
+            let c = Connection::open(dir.join("context.db")).unwrap();
+            c.execute_batch(V2).unwrap();
+            c.execute_batch(V3).unwrap();
+            c.execute_batch(
+                "PRAGMA user_version = 3;
+                 INSERT INTO credentials(account_id, method, gateway_url, gateway_token, cursor_token)
+                   VALUES (1, 'cursor', 'https://x.cursorvm.com', 'gw', 'cur');",
+            )
+            .unwrap();
+        }
+        let s = Store::open(&dir, None).unwrap();
+        assert_eq!(s.schema_version().unwrap(), 4);
+        let l = s.load_login().unwrap().unwrap();
+        assert_eq!(l.method, LoginMethod::Cursor);
+        assert_eq!(l.cursor_token.as_deref(), Some("cur"));
+        assert_eq!(l.desktop_entry, None);
     }
 
     #[test]

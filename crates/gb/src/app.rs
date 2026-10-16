@@ -77,12 +77,29 @@ pub enum LoginSource {
 
 type LoginOk = (Arc<dyn ApiClient>, Session, Vec<Bot>);
 
+/// Reads the desktop app's saved session for an optional descriptor entry.
+/// Only invoked by `/login desktop` and the 401 re-read for desktop-method accounts.
+pub type DesktopReader = Arc<dyn Fn(Option<&str>, &Policy) -> gw::Result<Session> + Send + Sync>;
+
+/// The real reader: the platform's app-data dir + OS keychain (see `grokbot_api::desktop`).
+pub fn real_desktop_reader() -> DesktopReader {
+    Arc::new(|entry, policy| {
+        let platform = gw::desktop::Platform::current().ok_or_else(|| gw::Error::Desktop {
+            code: "UNSUPPORTED_PLATFORM".into(),
+            message: "Reading the desktop session is supported on Linux, macOS and Windows only."
+                .into(),
+        })?;
+        gw::desktop::DesktopConfig::new(platform).load_entry(entry, policy)
+    })
+}
+
 pub enum Event {
     Login {
         epoch: u64,
         method: LoginMethod,
         source: LoginSource,
         cursor_token: Option<String>,
+        desktop_entry: Option<String>,
         result: std::result::Result<LoginOk, String>,
     },
     Bots {
@@ -146,6 +163,9 @@ pub struct App {
     last_poll_error: Option<String>,
     pub epoch: u64,
     pub inflight: usize,
+    pub desktop_reader: DesktopReader,
+    /// Set after one automatic desktop re-read on 401 so a bad session can't loop.
+    desktop_reread_tried: bool,
     tx: mpsc::UnboundedSender<Event>,
     rx: mpsc::UnboundedReceiver<Event>,
     pub should_quit: bool,
@@ -235,6 +255,8 @@ impl App {
             last_poll_error: None,
             epoch: 0,
             inflight: 0,
+            desktop_reader: real_desktop_reader(),
+            desktop_reread_tried: false,
             tx,
             rx,
             should_quit: false,
@@ -314,6 +336,7 @@ impl App {
                 method,
                 source,
                 cursor_token,
+                desktop_entry,
                 result,
             } => {
                 if epoch != self.epoch {
@@ -326,15 +349,7 @@ impl App {
                             LoginSource::Env => {
                                 format!("{TOKEN_ENV} · {}", host_of(&session.gateway_url))
                             }
-                            _ => format!(
-                                "{} · {}",
-                                if method == LoginMethod::Cursor {
-                                    "cursor"
-                                } else {
-                                    "gateway"
-                                },
-                                host_of(&session.gateway_url)
-                            ),
+                            _ => format!("{} · {}", method.as_str(), host_of(&session.gateway_url)),
                         };
                         self.api = Some(client);
                         self.user_label = Some(label.clone());
@@ -344,6 +359,7 @@ impl App {
                             method,
                             session,
                             cursor_token,
+                            desktop_entry,
                         };
                         match source {
                             LoginSource::Interactive => match self.store.save_login(&login) {
@@ -438,6 +454,7 @@ impl App {
                 match result {
                     Ok(msgs) => {
                         self.last_poll_error = None;
+                        self.desktop_reread_tried = false;
                         let added = match self.store.merge_remote(&bot, &msgs) {
                             Ok(a) => a,
                             Err(e) => {
@@ -462,6 +479,10 @@ impl App {
                         };
                     }
                     Err(e) => {
+                        if e.is_unauthorized() && self.try_desktop_reread() {
+                            self.poll.next = Instant::now() + POLL_IDLE;
+                            return;
+                        }
                         let msg = if e.is_unauthorized() {
                             "Gateway rejected the credential (401). Use /login again.".to_string()
                         } else {
@@ -544,6 +565,7 @@ impl App {
         self.user_label = None;
         self.login_method = None;
         self.login_source = None;
+        self.desktop_reread_tried = false;
         self.connecting = false;
         self.all_bots.clear();
         self.bots.clear();
@@ -637,7 +659,7 @@ impl App {
             );
         } else {
             self.info(format!(
-                "Account '{}' is not logged in. Use /login gateway or /login cursor.",
+                "Account '{}' is not logged in. Use /login gateway, /login cursor or /login desktop.",
                 self.account().alias
             ));
         }
@@ -649,6 +671,17 @@ impl App {
         source: LoginSource,
         session: Option<Session>,
         cursor_token: Option<String>,
+    ) {
+        self.spawn_login(method, source, session, cursor_token, None);
+    }
+
+    fn spawn_login(
+        &mut self,
+        method: LoginMethod,
+        source: LoginSource,
+        session: Option<Session>,
+        cursor_token: Option<String>,
+        desktop_entry: Option<String>,
     ) {
         if let Some(s) = &session
             && !self.mock
@@ -666,9 +699,62 @@ impl App {
                 method,
                 source,
                 cursor_token,
+                desktop_entry,
                 result,
             }
         });
+    }
+
+    /// `/login desktop [entry]`: read the desktop app's saved session (opt-in, user-initiated),
+    /// then validate it with listAgents and save it to the active account.
+    pub fn start_desktop_login(&mut self, entry: Option<String>, source: LoginSource) {
+        self.connecting = true;
+        let (epoch, mock, opts) = (self.epoch, self.mock, self.opts.clone());
+        let reader = self.desktop_reader.clone();
+        self.spawn(async move {
+            let e2 = entry.clone();
+            let policy = opts.policy;
+            let read = tokio::task::spawn_blocking(move || reader(e2.as_deref(), &policy))
+                .await
+                .map_err(|e| format!("desktop session reader failed: {e}"))
+                .and_then(|r| r.map_err(|e| e.to_string()));
+            let result = match read {
+                Ok(session) => login_task(mock, opts, Some(session), None).await,
+                Err(e) => Err(e),
+            };
+            Event::Login {
+                epoch,
+                method: LoginMethod::Desktop,
+                source,
+                cursor_token: None,
+                desktop_entry: entry,
+                result,
+            }
+        });
+    }
+
+    /// On 401 for an account that logged in with `/login desktop`, re-read the desktop
+    /// session once (the user opted in for this account). Returns true if a re-read started.
+    fn try_desktop_reread(&mut self) -> bool {
+        if self.login_method != Some(LoginMethod::Desktop)
+            || self.login_source == Some(LoginSource::Env)
+            || self.desktop_reread_tried
+            || self.connecting
+        {
+            return false;
+        }
+        self.desktop_reread_tried = true;
+        let entry = self
+            .store
+            .load_login()
+            .ok()
+            .flatten()
+            .and_then(|l| l.desktop_entry);
+        self.info(
+            "Gateway rejected the credential (401); re-reading the desktop app session…".into(),
+        );
+        self.start_desktop_login(entry, LoginSource::Stored);
+        true
     }
 
     /// Delete this account's stored credential and clear session state. Chats and memory are kept.
@@ -1387,6 +1473,122 @@ pub mod tests {
                 .session
                 .gateway_token,
             "gw2"
+        );
+    }
+
+    type Calls = Arc<std::sync::Mutex<Vec<Option<String>>>>;
+
+    /// A fake desktop reader that records calls (the entry asked for) and returns `f(n)`.
+    fn fake_reader(
+        f: impl Fn(usize, Option<&str>) -> gw::Result<Session> + Send + Sync + 'static,
+    ) -> (DesktopReader, Calls) {
+        let calls: Calls = Default::default();
+        let c = calls.clone();
+        let r: DesktopReader = Arc::new(move |entry, _policy| {
+            let mut v = c.lock().unwrap();
+            v.push(entry.map(str::to_string));
+            f(v.len(), entry)
+        });
+        (r, calls)
+    }
+
+    #[test]
+    fn desktop_login_only_reads_when_asked_and_handles_entries() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        let (reader, calls) = fake_reader(|_, entry| match entry {
+            None => Err(gw::Error::Desktop {
+                code: "AMBIGUOUS_ENTRIES".into(),
+                message:
+                    "several saved sessions: personal, work. Choose one with /login desktop <name>."
+                        .into(),
+            }),
+            Some(_) => Ok(Session::new("https://box.cursorvm.com", "desk")),
+        });
+        app.desktop_reader = reader;
+        app.connect();
+        mock_login(&mut app, "gw");
+        assert!(
+            calls.lock().unwrap().is_empty(),
+            "never read outside /login desktop"
+        );
+        type_line(&mut app, "/login desktop");
+        settle(&mut app);
+        assert!(
+            texts(&app)
+                .iter()
+                .any(|t| t.contains("Choose one with /login desktop"))
+        );
+        assert_eq!(
+            app.store.load_login().unwrap().unwrap().method,
+            LoginMethod::Gateway
+        );
+        type_line(&mut app, "/login desktop work");
+        settle(&mut app);
+        let l = app.store.load_login().unwrap().unwrap();
+        assert_eq!(l.method, LoginMethod::Desktop);
+        assert_eq!(l.desktop_entry.as_deref(), Some("work"));
+        assert_eq!(l.session.gateway_token, "desk");
+        assert_eq!(l.cursor_token, None);
+        assert_eq!(*calls.lock().unwrap(), vec![None, Some("work".to_string())]);
+    }
+
+    #[test]
+    fn desktop_login_errors_are_clear() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        let (reader, _calls) = fake_reader(|_, _| {
+            Err(gw::Error::Desktop {
+                code: "SECRET_TOOL_MISSING".into(),
+                message: "secret-tool is not installed".into(),
+            })
+        });
+        app.desktop_reader = reader;
+        type_line(&mut app, "/login desktop");
+        settle(&mut app);
+        assert!(
+            texts(&app)
+                .iter()
+                .any(|t| t.contains("Login failed: secret-tool is not installed"))
+        );
+        assert!(app.store.load_login().unwrap().is_none());
+    }
+
+    #[test]
+    fn http_desktop_login_rereads_on_401() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let server = rt.block_on(MockServer::start());
+        let uri = server.uri();
+        rt.block_on(async {
+            Mock::given(path("/api/listAgents"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!([{"id": "a1", "name": "A"}])))
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/getAgentTranscriptTail"))
+                .and(header("authorization", "Bearer d1"))
+                .respond_with(ResponseTemplate::new(401).set_body_json(json!({"error": "expired"})))
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/getAgentTranscriptTail"))
+                .and(header("authorization", "Bearer d2"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"entries": [{"id": "e1", "kind": "send-message", "message": {"content": "welcome"}}]})))
+                .mount(&server)
+                .await;
+        });
+        let (mut app, _d) = real_app(&rt, &server);
+        let (reader, calls) = fake_reader(move |n, _| {
+            Ok(Session::new(uri.clone(), if n == 1 { "d1" } else { "d2" }))
+        });
+        app.desktop_reader = reader;
+        type_line(&mut app, "/login desktop");
+        settle(&mut app);
+        settle(&mut app);
+        assert!(texts(&app).contains(&"welcome".to_string()));
+        assert_eq!(calls.lock().unwrap().len(), 2, "one automatic re-read");
+        let l = app.store.load_login().unwrap().unwrap();
+        assert_eq!(
+            (l.method, l.session.gateway_token.as_str()),
+            (LoginMethod::Desktop, "d2")
         );
     }
 

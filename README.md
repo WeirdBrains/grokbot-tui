@@ -62,6 +62,7 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 50 entries):
 | `/help [cmd]` (`/h`, `/?`) | List commands or show one |
 | `/login gateway [url]` | Log in the active account with a gateway URL plus gateway token (token prompt is masked) |
 | `/login cursor` | Log in with a Cursor access token (masked), exchanged via EnsureSandBox |
+| `/login desktop [entry]` | Opt-in: log in with the Grok Bot desktop app's saved session (see Authentication) |
 | `/logout` | Delete this account's stored credential and clear the session. Chats and memory are kept. (The gateway has no revoke call.) |
 | `/whoami` | Show the account's login details (method, gateway, header names, whether a Cursor token is stored, env override) |
 | `/bots` | Refresh and list all bots, including hidden ones and groups |
@@ -81,7 +82,7 @@ Commands live in a registry in `crates/gb/src/commands.rs`.
 
 ## Authentication
 
-Both methods are per account and stored in SQLite (see below).
+All methods are per account and stored in SQLite (see below).
 
 1. **Gateway token** — `/login gateway <url>`, then paste the token. gb checks the URL against the allowlist,
    then validates the credential with `listAgents` (the gateway has no "who am I" call). It is saved only if that succeeds.
@@ -90,7 +91,23 @@ Both methods are per account and stored in SQLite (see below).
    extra headers (e.g. `x-anyrun-network-token`). The Cursor token is stored too, so when the gateway answers
    **401** gb re-exchanges once, retries, and saves the new session. A Cursor dashboard API key does not work here.
 
-gb never reads the Grok Bot desktop app's encrypted session.
+3. **Desktop app session (opt-in)** — `/login desktop [entry]`. gb reads the desktop app's saved session only when
+   you run this command, mirroring grok-bot-cli's `app-session.js`. It reads `gateway-descriptor.json` from the app data dir:
+   - Linux: `$XDG_CONFIG_HOME/Grok Bot` or `~/.config/Grok Bot`;
+   - macOS: `~/Library/Application Support/Grok Bot`;
+   - Windows: `%APPDATA%\Grok Bot`.
+
+   Both descriptor formats are supported: v1 `{version, encrypted}` and v2 `{version: 2, entries}`. When a v2 file has
+   several entries, gb lists them and you choose one with `/login desktop <entry>`. The payload is Chromium Safe Storage:
+   - Linux `v11`: the password comes from `secret-tool lookup xdg:schema chrome_libsecret_os_crypt_password_v2 application 'Grok Bot'`;
+   - Linux `v10`: the fixed `peanuts` password;
+   - macOS: Keychain item `Grok Bot Safe Storage`, PBKDF2-SHA1 (`saltysalt`, 1003 rounds) and AES-128-CBC;
+   - Windows: the DPAPI-protected key in `Local State` and AES-256-GCM.
+
+   The decrypted `{baseUrl, token, headers?}` must pass the host allowlist and is validated with `listAgents`.
+   It is then saved to the active account with method `desktop`. If the gateway later answers **401**, gb re-reads the
+   desktop session once automatically, for that account only. gb never reads the desktop session in any other code path.
+   You get clear errors when the app isn't installed, you aren't signed in, or `secret-tool` is missing. Tokens are never printed or logged.
 
 **Host allowlist.** Credentials are only sent to:
 - gateway: `https` on `cursor.sh`, `cursor.com`, `*.cursor.sh`, `*.cursor.com`, `*.cursorvm.com`;
@@ -137,7 +154,7 @@ SQLite at `~/.gb/context.db` (directory `0700`, file `0600`), via `rusqlite` wit
 | Table | Key | Columns |
 |---|---|---|
 | `accounts` | `id` | `alias` (unique, case-insensitive), `created_at` |
-| `credentials` | `account_id` → accounts | `method` (`gateway`/`cursor`), `gateway_url`, `gateway_token`, `gateway_headers` (JSON), `cursor_token`, `created_at`, `updated_at` |
+| `credentials` | `account_id` → accounts | `method` (`gateway`/`cursor`/`desktop`), `gateway_url`, `gateway_token`, `gateway_headers` (JSON), `cursor_token`, `desktop_entry`, `created_at`, `updated_at` |
 | `bots` | `(account_id, bot_id)` → accounts | `name`, `description`, `hidden`, `is_group` |
 | `messages` | `id`; `(account_id, bot_id)` → bots | `role`, `text`, `remote_id` (transcript id or `pending:<nonce>`, unique per account+bot), `created_at` |
 | `memory` | `(account_id, bot_id, key)` → bots | `value`, `updated_at` |
@@ -146,6 +163,7 @@ SQLite at `~/.gb/context.db` (directory `0700`, file `0600`), via `rusqlite` wit
 
 **Migrations:** v1→v2 moved single-account data into account `default`. v2→v3 replaces the credentials table with the gateway schema.
 The old placeholder-API tokens are **dropped** because they never pointed at a real server, so log in again. v2→v3 also adds `messages.remote_id` and the bot flags, and deletes the dead `api_base_url`, `request_timeout_secs` and `paths.*` prefs.
+v3→v4 allows method `desktop` and adds `credentials.desktop_entry`, keeping existing logins.
 The earlier one-time import from `~/.grokbot-tui` was removed, since everything it imported is now dead.
 
 **Preferences:** account-scoped `default_bot`, `active_bot` (automatic), `show_hidden_bots` (`false`); global `ui.sidebar_width` (`24`), `active_account`.
