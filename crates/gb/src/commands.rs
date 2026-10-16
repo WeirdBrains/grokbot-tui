@@ -118,26 +118,26 @@ pub fn registry() -> Registry {
 }
 
 fn help(app: &mut App, args: &str) -> Result<()> {
-    let text = if args.is_empty() {
-        let mut s = String::from("Commands:\n");
-        for c in &app.registry.commands {
-            s.push_str(&format!("  {:<18} {}\n", c.usage, c.help));
-        }
-        s.push_str("Plain text is sent to the active bot.\nKeys: Tab focus sidebar, ↑/↓ + Enter pick bot, PgUp/PgDn or wheel scroll, click a bot, Ctrl-C quit.");
-        s
-    } else {
-        match app.registry.find(args.trim_start_matches('/')) {
-            Some(c) => format!("{} — {}", c.usage, c.help),
-            None => bail!("No such command: {args}"),
-        }
-    };
-    app.info(text);
-    Ok(())
+    if app.open_help(args) {
+        return Ok(());
+    }
+    let id = crate::help::normalize(args);
+    let names = crate::help::all_names(&app.registry);
+    match crate::help::suggest(&id, names.iter().map(String::as_str)) {
+        Some(s) => bail!(
+            "No help for '{args}'. Did you mean /help {}?",
+            crate::help::link_label(&s).trim_start_matches("/help ")
+        ),
+        None => bail!("No help for '{args}'. Try /help."),
+    }
 }
 
 fn login(app: &mut App, args: &str) -> Result<()> {
     let mut it = args.split_whitespace();
     match (it.next(), it.next(), it.next()) {
+        (None, _, _) => {
+            app.open_help("login");
+        }
         (Some("gateway"), url, None) => {
             app.mode = InputMode::GatewayUrl;
             match url {
@@ -224,8 +224,12 @@ fn whoami(app: &mut App, _: &str) -> Result<()> {
             }
         ));
     } else {
-        lines.push("stored login: none".into());
+        lines.push("stored login: none (recommended: /login desktop)".into());
     }
+    lines.push(format!(
+        "client version: {} ({})",
+        app.opts.client_version, app.client_version_source
+    ));
     if app.store.is_startup_account()
         && std::env::var(crate::config::TOKEN_ENV).is_ok_and(|t| !t.trim().is_empty())
     {

@@ -109,21 +109,29 @@ pub fn real_desktop_reader() -> DesktopReader {
 
 /// Fill EnsureSandBox client identity on `opts`.
 /// Priority: env → prefs → detected desktop app version (when `detect`) → crate defaults.
+/// Returns where `client_version` came from (for /whoami).
 pub fn apply_client_identity(
     opts: &mut ClientOptions,
     config: &crate::config::Config,
     detect: bool,
-) {
+) -> &'static str {
     let env = |k: &str| std::env::var(k).ok().filter(|s| !s.trim().is_empty());
+    let source;
     if let Some(v) = env(CLIENT_VERSION_ENV) {
         opts.client_version = v;
+        source = "env GB_CURSOR_CLIENT_VERSION";
     } else if let Some(v) = config.client_version.clone() {
         opts.client_version = v;
+        source = "pref cursor.client_version";
     } else if detect
         && let Some(platform) = gw::desktop::Platform::current()
         && let Some(v) = gw::desktop::DesktopConfig::new(platform).detect_app_version()
     {
         opts.client_version = v;
+        source = "detected desktop app";
+    } else {
+        opts.client_version = gw::DEFAULT_CLIENT_VERSION.into();
+        source = "built-in default";
     }
     if let Some(v) = env(CLIENT_TYPE_ENV) {
         opts.client_type = v;
@@ -135,6 +143,15 @@ pub fn apply_client_identity(
     } else if let Some(v) = config.sandbox_namespace.clone() {
         opts.sandbox_namespace = v;
     }
+    source
+}
+
+/// The help modal: one page, scroll offset, selected related link and back stack.
+pub struct HelpModal {
+    pub page: crate::help::Page,
+    pub scroll: u16,
+    pub link: usize,
+    pub back: Vec<String>,
 }
 
 pub enum Event {
@@ -210,6 +227,10 @@ pub struct App {
     pub epoch: u64,
     pub inflight: usize,
     pub desktop_reader: DesktopReader,
+    /// Open help modal (never part of chat history).
+    pub help: Option<HelpModal>,
+    /// Where `opts.client_version` came from.
+    pub client_version_source: &'static str,
     /// Set after one automatic desktop re-read on 401 so a bad session can't loop.
     desktop_reread_tried: bool,
     tx: mpsc::UnboundedSender<Event>,
@@ -265,7 +286,7 @@ impl App {
             backend_base,
             ..Default::default()
         };
-        apply_client_identity(&mut opts, &config, /*detect=*/ true);
+        let client_version_source = apply_client_identity(&mut opts, &config, true);
         let (tx, rx) = mpsc::unbounded_channel();
         Ok(Self {
             store,
@@ -303,6 +324,8 @@ impl App {
             epoch: 0,
             inflight: 0,
             desktop_reader: real_desktop_reader(),
+            help: None,
+            client_version_source,
             desktop_reread_tried: false,
             tx,
             rx,
@@ -440,13 +463,22 @@ impl App {
                         }
                         self.apply_bots(bots);
                     }
-                    Err(e) => match source {
-                        LoginSource::Interactive => self.error(format!("Login failed: {e}")),
-                        LoginSource::Stored => {
-                            self.error(format!("Saved credential failed: {e}. Use /login."))
+                    Err(e) => {
+                        let hint = crate::help::hint_for_error(&e)
+                            .map(|h| format!(" → {h}"))
+                            .unwrap_or_else(|| " → /help login".into());
+                        match source {
+                            LoginSource::Interactive => {
+                                self.error(format!("Login failed: {e}{hint}"))
+                            }
+                            LoginSource::Stored => self.error(format!(
+                                "Saved credential failed: {e}. Use /login desktop.{hint}"
+                            )),
+                            LoginSource::Env => {
+                                self.error(format!("{TOKEN_ENV} login failed: {e}{hint}"))
+                            }
                         }
-                        LoginSource::Env => self.error(format!("{TOKEN_ENV} login failed: {e}")),
-                    },
+                    }
                 }
             }
             Event::Bots {
@@ -543,7 +575,7 @@ impl App {
                             return;
                         }
                         let msg = if e.is_unauthorized() {
-                            "Gateway rejected the credential (401). Use /login again.".to_string()
+                            "Gateway rejected the credential (401). Run /login desktop (or your login method) again → /help troubleshooting".to_string()
                         } else {
                             format!("Could not refresh chat: {e}")
                         };
@@ -718,7 +750,7 @@ impl App {
             );
         } else {
             self.info(format!(
-                "Account '{}' is not logged in. Use /login gateway, /login cursor or /login desktop.",
+                "Account '{}' is not logged in. Recommended: sign in to the Grok Bot desktop app, then /login desktop. Other options: /help login · keys: F1",
                 self.account().alias
             ));
         }
@@ -770,7 +802,7 @@ impl App {
     /// `/login cursor`). Never reads the desktop session in any other code path.
     pub fn start_desktop_login(&mut self, entry: Option<String>, source: LoginSource) {
         // Refresh detected desktop app version right before EnsureSandBox (env/prefs still win).
-        apply_client_identity(&mut self.opts, &self.config, true);
+        self.client_version_source = apply_client_identity(&mut self.opts, &self.config, true);
         self.connecting = true;
         let (epoch, mock, opts) = (self.epoch, self.mock, self.opts.clone());
         let reader = self.desktop_reader.clone();
@@ -991,6 +1023,75 @@ impl App {
         });
     }
 
+    // ------------------------------------------------------------ help modal
+
+    /// Open `/help <arg>` in the modal. Returns false if no such topic/command.
+    pub fn open_help(&mut self, arg: &str) -> bool {
+        let Some(page) = crate::help::page(&self.registry, arg) else {
+            return false;
+        };
+        let back = match self.help.take() {
+            Some(m) if m.page.id != page.id => {
+                let mut b = m.back;
+                b.push(m.page.id);
+                b
+            }
+            Some(m) => m.back,
+            None => vec![],
+        };
+        self.help = Some(HelpModal {
+            page,
+            scroll: 0,
+            link: 0,
+            back,
+        });
+        true
+    }
+
+    pub fn close_help(&mut self) {
+        self.help = None;
+    }
+
+    pub fn help_scroll(&mut self, delta: i32) {
+        if let Some(m) = &mut self.help {
+            m.scroll = (m.scroll as i32 + delta).max(0) as u16;
+        }
+    }
+
+    pub fn help_select(&mut self, delta: i32) {
+        if let Some(m) = &mut self.help
+            && !m.page.related.is_empty()
+        {
+            let n = m.page.related.len() as i32;
+            m.link = ((m.link as i32 + delta).rem_euclid(n)) as usize;
+        }
+    }
+
+    /// Follow the selected related link.
+    pub fn help_follow(&mut self) {
+        if let Some(id) = self
+            .help
+            .as_ref()
+            .and_then(|m| m.page.related.get(m.link).cloned())
+        {
+            self.open_help(&id);
+        }
+    }
+
+    pub fn help_back(&mut self) {
+        let Some(m) = &mut self.help else { return };
+        let Some(prev) = m.back.pop() else { return };
+        let back = std::mem::take(&mut m.back);
+        if let Some(page) = crate::help::page(&self.registry, &prev) {
+            self.help = Some(HelpModal {
+                page,
+                scroll: 0,
+                link: 0,
+                back,
+            });
+        }
+    }
+
     pub fn active_bot(&self) -> Option<&Bot> {
         self.active.and_then(|i| self.bots.get(i))
     }
@@ -1103,12 +1204,28 @@ impl App {
             match self.registry.find(name) {
                 Some(cmd) => {
                     let run = cmd.run;
-                    self.push(EntryKind::User, trimmed.clone());
+                    // Help opens a modal; don't echo it into the chat.
+                    if cmd.name != "help" && !(cmd.name == "login" && args.trim().is_empty()) {
+                        self.push(EntryKind::User, trimmed.clone());
+                    }
                     if let Err(e) = run(self, args.trim()) {
                         self.error(format!("{e:#}"));
                     }
                 }
-                None => self.error(format!("Unknown command /{name}. Try /help.")),
+                None => {
+                    let names: Vec<&str> = self
+                        .registry
+                        .commands
+                        .iter()
+                        .flat_map(|c| std::iter::once(c.name).chain(c.aliases.iter().copied()))
+                        .collect();
+                    match crate::help::suggest(name, names) {
+                        Some(s) => self.error(format!(
+                            "Unknown command /{name}. Did you mean /{s}? (/help {s})"
+                        )),
+                        None => self.error(format!("Unknown command /{name}. Try /help.")),
+                    }
+                }
             }
         } else {
             self.send_chat(trimmed);
@@ -1224,6 +1341,77 @@ pub mod tests {
 
     fn texts(app: &App) -> Vec<String> {
         app.current_log().iter().map(|e| e.text.clone()).collect()
+    }
+
+    #[test]
+    fn help_opens_modal_not_chat_and_navigates() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        let before = texts(&app);
+        type_line(&mut app, "/help");
+        assert_eq!(texts(&app), before, "help must not touch chat history");
+        assert_eq!(app.help.as_ref().unwrap().page.id, "overview");
+        // follow the 2nd related link, then go back
+        app.help_select(1);
+        let target = app.help.as_ref().unwrap().page.related[1].clone();
+        app.help_follow();
+        assert_eq!(app.help.as_ref().unwrap().page.id, target);
+        app.help_back();
+        assert_eq!(app.help.as_ref().unwrap().page.id, "overview");
+        app.help_scroll(-5);
+        assert_eq!(app.help.as_ref().unwrap().scroll, 0);
+        app.close_help();
+        assert!(app.help.is_none());
+
+        type_line(&mut app, "/help login desktop");
+        assert_eq!(app.help.as_ref().unwrap().page.id, "login-desktop");
+        type_line(&mut app, "/help bot");
+        assert_eq!(app.help.as_ref().unwrap().page.id, "cmd-bot");
+        assert!(app.help.as_ref().unwrap().page.body.contains("Examples"));
+        app.close_help();
+
+        type_line(&mut app, "/login");
+        assert_eq!(app.help.as_ref().unwrap().page.id, "login");
+        assert_eq!(app.mode, InputMode::Normal);
+        app.close_help();
+
+        type_line(&mut app, "/help logn");
+        assert!(
+            texts(&app)
+                .last()
+                .unwrap()
+                .contains("Did you mean /help login")
+        );
+        type_line(&mut app, "/hisotry");
+        assert!(
+            texts(&app)
+                .last()
+                .unwrap()
+                .contains("Did you mean /history")
+        );
+    }
+
+    #[test]
+    fn help_never_shows_token_and_whoami_shows_version() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "sekrit-token-123");
+        for name in crate::help::all_names(&app.registry) {
+            assert!(app.open_help(&name));
+            assert!(
+                !app.help
+                    .as_ref()
+                    .unwrap()
+                    .page
+                    .body
+                    .contains("sekrit-token-123")
+            );
+        }
+        app.close_help();
+        type_line(&mut app, "/whoami");
+        let out = texts(&app).join("\n");
+        assert!(out.contains("client version: "), "{out}");
+        assert!(!out.contains("sekrit-token-123"));
     }
 
     #[test]

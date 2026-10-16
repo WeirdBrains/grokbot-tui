@@ -3,6 +3,7 @@ mod api;
 mod app;
 mod commands;
 mod config;
+mod help;
 mod storage;
 mod ui;
 
@@ -67,6 +68,32 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     app.should_quit = true;
                     continue;
                 }
+                if app.help.is_some() {
+                    match k.code {
+                        KeyCode::Esc | KeyCode::Char('q') | KeyCode::F(1) => app.close_help(),
+                        KeyCode::Up | KeyCode::Char('k') => app.help_scroll(-1),
+                        KeyCode::Down | KeyCode::Char('j') => app.help_scroll(1),
+                        KeyCode::PageUp => app.help_scroll(-10),
+                        KeyCode::PageDown | KeyCode::Char(' ') => app.help_scroll(10),
+                        KeyCode::Home => app.help_scroll(-10_000),
+                        KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => app.help_select(1),
+                        KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
+                            app.help_select(-1)
+                        }
+                        KeyCode::Enter => app.help_follow(),
+                        KeyCode::Backspace => app.help_back(),
+                        _ => {}
+                    }
+                    continue;
+                }
+                if k.code == KeyCode::F(1)
+                    || (k.code == KeyCode::Char('?')
+                        && app.input.is_empty()
+                        && app.mode == app::InputMode::Normal)
+                {
+                    app.open_help(if k.code == KeyCode::F(1) { "" } else { "keys" });
+                    continue;
+                }
                 match k.code {
                     KeyCode::Tab => {
                         app.focus = if app.focus == Focus::Input {
@@ -111,7 +138,11 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             }
             Event::Paste(s) => app.input.push_str(s.trim_end_matches(['\r', '\n'])),
             Event::Mouse(m) => match m.kind {
-                MouseEventKind::Down(MouseButton::Left) => app.click(m.column, m.row),
+                MouseEventKind::Down(MouseButton::Left) if app.help.is_none() => {
+                    app.click(m.column, m.row)
+                }
+                MouseEventKind::ScrollUp if app.help.is_some() => app.help_scroll(-3),
+                MouseEventKind::ScrollDown if app.help.is_some() => app.help_scroll(3),
                 MouseEventKind::ScrollUp => app.scroll_up(3),
                 MouseEventKind::ScrollDown => app.scroll_down(3),
                 _ => {}

@@ -1,10 +1,10 @@
 //! Rendering: top bar, left sidebar, body, bottom input bar.
 use crate::app::{App, EntryKind, Focus, InputMode};
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Position};
+use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let [top, mid, bottom] = Layout::vertical([
@@ -98,11 +98,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Body
     let bot_name = app.active_bot().map(|b| b.name.clone());
-    let lines: Vec<Line> = app
+    let mut lines: Vec<Line> = app
         .current_log()
         .iter()
         .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref()))
         .collect();
+    if lines.is_empty() {
+        lines = empty_state(app)
+            .into_iter()
+            .map(|t| Line::styled(t, Style::default().fg(Color::DarkGray)))
+            .collect();
+    }
     let inner_w = body.width.saturating_sub(2).max(1) as usize;
     let inner_h = body.height.saturating_sub(2);
     let total: usize = lines
@@ -147,7 +153,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             " Cursor access token (masked, Esc cancels) ",
         ),
         InputMode::GatewayUrl => (app.input.clone(), " Gateway URL (Esc cancels) "),
-        InputMode::Normal => (app.input.clone(), " /command or message "),
+        InputMode::Normal => (
+            app.input.clone(),
+            " /command or message · F1 or ? help · /help login ",
+        ),
         InputMode::ConfirmRemove => (
             app.input.clone(),
             " Type the account alias to confirm removal (Esc cancels) ",
@@ -167,13 +176,119 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         ),
         bottom,
     );
-    if app.focus == Focus::Input {
+    if app.help.is_some() {
+        draw_help(f, app);
+    } else if app.focus == Focus::Input {
         let x = bottom.x + 3 + shown.chars().count() as u16;
         f.set_cursor_position(Position::new(
             x.min(bottom.right().saturating_sub(2)),
             bottom.y + 1,
         ));
     }
+}
+
+/// Guidance shown when the body has nothing in it yet.
+pub fn empty_state(app: &App) -> Vec<String> {
+    let mut v = vec![];
+    if app.user_label.is_none() && !app.connecting {
+        v.push("Welcome to grokbot-tui — you're not logged in.".into());
+        v.push(String::new());
+        v.push("  1. Sign in to the Grok Bot desktop app on this computer.".into());
+        v.push("  2. Type /login desktop and press Enter (recommended).".into());
+        v.push(String::new());
+        v.push("Other ways: /help login · All keys: F1 · Everything: /help".into());
+    } else if app.connecting {
+        v.push("Connecting…".into());
+    } else if app.bots.is_empty() {
+        v.push("No bots yet. Create one in the Grok Bot app, then /bots.".into());
+        v.push("See /help sync.".into());
+    } else if app.active.is_none() {
+        v.push("Pick a bot on the left (click, or Tab then ↑/↓ + Enter).".into());
+    } else {
+        v.push("No messages yet. Type a message and press Enter.".into());
+        v.push("/history reloads the transcript · /help delivery".into());
+    }
+    v
+}
+
+fn centered(area: Rect, pct_w: u16, pct_h: u16) -> Rect {
+    let w = (area.width * pct_w / 100).max(20.min(area.width));
+    let h = (area.height * pct_h / 100).max(8.min(area.height));
+    Rect::new(
+        area.x + (area.width - w) / 2,
+        area.y + (area.height - h) / 2,
+        w,
+        h,
+    )
+}
+
+/// The help modal: bordered popup, distinct colours, related links at the bottom.
+fn draw_help(f: &mut Frame, app: &mut App) {
+    let Some(m) = &mut app.help else { return };
+    let area = centered(f.area(), 80, 85);
+    let [text_area, links_area] =
+        Layout::vertical([Constraint::Min(3), Constraint::Length(3)]).areas(area);
+    let inner_w = text_area.width.saturating_sub(2).max(1) as usize;
+    let total: usize = m
+        .page
+        .body
+        .lines()
+        .map(|l| l.chars().count().max(1).div_ceil(inner_w))
+        .sum();
+    let max = (total as u16).saturating_sub(text_area.height.saturating_sub(2));
+    m.scroll = m.scroll.min(max);
+    let style = Style::default().bg(Color::Black).fg(Color::White);
+    f.render_widget(Clear, area);
+    let back = if m.back.is_empty() {
+        ""
+    } else {
+        " · Backspace back"
+    };
+    f.render_widget(
+        Paragraph::new(m.page.body.as_str())
+            .wrap(Wrap { trim: false })
+            .scroll((m.scroll, 0))
+            .style(style)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow))
+                    .title(Span::styled(
+                        format!(" Help: {} ", m.page.title),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ))
+                    .title_bottom(format!(" ↑↓ scroll · Esc close{back} ")),
+            ),
+        text_area,
+    );
+    let mut spans = vec![Span::raw("Related: ")];
+    for (i, id) in m.page.related.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(", "));
+        }
+        let st = if i == m.link {
+            Style::default().fg(Color::Black).bg(Color::Cyan)
+        } else {
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::UNDERLINED)
+        };
+        spans.push(Span::styled(crate::help::link_label(id), st));
+    }
+    f.render_widget(
+        Paragraph::new(Line::from(spans))
+            .wrap(Wrap { trim: true })
+            .style(style)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow))
+                    .title(" Tab/←→ select · Enter open "),
+            ),
+        links_area,
+    );
 }
 
 fn entry_lines<'a>(kind: EntryKind, text: &'a str, bot: Option<&str>) -> Vec<Line<'a>> {
@@ -223,5 +338,29 @@ mod tests {
         assert!(text.contains("bot: Helper"));
         assert!(text.contains("Coder"));
         assert_eq!(app.sidebar_area.width, 24);
+    }
+
+    #[test]
+    fn help_modal_and_empty_state_render() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        assert!(
+            empty_state(&app)
+                .iter()
+                .any(|l| l.contains("/login desktop"))
+        );
+        app.open_help("login");
+        let mut term = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let screen: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(screen.contains("Help: Logging in"));
+        assert!(screen.contains("Related:"));
+        assert!(screen.contains("/help login desktop"));
     }
 }
