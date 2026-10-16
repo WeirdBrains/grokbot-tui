@@ -181,10 +181,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             app.input.clone(),
             " /command or message · F1 or ? help · /help login ",
         ),
-        InputMode::ConfirmRemove => (
-            app.input.clone(),
-            " Type the account alias to confirm removal (Esc cancels) ",
-        ),
     };
     let border = if app.focus == Focus::Input {
         Color::Cyan
@@ -200,7 +196,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         ),
         bottom,
     );
-    if app.help.is_some() {
+    if app.picker.is_some() {
+        draw_picker(f, app);
+    } else if app.help.is_some() {
         draw_help(f, app);
     } else if app.focus == Focus::Input {
         let x = bottom.x + 3 + shown.chars().count() as u16;
@@ -244,6 +242,78 @@ fn centered(area: Rect, pct_w: u16, pct_h: u16) -> Rect {
         w,
         h,
     )
+}
+
+/// The selection modal: same look as the help popup (black panel, yellow border).
+fn draw_picker(f: &mut Frame, app: &mut App) {
+    let Some(p) = &mut app.picker else { return };
+    let screen = f.area();
+    let longest = p
+        .items
+        .iter()
+        .map(|i| i.label.chars().count() + i.detail.as_ref().map_or(0, |d| d.chars().count() + 3))
+        .max()
+        .unwrap_or(0)
+        .max(p.title.chars().count() + 4);
+    let w =
+        ((longest + 8) as u16).clamp(24.min(screen.width), screen.width.saturating_sub(4).max(1));
+    let h = (p.items.len() as u16 + 2).clamp(3, screen.height.saturating_sub(4).max(3));
+    let area = Rect::new(
+        screen.x + screen.width.saturating_sub(w) / 2,
+        screen.y + screen.height.saturating_sub(h) / 2,
+        w,
+        h,
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(Span::styled(
+            format!(" {} ", p.title),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .title_bottom(" ↑↓ select · Enter/click pick · Esc cancel ");
+    let inner = block.inner(area);
+    p.popup_area = area;
+    p.list_area = inner;
+    p.scroll_into_view(inner.height as usize);
+    let base = Style::default().bg(Color::Black).fg(Color::White);
+    let lines: Vec<Line> = p
+        .items
+        .iter()
+        .enumerate()
+        .skip(p.offset)
+        .take(inner.height as usize)
+        .map(|(i, it)| {
+            let sel = i == p.cursor;
+            let st = if sel {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                base
+            };
+            let mut spans = vec![Span::styled(
+                format!("{} {}", if sel { "›" } else { " " }, it.label),
+                st,
+            )];
+            if let Some(d) = &it.detail {
+                spans.push(Span::styled(
+                    format!("  ({d})"),
+                    if sel {
+                        st
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    },
+                ));
+            }
+            Line::from(spans).style(st)
+        })
+        .collect();
+    f.render_widget(Clear, area);
+    f.render_widget(Paragraph::new(lines).style(base).block(block), area);
 }
 
 /// The help modal: bordered popup, distinct colours, related links at the bottom.
@@ -471,6 +541,36 @@ mod tests {
             line.find("MY-OWN-MSG").unwrap() > 50,
             "right side: {line:?}"
         );
+    }
+
+    #[test]
+    fn picker_renders_and_mouse_click_picks() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        crate::app::tests::mock_login(&mut app, "t");
+        let before = app.active_bot().unwrap().id.clone();
+        app.open_bot_picker();
+        let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let screen: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(screen.contains("Switch bot"));
+        assert!(screen.contains("(current)"));
+        // Click the row of a different bot.
+        let p = app.picker.as_ref().unwrap();
+        let target = p.items.iter().position(|i| i.value != before).unwrap();
+        let (x, y) = (
+            p.list_area.x + 2,
+            p.list_area.y + (target - p.offset) as u16,
+        );
+        let want = p.items[target].value.clone();
+        let p = app.picker.as_mut().unwrap();
+        p.hover(x, y);
+        assert_eq!(p.cursor, target, "hover highlights");
+        assert_eq!(p.click(x, y), crate::picker::MouseOutcome::Confirm);
+        app.picker_confirm();
+        assert!(app.picker.is_none());
+        assert_eq!(app.active_bot().unwrap().id, want);
     }
 
     #[test]

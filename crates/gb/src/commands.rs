@@ -67,7 +67,7 @@ pub fn registry() -> Registry {
             Command {
                 name: "bot",
                 aliases: &["use"],
-                usage: "/bot <name|id>",
+                usage: "/bot [name|id]",
                 help: "Switch to a bot's chat",
                 run: bot,
             },
@@ -244,7 +244,8 @@ fn bots(app: &mut App, _: &str) -> Result<()> {
 
 fn bot(app: &mut App, args: &str) -> Result<()> {
     if args.is_empty() {
-        bail!("Usage: /bot <name|id>");
+        app.open_bot_picker();
+        return Ok(());
     }
     match app.find_bot(args) {
         Some(i) => {
@@ -288,6 +289,7 @@ fn account(app: &mut App, args: &str) -> Result<()> {
                 a.alias, a.alias
             ));
         }
+        ["use"] => app.open_account_picker(),
         ["use", alias] => app.switch_account(alias)?,
         ["rename", old, new] => {
             app.store.rename_account(old, new)?;
@@ -302,11 +304,29 @@ fn account(app: &mut App, args: &str) -> Result<()> {
                 bail!("cannot remove the active account; switch with /account use first");
             }
             app.pending_remove = Some(a.alias.clone());
-            app.mode = InputMode::ConfirmRemove;
-            app.info(format!(
-                "This deletes account '{}' and ALL its credentials, chats, memory and prefs. Type '{}' to confirm (anything else cancels).",
-                a.alias, a.alias
-            ));
+            use crate::picker::{PickItem, Picker};
+            app.open_picker(
+                Picker::new(
+                    format!("Delete account '{}' and ALL its data?", a.alias),
+                    vec![
+                        PickItem::new("Cancel", "cancel"),
+                        PickItem::new(
+                            format!("Delete '{}' (credentials, chats, memory, prefs)", a.alias),
+                            "delete",
+                        ),
+                    ],
+                    |app, it| {
+                        let alias = app.pending_remove.clone().unwrap_or_default();
+                        let typed = if it.value == "delete" {
+                            alias
+                        } else {
+                            String::new()
+                        };
+                        finish_remove(app, &typed);
+                    },
+                )
+                .on_cancel(|app| finish_remove(app, "")),
+            );
         }
         _ => bail!(
             "Usage: /account [list | add <alias> | use <alias> | rename <old> <new> | remove <alias>]"

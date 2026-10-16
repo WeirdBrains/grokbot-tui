@@ -4,6 +4,7 @@ mod app;
 mod commands;
 mod config;
 mod help;
+mod picker;
 mod storage;
 mod ui;
 
@@ -65,6 +66,28 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     && matches!(k.code, KeyCode::Char('c') | KeyCode::Char('d'))
                 {
                     app.should_quit = true;
+                    continue;
+                }
+                if let Some(p) = app.picker.as_mut() {
+                    match k.code {
+                        KeyCode::Esc | KeyCode::Char('q') => app.picker_cancel(),
+                        KeyCode::Enter => app.picker_confirm(),
+                        KeyCode::Up | KeyCode::Char('k') => p.move_by(-1),
+                        KeyCode::Down | KeyCode::Char('j') => p.move_by(1),
+                        KeyCode::PageUp => p.move_by(-10),
+                        KeyCode::PageDown => p.move_by(10),
+                        KeyCode::Home => p.first(),
+                        KeyCode::End => p.last(),
+                        _ => {}
+                    }
+                    continue;
+                }
+                if k.code == KeyCode::F(2) {
+                    app.open_bot_picker();
+                    continue;
+                }
+                if k.code == KeyCode::F(3) {
+                    app.open_account_picker();
                     continue;
                 }
                 if app.help.as_ref().is_some_and(|m| m.query.is_some()) {
@@ -150,6 +173,20 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                 }
             }
             Event::Paste(s) => app.input.push_str(s.trim_end_matches(['\r', '\n'])),
+            Event::Mouse(m) if app.picker.is_some() => {
+                let p = app.picker.as_mut().unwrap();
+                match m.kind {
+                    MouseEventKind::Moved => p.hover(m.column, m.row),
+                    MouseEventKind::ScrollUp => p.move_by(-1),
+                    MouseEventKind::ScrollDown => p.move_by(1),
+                    MouseEventKind::Down(MouseButton::Left) => match p.click(m.column, m.row) {
+                        picker::MouseOutcome::Confirm => app.picker_confirm(),
+                        picker::MouseOutcome::Cancel => app.picker_cancel(),
+                        picker::MouseOutcome::None => {}
+                    },
+                    _ => {}
+                }
+            }
             Event::Mouse(m) => match m.kind {
                 MouseEventKind::Down(MouseButton::Left) if app.help.is_none() => {
                     app.click(m.column, m.row)

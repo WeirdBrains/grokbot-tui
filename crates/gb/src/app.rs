@@ -66,8 +66,6 @@ pub enum InputMode {
     GatewayToken,
     /// `/login cursor`: masked Cursor access token entry.
     CursorToken,
-    /// Type the alias in `App::pending_remove` to confirm deleting that account.
-    ConfirmRemove,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +94,40 @@ pub type DesktopRead = (gw::desktop::DesktopCredential, Option<String>);
 /// Only invoked by `/login desktop` and the 401 re-read for desktop-method accounts.
 pub type DesktopReader =
     Arc<dyn Fn(Option<&str>, &Policy) -> gw::Result<DesktopRead> + Send + Sync>;
+
+/// Lists the desktop app's saved sessions/accounts as (label, choice) pairs, for the
+/// "pick one" modal when `/login desktop` finds several. Labels only; no secrets.
+pub type DesktopLister = Arc<dyn Fn() -> gw::Result<Vec<(String, String)>> + Send + Sync>;
+
+pub fn real_desktop_lister() -> DesktopLister {
+    Arc::new(|| {
+        let platform = gw::desktop::Platform::current().ok_or_else(|| gw::Error::Desktop {
+            code: "UNSUPPORTED_PLATFORM".into(),
+            message: "unsupported platform".into(),
+        })?;
+        let cfg = gw::desktop::DesktopConfig::new(platform);
+        if let Ok(entries) = cfg.entries()
+            && entries.len() > 1
+        {
+            return Ok(entries
+                .into_iter()
+                .map(|e| (e.key.clone(), e.key))
+                .collect());
+        }
+        Ok(cfg
+            .sand_accounts()?
+            .into_iter()
+            .map(|a| {
+                let label = if a.active {
+                    format!("{} (active in app)", a.label)
+                } else {
+                    a.label
+                };
+                (label, a.key)
+            })
+            .collect())
+    })
+}
 
 /// The real reader: the platform's app-data dir + OS keychain (see `grokbot_api::desktop`).
 pub fn real_desktop_reader() -> DesktopReader {
@@ -192,6 +224,11 @@ pub enum Event {
         nonce: String,
         result: gw::Result<gw::SendReceipt>,
     },
+    /// `/login desktop` found several sessions/accounts: let the user pick one.
+    DesktopChoices {
+        epoch: u64,
+        choices: Vec<(String, String)>,
+    },
     /// `promptAcceptanceStatus` answer for a send whose outcome was unknown.
     Acceptance {
         epoch: u64,
@@ -256,8 +293,11 @@ pub struct App {
     pub epoch: u64,
     pub inflight: usize,
     pub desktop_reader: DesktopReader,
+    pub desktop_lister: DesktopLister,
     /// Open help modal (never part of chat history).
     pub help: Option<HelpModal>,
+    /// Open selection modal (bots, accounts, …).
+    pub picker: Option<crate::picker::Picker>,
     /// Where `opts.client_version` came from.
     pub client_version_source: &'static str,
     /// Set after one automatic desktop re-read on 401 so a bad session can't loop.
@@ -364,7 +404,9 @@ impl App {
             epoch: 0,
             inflight: 0,
             desktop_reader: real_desktop_reader(),
+            desktop_lister: real_desktop_lister(),
             help: None,
+            picker: None,
             client_version_source,
             desktop_reread_tried: false,
             login_retry: None,
@@ -712,6 +754,27 @@ impl App {
                     Err(_) => self.check_acceptance(bot, nonce, 1, Duration::ZERO),
                 }
             }
+            Event::DesktopChoices { epoch, choices } => {
+                if epoch != self.epoch {
+                    return;
+                }
+                self.connecting = false;
+                let items = choices
+                    .into_iter()
+                    .map(|(label, value)| crate::picker::PickItem::new(label, value))
+                    .collect();
+                self.open_picker(
+                    crate::picker::Picker::new(
+                        "Several desktop accounts: pick one to log in",
+                        items,
+                        |app, it| {
+                            app.info("Reading the chosen desktop account…".into());
+                            app.start_desktop_login(Some(it.value), LoginSource::Interactive);
+                        },
+                    )
+                    .on_cancel(|app| app.info("Desktop login cancelled.".into())),
+                );
+            }
             Event::Acceptance {
                 epoch,
                 bot,
@@ -870,20 +933,6 @@ impl App {
         Ok(())
     }
 
-    pub fn next_account(&mut self) {
-        let Ok(list) = self.store.accounts() else {
-            return;
-        };
-        let cur = self.account().id;
-        let i = list.iter().position(|a| a.id == cur).unwrap_or(0);
-        if let Some(next) = list.get((i + 1) % list.len().max(1)).cloned()
-            && next.id != cur
-            && let Err(e) = self.switch_account(&next.alias)
-        {
-            self.error(format!("{e:#}"));
-        }
-    }
-
     pub fn init(&mut self) {
         self.info(format!(
             "Welcome to grokbot-tui{}. Type /help for commands.",
@@ -990,13 +1039,29 @@ impl App {
         self.connecting = true;
         let (epoch, mock, opts) = (self.epoch, self.mock, self.opts.clone());
         let reader = self.desktop_reader.clone();
+        let lister = self.desktop_lister.clone();
+        let ask = source == LoginSource::Interactive && entry.is_none();
         self.spawn(async move {
             let e2 = entry.clone();
             let policy = opts.policy;
-            let read = tokio::task::spawn_blocking(move || reader(e2.as_deref(), &policy))
-                .await
+            let joined = tokio::task::spawn_blocking(move || {
+                let r = reader(e2.as_deref(), &policy);
+                let ambiguous = matches!(&r, Err(gw::Error::Desktop { code, .. }) if code == "AMBIGUOUS_ENTRIES");
+                let choices = (ask && ambiguous).then(|| lister().ok()).flatten();
+                (r, choices)
+            })
+            .await;
+            if let Ok((_, Some(choices))) = &joined
+                && choices.len() > 1
+            {
+                return Event::DesktopChoices {
+                    epoch,
+                    choices: choices.clone(),
+                };
+            }
+            let read = joined
                 .map_err(|e| format!("desktop session reader failed: {e}"))
-                .and_then(|r| r.map_err(|e| e.to_string()));
+                .and_then(|(r, _)| r.map_err(|e| e.to_string()));
             let (result, desktop_entry) = match read {
                 Ok((gw::desktop::DesktopCredential::Session(session), stored)) => (
                     login_task(mock, opts, Some(session), None).await,
@@ -1195,6 +1260,93 @@ impl App {
         });
     }
 
+    // ------------------------------------------------------------ selection modal
+
+    /// Show a selection modal; `on_pick` gets the chosen item on confirm.
+    pub fn open_picker(&mut self, picker: crate::picker::Picker) {
+        self.picker = Some(picker);
+    }
+
+    /// Confirm the highlighted item: close the modal, then run its callback.
+    pub fn picker_confirm(&mut self) {
+        if let Some(p) = self.picker.take()
+            && let Some(item) = p.selected().cloned()
+        {
+            (p.on_pick)(self, item);
+        }
+    }
+
+    pub fn picker_cancel(&mut self) {
+        if let Some(f) = self.picker.take().and_then(|p| p.on_cancel) {
+            f(self);
+        }
+    }
+
+    /// Bot switcher (`/bot`, F2).
+    pub fn open_bot_picker(&mut self) {
+        use crate::picker::{PickItem, Picker};
+        if self.bots.is_empty() {
+            self.error("No bots to pick from. Log in (/login desktop) or /bots.".into());
+            return;
+        }
+        let current = self.active_bot().map(|b| b.id.clone()).unwrap_or_default();
+        let items = self
+            .bots
+            .iter()
+            .map(|b| {
+                let it = PickItem::new(b.name.clone(), b.id.clone());
+                if b.id == current {
+                    it.detail("current")
+                } else {
+                    it
+                }
+            })
+            .collect();
+        self.open_picker(
+            Picker::new("Switch bot", items, |app, it| {
+                if let Some(i) = app.bots.iter().position(|b| b.id == it.value) {
+                    app.select_bot(i);
+                    app.focus = Focus::Input;
+                }
+            })
+            .with_selected(&current),
+        );
+    }
+
+    /// Account switcher (`/account use`, F3, click the @account header).
+    pub fn open_account_picker(&mut self) {
+        use crate::picker::{PickItem, Picker};
+        let list = match self.store.accounts() {
+            Ok(l) => l,
+            Err(e) => {
+                self.error(format!("{e:#}"));
+                return;
+            }
+        };
+        let current = self.account().alias.clone();
+        let items = list
+            .iter()
+            .map(|a| {
+                let it = PickItem::new(format!("@{}", a.alias), a.alias.clone());
+                if a.alias == current {
+                    it.detail("current")
+                } else {
+                    it
+                }
+            })
+            .collect();
+        self.open_picker(
+            Picker::new("Switch account", items, |app, it| {
+                if it.value != app.account().alias
+                    && let Err(e) = app.switch_account(&it.value)
+                {
+                    app.error(format!("{e:#}"));
+                }
+            })
+            .with_selected(&current),
+        );
+    }
+
     // ------------------------------------------------------------ help modal
 
     /// Open `/help <arg>` in the modal. Returns false if no such topic/command.
@@ -1348,10 +1500,6 @@ impl App {
         self.input.clear();
         self.login_url_draft = None;
         match was {
-            InputMode::ConfirmRemove => {
-                self.pending_remove = None;
-                self.info("Account removal cancelled.".into());
-            }
             InputMode::Normal => {}
             _ => self.info("Login cancelled.".into()),
         }
@@ -1361,11 +1509,6 @@ impl App {
         let line = std::mem::take(&mut self.input);
         let trimmed = line.trim().to_string();
         match self.mode {
-            InputMode::ConfirmRemove => {
-                self.mode = InputMode::Normal;
-                commands::finish_remove(self, &trimmed);
-                return;
-            }
             InputMode::GatewayUrl | InputMode::GatewayToken | InputMode::CursorToken
                 if trimmed.is_empty() =>
             {
@@ -1477,7 +1620,7 @@ impl App {
             .account_area
             .contains(ratatui::layout::Position::new(col, row))
         {
-            self.next_account();
+            self.open_account_picker();
             return;
         }
         let a = self.sidebar_area;
@@ -1524,7 +1667,14 @@ pub mod tests {
     pub fn test_app(rt: &tokio::runtime::Runtime) -> (App, tempfile::TempDir) {
         let d = tempfile::tempdir().unwrap();
         let store = Store::open(d.path().join("gb"), None).unwrap();
-        let app = App::new(store, rt.handle().clone(), true).unwrap();
+        let mut app = App::new(store, rt.handle().clone(), true).unwrap();
+        // Never touch the real desktop app from tests.
+        app.desktop_lister = Arc::new(|| {
+            Err(gw::Error::Desktop {
+                code: "TEST".into(),
+                message: "no lister in tests".into(),
+            })
+        });
         (app, d)
     }
 
@@ -1753,6 +1903,42 @@ pub mod tests {
             Some("acct2"),
             "entry choice kept"
         );
+    }
+
+    #[test]
+    fn bot_and_account_pickers_switch_and_cancel() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "t");
+        let start = app.active_bot().unwrap().id.clone();
+        type_line(&mut app, "/bot");
+        let p = app.picker.as_ref().expect("bare /bot opens the picker");
+        assert_eq!(
+            p.selected().unwrap().value,
+            start,
+            "starts on the current bot"
+        );
+        // Esc-equivalent cancel leaves everything as is.
+        app.picker_cancel();
+        assert_eq!(app.active_bot().unwrap().id, start);
+        // Keyboard: move down one and confirm.
+        app.open_bot_picker();
+        let p = app.picker.as_mut().unwrap();
+        let i = p.cursor;
+        p.move_by(if i + 1 < p.items.len() { 1 } else { -1 });
+        let want = p.selected().unwrap().value.clone();
+        app.picker_confirm();
+        assert_eq!(app.active_bot().unwrap().id, want);
+        assert_ne!(want, start);
+
+        type_line(&mut app, "/account add work");
+        type_line(&mut app, "/account use");
+        let p = app.picker.as_mut().expect("/account use opens the picker");
+        assert!(p.items.iter().any(|i| i.value == "work"));
+        let w = p.items.iter().position(|i| i.value == "work").unwrap();
+        p.cursor = w;
+        app.picker_confirm();
+        assert_eq!(app.account().alias, "work");
     }
 
     #[test]
@@ -2041,12 +2227,21 @@ pub mod tests {
         );
         assert!(texts(&app).contains(&"personal msg".to_string()));
 
+        // Removal is confirmed in the pick list; Cancel is the default.
         type_line(&mut app, "/account remove work");
-        assert_eq!(app.mode, InputMode::ConfirmRemove);
-        type_line(&mut app, "nope");
+        assert_eq!(
+            app.picker.as_ref().unwrap().selected().unwrap().value,
+            "cancel"
+        );
+        app.picker_confirm();
         assert!(app.store.find_account("work").unwrap().is_some());
         type_line(&mut app, "/account remove work");
-        type_line(&mut app, "work");
+        app.picker_cancel();
+        assert!(app.store.find_account("work").unwrap().is_some());
+        assert!(texts(&app).iter().any(|t| t.contains("removal cancelled")));
+        type_line(&mut app, "/account remove work");
+        app.picker.as_mut().unwrap().move_by(1);
+        app.picker_confirm();
         assert!(app.store.find_account("work").unwrap().is_none());
         type_line(&mut app, "/account rename default home");
         assert_eq!(app.account().alias, "home");
@@ -2081,10 +2276,17 @@ pub mod tests {
         assert_eq!(app.active, Some(2));
         type_line(&mut app, "/account add b");
         app.account_area = Rect::new(0, 1, 24, 1);
+        // Clicking the @account header opens the account pick list.
         app.click(2, 1);
+        let p = app
+            .picker
+            .as_mut()
+            .expect("header click opens the account picker");
+        assert_eq!(p.selected().unwrap().value, "default");
+        let b = p.items.iter().position(|i| i.value == "b").unwrap();
+        p.cursor = b;
+        app.picker_confirm();
         assert_eq!(app.account().alias, "b");
-        app.click(2, 1);
-        assert_eq!(app.account().alias, "default");
     }
 
     #[test]
@@ -2242,6 +2444,56 @@ pub mod tests {
             f(v.len(), entry)
         });
         (r, calls)
+    }
+
+    #[test]
+    fn desktop_several_accounts_opens_picker_and_logs_in_with_choice() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        let (reader, calls) = fake_reader(|_, entry| match entry {
+            None => Err(gw::Error::Desktop {
+                code: "AMBIGUOUS_ENTRIES".into(),
+                message: "several".into(),
+            }),
+            Some(k) => Ok((
+                gw::desktop::DesktopCredential::Session(Session::new(
+                    "https://box.cursorvm.com",
+                    "desk",
+                )),
+                Some(k.to_string()),
+            )),
+        });
+        app.desktop_reader = reader;
+        app.desktop_lister = Arc::new(|| {
+            Ok(vec![
+                ("1) aaaa1111… (active in app)".into(), "aaaa1111key".into()),
+                ("2) bbbb2222…".into(), "bbbb2222key".into()),
+            ])
+        });
+        type_line(&mut app, "/login desktop");
+        settle(&mut app);
+        let p = app
+            .picker
+            .as_mut()
+            .expect("several desktop accounts → pick list");
+        assert_eq!(p.items.len(), 2);
+        p.move_by(1);
+        app.picker_confirm();
+        settle(&mut app);
+        assert_eq!(
+            calls.lock().unwrap().last().unwrap().as_deref(),
+            Some("bbbb2222key")
+        );
+        assert!(app.user_label.is_some());
+        assert_eq!(
+            app.store
+                .load_login()
+                .unwrap()
+                .unwrap()
+                .desktop_entry
+                .as_deref(),
+            Some("bbbb2222key")
+        );
     }
 
     #[test]

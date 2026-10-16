@@ -92,7 +92,8 @@ What gb reads (only when you run this command, or on a 401 for a desktop-login a
   'Grok Bot Safe Storage' on macOS, DPAPI on Windows. Nothing is printed or logged.
 
 Several saved sessions/accounts
-  gb lists them (e.g. '1) 3f2a9c1e… (active)'). Choose with /login desktop <number>.
+  gb opens a pick list (e.g. '1) 3f2a9c1e… (active in app)'); choose with ↑↓/Enter or
+  the mouse. Or name it directly: /login desktop <number>.
   Tip: /account add <alias> first so each desktop account maps to its own gb account.
 
 Client version
@@ -167,6 +168,8 @@ Loopback only with GB_ALLOW_LOCAL_GATEWAY=1. URLs with user:pass@ are rejected."
         body: "\
 Anywhere
   F1, or ? on an empty input   Open this help
+  F2                           Pick a bot (list popup; same as /bot)
+  F3                           Pick an account (same as /account use)
   Ctrl-C / Ctrl-D              Quit
   Tab                          Switch focus between input and sidebar
   PgUp / PgDn, mouse wheel     Scroll the chat
@@ -181,7 +184,11 @@ Sidebar focused
   ↑ ↓ / k j  Move      Enter  Open bot
 
 Mouse
-  Click a bot to open it. Click the @account header to switch accounts.
+  Click a bot to open it. Click the @account header to pick an account.
+
+In a pick list (F2, F3, /bot, /account use)
+  ↑ ↓ / j k, PgUp PgDn, Home End  Move      Enter  Pick      Esc / q  Cancel
+  Mouse: hover highlights, click picks, click outside cancels, wheel moves
 
 In this help window
   ↑ ↓ / j k, PgUp PgDn  Scroll      Tab / ← →  Select a related link
@@ -197,9 +204,9 @@ gb keeps several accounts fully separate: logins, bots, chats, memory and prefs.
 
   /account                  List accounts (* = active)
   /account add <alias>      Create an account
-  /account use <alias>      Switch (also: click the @account header)
+  /account use [alias]      Switch (no alias, F3 or clicking @account: pick list)
   /account rename <a> <b>   Rename
-  /account remove <alias>   Delete (asks you to type the alias to confirm)
+  /account remove <alias>   Delete (confirm in a pick list; Cancel is the default)
 
 Start in an account: grokbot-tui --account work  or  GB_ACCOUNT=work grokbot-tui
 GB_GROKBOT_TOKEN only applies to the account selected at startup.
