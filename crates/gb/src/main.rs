@@ -67,8 +67,22 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     app.should_quit = true;
                     continue;
                 }
+                if app.help.as_ref().is_some_and(|m| m.query.is_some()) {
+                    let q = app.help.as_mut().and_then(|m| m.query.as_mut()).unwrap();
+                    match k.code {
+                        KeyCode::Esc => app.help.as_mut().unwrap().query = None,
+                        KeyCode::Enter => app.help_search_submit(),
+                        KeyCode::Backspace => {
+                            q.pop();
+                        }
+                        KeyCode::Char(c) => q.push(c),
+                        _ => {}
+                    }
+                    continue;
+                }
                 if app.help.is_some() {
                     match k.code {
+                        KeyCode::Char('/') => app.help_search_start(),
                         KeyCode::Esc | KeyCode::Char('q') | KeyCode::F(1) => app.close_help(),
                         KeyCode::Up | KeyCode::Char('k') => app.help_scroll(-1),
                         KeyCode::Down | KeyCode::Char('j') => app.help_scroll(1),

@@ -662,6 +662,7 @@ impl Store {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn clear_messages(&self, bot_id: &str) -> Result<()> {
         self.conn.execute(
             "DELETE FROM messages WHERE account_id = ?1 AND bot_id = ?2",

@@ -30,8 +30,10 @@ Help topics (Enter on a link below opens it):
   login · login desktop · login cursor · login gateway
   keys · accounts · prefs · env · sync · delivery · troubleshooting
 
+Search: /help <keyword> (e.g. /help keyring), or press / in this window.
+
 Commands: /help <command> shows usage, examples and related topics.
-  help login logout whoami bots bot history account prefs memory clear quit",
+  help login logout whoami bots bot history account prefs memory quit",
         related: &[
             "login",
             "login-desktop",
@@ -183,7 +185,8 @@ Mouse
 
 In this help window
   ↑ ↓ / j k, PgUp PgDn  Scroll      Tab / ← →  Select a related link
-  Enter  Open link      Backspace  Back      Esc / q  Close",
+  Enter  Open link      Backspace  Back      Esc / q  Close
+  /      Search all help by keyword (type, Enter to run, Esc to cancel)",
         related: &["overview", "accounts"],
     },
     Topic {
@@ -264,8 +267,10 @@ Bots come from the gateway's listAgents. Messages come from getAgentTranscriptTa
     from the desktop app appear too.
   • While a bot is open gb polls for new messages every ~3 s, backing off to 15 s
     when idle, and every 1.5 s right after you send.
-  • /bots refreshes the bot list. /clear hides the chat (the next poll redraws it);
-    /clear saved deletes the stored copy.",
+  • The chat you see is always rebuilt from that database. Your sent message is saved
+    there first (as pending) and shows immediately; notices and errors appear in a
+    separate section below the chat and are not saved.
+  • /bots refreshes the bot list.",
         related: &["delivery", "troubleshooting"],
     },
     Topic {
@@ -337,8 +342,15 @@ fn command_extra(
 ) {
     match name {
         "help" => (
-            "Open help. With a topic or command name, open that page.",
-            &["/help", "/help login desktop", "/help keys", "/help bot"],
+            "Open help. With a topic or command name, open that page; any other words search all help pages.",
+            &[
+                "/help",
+                "/help login desktop",
+                "/help keys",
+                "/help bot",
+                "/help keyring",
+                "/help search 401",
+            ],
             &["overview", "keys"],
         ),
         "login" => (
@@ -401,11 +413,6 @@ fn command_extra(
             &["/memory", "/memory add lang rust", "/memory clear lang"],
             &["accounts"],
         ),
-        "clear" => (
-            "Clear the chat view. `saved` also deletes the stored transcript for this bot.",
-            &["/clear", "/clear saved"],
-            &["sync"],
-        ),
         "quit" => ("Exit grokbot-tui.", &["/quit"], &["keys"]),
         _ => ("", &[], &["overview"]),
     }
@@ -419,8 +426,107 @@ pub struct Page {
     pub related: Vec<String>,
 }
 
-/// Resolve `/help <arg>` to a page: a topic, or a command.
+/// Resolve `/help <arg>` to a page: a topic, a command, `search <words>`, or —
+/// when nothing matches exactly — keyword search results (if any).
 pub fn page(registry: &Registry, arg: &str) -> Option<Page> {
+    let raw = arg.trim();
+    if let Some(q) = raw
+        .strip_prefix("search:")
+        .or_else(|| raw.strip_prefix("search "))
+    {
+        return Some(search_page(registry, q.trim()));
+    }
+    if let Some(p) = exact_page(registry, raw) {
+        return Some(p);
+    }
+    (!search(registry, raw).is_empty()).then(|| search_page(registry, raw))
+}
+
+/// One keyword-search hit.
+pub struct Hit {
+    pub id: String,
+    pub title: String,
+    pub snippet: String,
+}
+
+/// Search all topics and command pages. Every query word must appear (case-
+/// insensitive) in the id, title or body. Title/id matches rank first.
+pub fn search(registry: &Registry, query: &str) -> Vec<Hit> {
+    let words: Vec<String> = query
+        .split_whitespace()
+        .map(|w| w.trim_start_matches('/').to_lowercase())
+        .filter(|w| !w.is_empty())
+        .collect();
+    if words.is_empty() {
+        return vec![];
+    }
+    let mut hits: Vec<(usize, Hit)> = vec![];
+    for name in all_names(registry) {
+        let Some(p) = exact_page(registry, &name) else {
+            continue;
+        };
+        let head = format!("{} {}", p.id, p.title).to_lowercase();
+        let body = p.body.to_lowercase();
+        if !words.iter().all(|w| head.contains(w) || body.contains(w)) {
+            continue;
+        }
+        let score = words.iter().filter(|w| head.contains(*w)).count();
+        let snippet = p
+            .body
+            .lines()
+            .find(|l| words.iter().any(|w| l.to_lowercase().contains(w)))
+            .unwrap_or_else(|| p.body.lines().next().unwrap_or(""))
+            .trim();
+        let snippet: String = if snippet.chars().count() > 90 {
+            format!("{}…", snippet.chars().take(89).collect::<String>())
+        } else {
+            snippet.to_string()
+        };
+        hits.push((
+            score,
+            Hit {
+                id: p.id,
+                title: p.title,
+                snippet,
+            },
+        ));
+    }
+    hits.sort_by_key(|h| std::cmp::Reverse(h.0));
+    hits.into_iter().map(|(_, h)| h).collect()
+}
+
+fn search_page(registry: &Registry, q: &str) -> Page {
+    let hits = search(registry, q);
+    let mut body = if hits.is_empty() {
+        format!("No help pages match '{q}'.\n\nTry fewer or different words, or browse /help.\n")
+    } else {
+        format!(
+            "{} result(s) for '{q}'. Tab/←→ to pick one below, Enter to open.\n\n",
+            hits.len()
+        )
+    };
+    for h in &hits {
+        body.push_str(&format!(
+            "{}  ({})\n    {}\n\n",
+            h.title,
+            link_label(&h.id),
+            h.snippet
+        ));
+    }
+    body.push_str("Press / to search again.");
+    let mut related: Vec<String> = hits.into_iter().map(|h| h.id).collect();
+    if related.is_empty() {
+        related.push("overview".into());
+    }
+    Page {
+        id: format!("search:{q}"),
+        title: format!("search \"{q}\""),
+        body,
+        related,
+    }
+}
+
+fn exact_page(registry: &Registry, arg: &str) -> Option<Page> {
     let id = normalize(arg);
     let id = if id.is_empty() {
         "overview".to_string()
@@ -620,6 +726,34 @@ mod tests {
                 .contains("libsecret")
         );
         assert!(hint_for_error("all good").is_none());
+    }
+
+    #[test]
+    fn keyword_search_matches_topics_and_commands() {
+        let r = registry();
+        let ids = |q: &str| search(&r, q).into_iter().map(|h| h.id).collect::<Vec<_>>();
+        assert!(ids("keyring").contains(&"login-desktop".to_string()));
+        assert!(ids("GB_CURSOR_CLIENT_VERSION").contains(&"env".to_string()));
+        assert!(ids("examples rename").contains(&"cmd-account".to_string()));
+        assert_eq!(ids("prefs")[0], "prefs", "title match ranks first");
+        assert!(ids("secret-tool libsecret").iter().all(|i| i != "keys"));
+        assert!(ids("zzqqxx").is_empty());
+        assert!(ids("").is_empty());
+        let hit = &search(&r, "keyring")[0];
+        assert!(hit.snippet.to_lowercase().contains("keyring"));
+        // page(): exact first, else search with results, explicit search always.
+        assert_eq!(page(&r, "keys").unwrap().id, "keys");
+        let p = page(&r, "keyring").unwrap();
+        assert_eq!(p.id, "search:keyring");
+        assert!(p.related.iter().all(|id| page(&r, id).is_some()));
+        assert!(page(&r, "zzqqxx").is_none());
+        assert!(
+            page(&r, "search zzqqxx")
+                .unwrap()
+                .body
+                .contains("No help pages")
+        );
+        assert_eq!(page(&r, "search:keyring").unwrap().id, "search:keyring");
     }
 
     #[test]

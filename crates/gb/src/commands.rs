@@ -100,13 +100,6 @@ pub fn registry() -> Registry {
                 run: memory,
             },
             Command {
-                name: "clear",
-                aliases: &[],
-                usage: "/clear [saved]",
-                help: "Clear the body; `saved` also deletes the bot's stored transcript",
-                run: clear,
-            },
-            Command {
                 name: "quit",
                 aliases: &["q", "exit"],
                 usage: "/quit",
@@ -413,21 +406,6 @@ fn memory(app: &mut App, args: &str) -> Result<()> {
         }
         _ => bail!("Usage: /memory [list | add <key> <value> | clear [key]]"),
     }
-    Ok(())
-}
-
-fn clear(app: &mut App, args: &str) -> Result<()> {
-    match args {
-        "" => {}
-        "saved" => {
-            let Some(id) = app.active_bot().map(|b| b.id.clone()) else {
-                bail!("No active bot")
-            };
-            app.store.clear_messages(&id)?;
-        }
-        _ => bail!("Usage: /clear [saved]"),
-    }
-    app.clear_current();
     Ok(())
 }
 

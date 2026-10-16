@@ -156,6 +156,8 @@ pub struct HelpModal {
     pub scroll: u16,
     pub link: usize,
     pub back: Vec<String>,
+    /// Search box text while typing a query in the modal (`/` to start).
+    pub query: Option<String>,
 }
 
 pub enum Event {
@@ -214,8 +216,13 @@ pub struct App {
     pub bots: Vec<Bot>,
     pub active: Option<usize>,
     pub sidebar_cursor: usize,
-    /// Body logs keyed by bot id ("" when no bot is active).
+    /// Chat feed per bot id. Only ever rebuilt from SQLite by `reload_bot_log`;
+    /// nothing else writes it.
     pub logs: HashMap<String, Vec<Entry>>,
+    /// Transient notices (command echoes, info, errors, delivery warnings) keyed by
+    /// bot id ("" when no bot is active). Never stored, never mixed into the feed;
+    /// rendered in their own section below it.
+    pub notices: HashMap<String, Vec<Entry>>,
     pub input: String,
     pub mode: InputMode,
     pub focus: Focus,
@@ -309,6 +316,7 @@ impl App {
             active: None,
             sidebar_cursor: 0,
             logs: HashMap::new(),
+            notices: HashMap::new(),
             input: String::new(),
             mode: InputMode::Normal,
             focus: Focus::Input,
@@ -558,8 +566,7 @@ impl App {
                             }
                         };
                         let got_reply = added.iter().any(|m| m.role == Role::Bot);
-                        // Rebuild the visible log from SQLite so /clear, first select, and
-                        // desktop-app messages all converge on the same merged transcript.
+                        // The chat feed is always rebuilt from SQLite (single source of truth).
                         self.reload_bot_log(&bot);
                         if got_reply {
                             self.awaiting.remove(&bot);
@@ -614,6 +621,7 @@ impl App {
                     }
                     Err(e) if e.delivery() == Delivery::Rejected => {
                         let _ = self.store.delete_pending(&bot, &nonce);
+                        self.reload_bot_log(&bot);
                         self.push_to(
                             &bot,
                             Entry {
@@ -667,6 +675,7 @@ impl App {
         self.active = None;
         self.sidebar_cursor = 0;
         self.logs.clear();
+        self.notices.clear();
         self.awaiting.clear();
         self.scroll = 0;
         self.poll = PollState {
@@ -976,25 +985,13 @@ impl App {
     /// keeping only trailing system/error lines (e.g. delivery notices) so polls
     /// don't wipe them and don't duplicate them.
     fn reload_bot_log(&mut self, bot_id: &str) {
-        let mut entries: Vec<Entry> = self
+        let entries: Vec<Entry> = self
             .store
             .messages(bot_id)
             .unwrap_or_default()
             .iter()
             .map(entry_from_msg)
             .collect();
-        if let Some(prev) = self.logs.get(bot_id) {
-            let mut trailing = Vec::new();
-            for e in prev.iter().rev() {
-                if matches!(e.kind, EntryKind::System | EntryKind::Error) {
-                    trailing.push(e.clone());
-                } else {
-                    break;
-                }
-            }
-            trailing.reverse();
-            entries.extend(trailing);
-        }
         self.logs.insert(bot_id.to_string(), entries);
         if self.active_bot().is_some_and(|b| b.id == bot_id) {
             self.scroll = 0;
@@ -1048,8 +1045,26 @@ impl App {
             scroll: 0,
             link: 0,
             back,
+            query: None,
         });
         true
+    }
+
+    /// Start typing a search query inside the help modal.
+    pub fn help_search_start(&mut self) {
+        if let Some(m) = &mut self.help {
+            m.query = Some(String::new());
+        }
+    }
+
+    /// Run the typed query (empty cancels).
+    pub fn help_search_submit(&mut self) {
+        let Some(q) = self.help.as_mut().and_then(|m| m.query.take()) else {
+            return;
+        };
+        if !q.trim().is_empty() {
+            self.open_help(&format!("search {q}"));
+        }
     }
 
     pub fn close_help(&mut self) {
@@ -1092,6 +1107,7 @@ impl App {
                 scroll: 0,
                 link: 0,
                 back,
+                query: None,
             });
         }
     }
@@ -1111,12 +1127,32 @@ impl App {
         self.active_bot().map(|b| b.id.clone()).unwrap_or_default()
     }
 
-    pub fn current_log(&self) -> &[Entry] {
+    /// The active bot's chat feed (rebuilt from SQLite).
+    pub fn feed(&self) -> &[Entry] {
         self.logs.get(&self.key()).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    /// Transient notices for the active view.
+    pub fn notices(&self) -> &[Entry] {
+        self.notices
+            .get(&self.key())
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// Everything shown in the body, in render order: feed, then notices.
+    #[cfg(test)]
+    pub fn current_log(&self) -> Vec<Entry> {
+        self.feed().iter().chain(self.notices()).cloned().collect()
+    }
+
     fn push_to(&mut self, key: &str, e: Entry) {
-        self.logs.entry(key.to_string()).or_default().push(e);
+        const MAX_NOTICES: usize = 50;
+        let n = self.notices.entry(key.to_string()).or_default();
+        n.push(e);
+        if n.len() > MAX_NOTICES {
+            n.drain(..n.len() - MAX_NOTICES);
+        }
         if key == self.key() {
             self.scroll = 0;
         }
@@ -1131,12 +1167,6 @@ impl App {
     }
     pub fn error(&mut self, t: String) {
         self.push(EntryKind::Error, t);
-    }
-
-    pub fn clear_current(&mut self) {
-        let k = self.key();
-        self.logs.insert(k, vec![]);
-        self.scroll = 0;
     }
 
     // ------------------------------------------------------------ input
@@ -1254,8 +1284,11 @@ impl App {
         };
         if let Err(e) = self.store.append_message(&bot, &mine) {
             self.error(format!("Could not save message: {e:#}"));
+            return;
         }
-        self.push(EntryKind::User, text.clone());
+        // Optimistic UX without a second source: the pending row is in SQLite, so
+        // rebuilding from it shows the message immediately.
+        self.reload_bot_log(&bot);
         let epoch = self.epoch;
         self.spawn(async move {
             let result = api.send(&bot, &text, &nonce).await;
@@ -1362,6 +1395,73 @@ pub mod tests {
         }
         assert_eq!(app.poll.next, next);
         assert!(UI_TICK < POLL_FAST);
+    }
+
+    #[test]
+    fn feed_is_rebuilt_from_db_and_notices_stay_separate() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "tok");
+        let bot = app.active_bot().unwrap().id.clone();
+        type_line(&mut app, "hi from tui");
+        // Appears immediately, and only because it is in SQLite.
+        let db: Vec<String> = app
+            .store
+            .messages(&bot)
+            .unwrap()
+            .iter()
+            .map(|m| m.text.clone())
+            .collect();
+        let feed: Vec<String> = app.feed().iter().map(|e| e.text.clone()).collect();
+        assert_eq!(feed, db);
+        assert!(feed.contains(&"hi from tui".to_string()));
+        // Notices never enter the feed or the DB.
+        type_line(&mut app, "/whoami");
+        assert!(!app.notices().is_empty());
+        assert_eq!(app.feed().len(), db.len());
+        assert!(
+            app.store
+                .messages(&bot)
+                .unwrap()
+                .iter()
+                .all(|m| !m.text.contains("account:"))
+        );
+        settle(&mut app);
+        let db: Vec<String> = app
+            .store
+            .messages(&bot)
+            .unwrap()
+            .iter()
+            .map(|m| m.text.clone())
+            .collect();
+        let feed: Vec<String> = app.feed().iter().map(|e| e.text.clone()).collect();
+        assert_eq!(feed, db);
+    }
+
+    #[test]
+    fn help_search_in_modal() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        type_line(&mut app, "/help keyring");
+        let m = app.help.as_ref().unwrap();
+        assert!(m.page.id.starts_with("search"));
+        assert!(m.page.related.contains(&"login-desktop".to_string()));
+        app.help_search_start();
+        app.help
+            .as_mut()
+            .unwrap()
+            .query
+            .as_mut()
+            .unwrap()
+            .push_str("polls");
+        app.help_search_submit();
+        let m = app.help.as_ref().unwrap();
+        assert!(m.page.related.contains(&"sync".to_string()));
+        let first = m.page.related[0].clone();
+        app.help_follow();
+        assert_eq!(app.help.as_ref().unwrap().page.id, first);
+        app.help_back();
+        assert!(app.help.as_ref().unwrap().page.id.starts_with("search"));
     }
 
     #[test]
@@ -1581,8 +1681,6 @@ pub mod tests {
         );
         type_line(&mut app, "/memory clear");
         assert!(app.store.list_memory("scribe").unwrap().is_empty());
-        type_line(&mut app, "/clear saved");
-        assert!(app.store.messages("scribe").unwrap().is_empty());
         type_line(&mut app, "/prefs bogus");
         assert_eq!(app.current_log().last().unwrap().kind, EntryKind::Error);
     }

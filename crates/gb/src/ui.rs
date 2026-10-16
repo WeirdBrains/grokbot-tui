@@ -98,11 +98,25 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Body
     let bot_name = app.active_bot().map(|b| b.name.clone());
+    // Chat feed (from SQLite), then transient notices in their own section.
     let mut lines: Vec<Line> = app
-        .current_log()
+        .feed()
         .iter()
         .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref()))
         .collect();
+    if !app.notices().is_empty() {
+        if !lines.is_empty() {
+            lines.push(Line::styled(
+                "── notices (not saved) ──",
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+        lines.extend(
+            app.notices()
+                .iter()
+                .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref())),
+        );
+    }
     if lines.is_empty() {
         lines = empty_state(app)
             .into_iter()
@@ -285,7 +299,10 @@ fn draw_help(f: &mut Frame, app: &mut App) {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::Yellow))
-                    .title(" Tab/←→ select · Enter open "),
+                    .title(match &m.query {
+                        Some(q) => format!(" Search: {q}▏ (Enter run · Esc cancel) "),
+                        None => " Tab/←→ select · Enter open · / search ".into(),
+                    }),
             ),
         links_area,
     );

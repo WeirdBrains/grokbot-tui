@@ -76,7 +76,6 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 50 entries):
 | `/account remove <alias>` | Delete an account and all its data; you confirm by typing the alias (the active account can't be removed) |
 | `/prefs` (`/pref`) | List preferences; `/prefs get <key>`, `/prefs set <key> <value>` |
 | `/memory` (`/mem`) | The active bot's local memory notes; `/memory add <key> <value>`, `/memory clear [key]` |
-| `/clear [saved]` | Clear the body; with `saved`, also delete the bot's stored transcript |
 | `/quit` (`/q`, `/exit`) | Exit |
 
 Commands live in a registry in `crates/gb/src/commands.rs`.
@@ -211,5 +210,16 @@ Press **F1** (or **?** on an empty input) or type `/help`. Help opens in a scrol
 popup and is never written to chat history. Topics: `login`, `login desktop`
 (recommended), `login cursor`, `login gateway`, `keys`, `accounts`, `prefs`, `env`,
 `sync`, `delivery`, `troubleshooting`, plus `/help <command>`. Each page lists related
-topics; Tab/←→ selects one, Enter opens it, Backspace goes back, Esc closes. A bare
+topics; Tab/←→ selects one, Enter opens it, Backspace goes back, Esc closes.
+`/help <keyword>` (or `/` inside the help window) searches every topic and command
+page and lists matches with a snippet; pick one with Tab/←→ and Enter. A bare
 `/login` opens the login help. Mistyped commands get a "did you mean" suggestion.
+
+## Chat feed and the database
+
+SQLite (`~/.gb/context.db`) is the single source of truth for the chat feed. The body
+is always rebuilt from `store.messages(bot)`: polled messages and bot replies are merged
+into the DB first, and your own message is written as a pending row and the feed is
+rebuilt immediately (so it still appears instantly). Notices — command echoes, info,
+errors, delivery warnings — are transient: they are kept in memory per bot, shown in a
+separate "notices (not saved)" section below the chat, and never written to the DB.
