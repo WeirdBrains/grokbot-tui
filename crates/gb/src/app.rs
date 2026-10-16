@@ -197,6 +197,72 @@ pub struct HelpModal {
     pub query: Option<String>,
 }
 
+/// Result of a `/shell` command.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShellOutput {
+    /// Combined stdout then stderr, capped to [`SHELL_MAX_LINES`] / [`SHELL_MAX_BYTES`].
+    pub text: String,
+    pub truncated: bool,
+    /// `None` if killed by a signal.
+    pub code: Option<i32>,
+}
+
+pub const SHELL_MAX_LINES: usize = 500;
+pub const SHELL_MAX_BYTES: usize = 64 * 1024;
+pub const SHELL_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Run `cmd` with `$SHELL -c` (fallback `sh`), capturing stdout+stderr and exit code.
+pub async fn run_shell(cmd: &str) -> std::result::Result<ShellOutput, String> {
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "sh".into());
+    let child = tokio::process::Command::new(&shell)
+        .arg("-c")
+        .arg(cmd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("could not start {shell}: {e}"))?;
+    let out = tokio::time::timeout(SHELL_TIMEOUT, child.wait_with_output())
+        .await
+        .map_err(|_| format!("timed out after {}s (killed)", SHELL_TIMEOUT.as_secs()))?
+        .map_err(|e| format!("failed: {e}"))?;
+    let mut all = String::from_utf8_lossy(&out.stdout).into_owned();
+    let err = String::from_utf8_lossy(&out.stderr);
+    if !err.is_empty() {
+        if !all.is_empty() && !all.ends_with('\n') {
+            all.push('\n');
+        }
+        all.push_str(&err);
+    }
+    let (text, truncated) = cap_output(&grokbot_api::sanitize_text(&all));
+    Ok(ShellOutput {
+        text,
+        truncated,
+        code: out.status.code(),
+    })
+}
+
+/// Keep the first [`SHELL_MAX_LINES`] lines and at most [`SHELL_MAX_BYTES`] bytes.
+pub fn cap_output(s: &str) -> (String, bool) {
+    let mut out = String::new();
+    let mut truncated = false;
+    for (n, line) in s.lines().enumerate() {
+        if n >= SHELL_MAX_LINES || out.len() + line.len() + 1 > SHELL_MAX_BYTES {
+            truncated = true;
+            break;
+        }
+        if n > 0 {
+            out.push('\n');
+        }
+        out.push_str(line);
+    }
+    (out, truncated)
+}
+
 pub enum Event {
     Login {
         epoch: u64,
@@ -228,6 +294,11 @@ pub enum Event {
     DesktopChoices {
         epoch: u64,
         choices: Vec<(String, String)>,
+    },
+    /// `/shell` finished (output is a transient notice, never chat or gateway).
+    Shell {
+        cmd: String,
+        result: std::result::Result<ShellOutput, String>,
     },
     /// `/bot new` finished.
     BotCreated { epoch: u64, result: gw::Result<Bot> },
@@ -626,6 +697,34 @@ impl App {
                     }
                 }
             }
+            Event::Shell { cmd, result } => match result {
+                Ok(o) => {
+                    let status = match o.code {
+                        Some(0) => "exit 0".to_string(),
+                        Some(127) => "exit 127 (command not found?)".to_string(),
+                        Some(c) => format!("exit {c}"),
+                        None => "killed by signal".to_string(),
+                    };
+                    let mut t = format!("$ {cmd}");
+                    if !o.text.is_empty() {
+                        t.push('\n');
+                        t.push_str(&o.text);
+                    }
+                    if o.truncated {
+                        t.push_str(&format!(
+                            "\n… output truncated (first {SHELL_MAX_LINES} lines / {} KB)",
+                            SHELL_MAX_BYTES / 1024
+                        ));
+                    }
+                    t.push_str(&format!("\n[{status}]"));
+                    if o.code == Some(0) {
+                        self.info(t);
+                    } else {
+                        self.error(t);
+                    }
+                }
+                Err(e) => self.error(format!("$ {cmd}\n[shell error: {e}]")),
+            },
             Event::BotCreated { epoch, result } => {
                 if epoch != self.epoch {
                     return;
@@ -1198,6 +1297,16 @@ impl App {
                 announce,
                 result,
             }
+        });
+    }
+
+    /// `/shell <cmd>`: run locally off the UI thread; output arrives as a notice.
+    pub fn run_shell_command(&mut self, cmd: &str) {
+        let cmd = cmd.trim().to_string();
+        self.info(format!("$ {cmd}  (running…)"));
+        self.spawn(async move {
+            let result = run_shell(&cmd).await;
+            Event::Shell { cmd, result }
         });
     }
 
@@ -2055,6 +2164,47 @@ pub mod tests {
         p.cursor = w;
         app.picker_confirm();
         assert_eq!(app.account().alias, "work");
+    }
+
+    #[test]
+    fn shell_echo_shows_output_as_notice_not_chat() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "tok");
+        let before = app.feed().len();
+        type_line(&mut app, "/shell echo hi");
+        settle(&mut app);
+        let t = texts(&app).join("\n");
+        assert!(t.contains("$ echo hi\nhi\n[exit 0]"), "{t}");
+        assert_eq!(app.feed().len(), before, "not stored as chat");
+
+        type_line(&mut app, "/shell echo oops >&2; exit 3");
+        settle(&mut app);
+        let t = texts(&app).join("\n");
+        assert!(t.contains("oops\n[exit 3]"), "{t}");
+
+        type_line(&mut app, "/shell definitely-not-a-command-xyz");
+        settle(&mut app);
+        assert!(
+            texts(&app)
+                .join("\n")
+                .contains("[exit 127 (command not found?)]")
+        );
+
+        type_line(&mut app, "/shell");
+        assert!(texts(&app).join("\n").contains("Usage: /shell"));
+    }
+
+    #[test]
+    fn shell_output_is_capped() {
+        let big = (0..2000)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (t, trunc) = cap_output(&big);
+        assert!(trunc);
+        assert_eq!(t.lines().count(), SHELL_MAX_LINES);
+        assert_eq!(cap_output("a\nb"), ("a\nb".into(), false));
     }
 
     #[test]

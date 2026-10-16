@@ -405,6 +405,16 @@ fn command_extra(
             ],
             &["sync", "keys"],
         ),
+        "shell" => (
+            "Run a command on THIS machine with $SHELL -c (sh if unset) and show its output.\n\
+             Output (stdout, then stderr) and the exit code appear as a local notice in the\n\
+             chat area; it is never sent to the bot or saved to chat history. Runs in the\n\
+             background so the UI stays responsive. No stdin (interactive programs won't work);\n\
+             killed after 120s; output capped at 500 lines / 64 KB (scroll with PgUp/PgDn).\n\
+             Nonzero exits are shown in red; exit 127 usually means command not found.",
+            &["/shell ls -la", "/shell git status", "/sh uptime"],
+            &["keys"],
+        ),
         "history" => (
             "Reload the active bot's full transcript from the gateway.",
             &["/history"],

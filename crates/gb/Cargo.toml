@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 grokbot_api = { path = "../grokbot_api", features = ["desktop-session"] }
 ratatui = { version = "0.29", features = ["unstable-rendered-line-info"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "process"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }

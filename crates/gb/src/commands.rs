@@ -72,6 +72,13 @@ pub fn registry() -> Registry {
                 run: bot,
             },
             Command {
+                name: "shell",
+                aliases: &["sh"],
+                usage: "/shell <command>",
+                help: "Run a local shell command and show its output (not sent to the bot)",
+                run: shell,
+            },
+            Command {
                 name: "history",
                 aliases: &[],
                 usage: "/history",
@@ -277,6 +284,14 @@ fn bot(app: &mut App, args: &str) -> Result<()> {
         }
         None => bail!("No bot named {args}. Try /bots, or /bot new {args} to create it."),
     }
+}
+
+fn shell(app: &mut App, args: &str) -> Result<()> {
+    if args.trim().is_empty() {
+        bail!("Usage: /shell <command>   e.g. /shell ls -la");
+    }
+    app.run_shell_command(args);
+    Ok(())
 }
 
 fn history(app: &mut App, _: &str) -> Result<()> {
