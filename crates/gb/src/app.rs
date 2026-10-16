@@ -22,6 +22,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 /// Poll interval right after a send / while waiting for a reply.
+/// Max wait of the UI event loop between redraws. Purely local: gateway polling is
+/// gated separately by `poll.next` (POLL_IDLE / POLL_FAST / backoff), so a faster UI
+/// tick never causes extra API calls.
+pub const UI_TICK: Duration = Duration::from_millis(120);
 pub const POLL_FAST: Duration = Duration::from_millis(1500);
 /// Ceiling while waiting for a reply.
 pub const POLL_AWAIT_MAX: Duration = Duration::from_secs(8);
@@ -1341,6 +1345,23 @@ pub mod tests {
 
     fn texts(app: &App) -> Vec<String> {
         app.current_log().iter().map(|e| e.text.clone()).collect()
+    }
+
+    #[test]
+    fn ui_ticks_do_not_trigger_extra_gateway_polls() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "tok");
+        settle(&mut app);
+        assert!(app.active_bot().is_some());
+        app.poll.next = Instant::now() + POLL_IDLE;
+        let next = app.poll.next;
+        for _ in 0..20 {
+            app.tick();
+            assert!(!app.poll.inflight, "UI tick started a gateway poll early");
+        }
+        assert_eq!(app.poll.next, next);
+        assert!(UI_TICK < POLL_FAST);
     }
 
     #[test]

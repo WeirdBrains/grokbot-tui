@@ -15,7 +15,6 @@ use ratatui::crossterm::event::{
     MouseButton, MouseEventKind,
 };
 use ratatui::crossterm::execute;
-use std::time::Duration;
 use storage::Store;
 
 #[derive(Parser)]
@@ -57,7 +56,7 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     while !app.should_quit {
         app.tick();
         term.draw(|f| ui::draw(f, app))?;
-        if !event::poll(Duration::from_millis(100))? {
+        if !event::poll(app::UI_TICK)? {
             continue;
         }
         match event::read()? {
