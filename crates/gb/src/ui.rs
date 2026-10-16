@@ -454,6 +454,21 @@ fn draw_help(f: &mut Frame, app: &mut App) {
     );
 }
 
+/// Your message as a clean block: wrapped to `max`, every line padded to the longest
+/// line's width so the block's left and right edges are straight when right-aligned.
+pub fn bubble_block(text: &str, max: usize) -> Vec<String> {
+    use unicode_width::UnicodeWidthStr;
+    let lines = wrap_text(text, max);
+    let bw = lines.iter().map(|l| l.width()).max().unwrap_or(0);
+    lines
+        .into_iter()
+        .map(|l| {
+            let pad = bw - l.width();
+            l + &" ".repeat(pad)
+        })
+        .collect()
+}
+
 /// Lines for one entry. In the chat feed (`feed`), the user's own messages are
 /// right-aligned like a typical chat UI; everything else stays left-aligned.
 /// Widest a chat message's text may be: 2/3 of the chat body's inner width.
@@ -517,7 +532,7 @@ fn entry_lines<'a>(
                 .alignment(Alignment::Right),
         ];
         out.extend(
-            wrap_text(text, max)
+            bubble_block(text, max)
                 .into_iter()
                 .map(|l| Line::from(Span::styled(l, style)).alignment(Alignment::Right)),
         );
@@ -657,6 +672,23 @@ mod tests {
     }
 
     #[test]
+    fn user_bubble_is_a_clean_block() {
+        let b = bubble_block("the quick brown fox jumps over the lazy dog again", 16);
+        assert!(b.len() > 2);
+        let w = b[0].len();
+        assert!(w <= 16);
+        assert!(
+            b.iter().all(|l| l.len() == w),
+            "all lines same width: {b:?}"
+        );
+        assert_eq!(
+            b.iter().map(|l| l.trim_end()).collect::<Vec<_>>().join(" "),
+            "the quick brown fox jumps over the lazy dog again"
+        );
+        assert_eq!(bubble_block("hi", 16), vec!["hi"]);
+    }
+
+    #[test]
     fn chat_bubbles_wrap_within_two_thirds() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = crate::app::tests::test_app(&rt);
@@ -709,6 +741,24 @@ mod tests {
             }
         }
         assert!(msg_rows >= 8, "long messages wrapped onto several rows");
+        // Your message rows (right-aligned) all start at the same column: a clean block.
+        let mut user_starts = vec![];
+        for y in 0..b.area.height {
+            let row: String = (inner_x..inner_x + inner_w as u16)
+                .map(|x| b[(x, y)].symbol())
+                .collect();
+            if let Some(f) = row.find(|c: char| c != ' ')
+                && f > inner_w / 4
+                && !row.contains("you")
+            {
+                user_starts.push(f);
+            }
+        }
+        assert!(user_starts.len() >= 3, "{user_starts:?}");
+        assert!(
+            user_starts.windows(2).all(|w| w[0] == w[1]),
+            "jagged: {user_starts:?}"
+        );
         // Some user rows end flush right.
         let right_flush = (0..b.area.height).any(|y| {
             let c = b[(inner_x + inner_w as u16 - 1, y)].symbol();

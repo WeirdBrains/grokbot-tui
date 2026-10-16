@@ -48,25 +48,9 @@ fn main() -> Result<()> {
 
     let mut term = ratatui::init();
     execute!(std::io::stdout(), EnableMouseCapture)?;
-    // Ask the terminal to report modifiers on Enter so Shift-Enter is distinct (kitty
-    // keyboard protocol). Terminals without it fall back to Alt-Enter / Ctrl-J.
-    let enhanced = matches!(
-        ratatui::crossterm::terminal::supports_keyboard_enhancement(),
-        Ok(true)
-    ) && execute!(
-        std::io::stdout(),
-        ratatui::crossterm::event::PushKeyboardEnhancementFlags(
-            ratatui::crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-        )
-    )
-    .is_ok();
+    enable_shift_enter();
     let res = run(&mut term, &mut app);
-    if enhanced {
-        let _ = execute!(
-            std::io::stdout(),
-            ratatui::crossterm::event::PopKeyboardEnhancementFlags
-        );
-    }
+    disable_shift_enter();
     let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     res
@@ -252,6 +236,37 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// xterm modifyOtherKeys level 1 on / reset. Level 1 only re-encodes keys with no
+/// standard sequence (like Shift-Enter), so Ctrl-C / Ctrl-J are untouched. This lets
+/// tmux (`extended-keys on`, `extended-keys-format csi-u`) forward Shift-Enter as
+/// `CSI 13;2u`, which crossterm parses. (Level 2 would re-encode Ctrl+letters too.)
+const MODIFY_OTHER_KEYS_ON: &str = "\x1b[>4;1m";
+const MODIFY_OTHER_KEYS_OFF: &str = "\x1b[>4m";
+
+/// Ask the terminal to report modifiers on Enter so Shift-Enter can be told apart.
+/// Both requests are sent unconditionally: the kitty "supports?" query fails behind
+/// tmux/screen even when the outer terminal could help, and terminals ignore requests
+/// they don't understand. Alt-Enter and Ctrl-J always work as fallbacks.
+fn enable_shift_enter() {
+    use ratatui::crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    let _ = execute!(
+        out,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    );
+    let _ = out.write_all(MODIFY_OTHER_KEYS_ON.as_bytes());
+    let _ = out.flush();
+}
+
+fn disable_shift_enter() {
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    let _ = out.write_all(MODIFY_OTHER_KEYS_OFF.as_bytes());
+    let _ = execute!(out, ratatui::crossterm::event::PopKeyboardEnhancementFlags);
+    let _ = out.flush();
 }
 
 /// Shift-Enter (needs keyboard enhancement) or Alt-Enter (works everywhere) inserts a newline.

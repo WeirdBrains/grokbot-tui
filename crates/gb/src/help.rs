@@ -182,6 +182,11 @@ Input focused (multi-line)
   Shift-Enter               New line (terminals with the kitty keyboard protocol:
                             kitty, WezTerm, foot, Ghostty, recent Alacritty/iTerm2)
   Alt-Enter or Ctrl-J       New line (fallback that works in any terminal)
+                            GNOME Console/Terminal (VTE), Konsole and most others send
+                            Shift-Enter as plain Enter: use Ctrl-J or Alt-Enter there.
+                            In tmux, add `set -s extended-keys on` and
+                            `set -s extended-keys-format csi-u` (tmux 3.5+), and use an
+                            outer terminal that sends Shift-Enter distinctly.
   ← → / Home End            Move the cursor / to the start or end of the line
   ↑ / ↓                     Previous / next line; on the first / last line, scroll the chat
   Backspace / Delete        Delete before / at the cursor
