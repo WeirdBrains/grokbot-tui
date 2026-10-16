@@ -23,6 +23,12 @@ gb --account work                # start in an account (or GB_ACCOUNT=work gb)
 
 In mock mode any token logs in except `bad`. Sending `reject` simulates a 4xx and `unknown` simulates a 5xx after the prompt has landed.
 
+> **Shell alias conflict.** Many setups define `alias gb='git branch'`, which shadows
+> `~/.cargo/bin/gb`. If you see `fatal: not a git repository` when running `gb`, that is
+> git — not this app (gb never invokes `git` at runtime). Check with `type -a gb`, then
+> `unalias gb` (and remove the alias from your shell rc), or run `~/.cargo/bin/gb` directly.
+
+
 ## Layout
 
 ```
