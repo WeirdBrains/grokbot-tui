@@ -207,6 +207,60 @@ pub struct ShellOutput {
     pub code: Option<i32>,
 }
 
+/// The `/shell` output popup.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShellModal {
+    pub id: u64,
+    pub cmd: String,
+    /// `None` while running.
+    pub result: Option<std::result::Result<ShellOutput, String>>,
+    pub scroll: u16,
+}
+
+impl ShellModal {
+    pub fn running(&self) -> bool {
+        self.result.is_none()
+    }
+    /// Body text: command line, output, then exit status.
+    pub fn body(&self) -> String {
+        let mut t = format!("$ {}\n", self.cmd);
+        match &self.result {
+            None => t.push_str("\nrunning…"),
+            Some(Err(e)) => t.push_str(&format!("\n[shell error: {e}]")),
+            Some(Ok(o)) => {
+                if !o.text.is_empty() {
+                    t.push_str(&o.text);
+                    t.push('\n');
+                }
+                if o.truncated {
+                    t.push_str(&format!(
+                        "… output truncated (first {SHELL_MAX_LINES} lines / {} KB)\n",
+                        SHELL_MAX_BYTES / 1024
+                    ));
+                }
+                t.push_str(&format!("\n[{}]", shell_status(o.code)));
+            }
+        }
+        t
+    }
+    /// Whether the finished command failed (for styling).
+    pub fn failed(&self) -> bool {
+        !matches!(
+            &self.result,
+            None | Some(Ok(ShellOutput { code: Some(0), .. }))
+        )
+    }
+}
+
+pub fn shell_status(code: Option<i32>) -> String {
+    match code {
+        Some(0) => "exit 0".into(),
+        Some(127) => "exit 127 (command not found?)".into(),
+        Some(c) => format!("exit {c}"),
+        None => "killed by signal".into(),
+    }
+}
+
 pub const SHELL_MAX_LINES: usize = 500;
 pub const SHELL_MAX_BYTES: usize = 64 * 1024;
 pub const SHELL_TIMEOUT: Duration = Duration::from_secs(120);
@@ -295,8 +349,9 @@ pub enum Event {
         epoch: u64,
         choices: Vec<(String, String)>,
     },
-    /// `/shell` finished (output is a transient notice, never chat or gateway).
+    /// `/shell` finished (shown in the shell modal; never chat or gateway).
     Shell {
+        id: u64,
         cmd: String,
         result: std::result::Result<ShellOutput, String>,
     },
@@ -376,6 +431,9 @@ pub struct App {
     pub desktop_lister: DesktopLister,
     /// Open help modal (never part of chat history).
     pub help: Option<HelpModal>,
+    /// `/shell` output popup.
+    pub shell: Option<ShellModal>,
+    shell_seq: u64,
     /// Open selection modal (bots, accounts, …).
     pub picker: Option<crate::picker::Picker>,
     /// Where `opts.client_version` came from.
@@ -486,6 +544,8 @@ impl App {
             desktop_reader: real_desktop_reader(),
             desktop_lister: real_desktop_lister(),
             help: None,
+            shell: None,
+            shell_seq: 0,
             picker: None,
             client_version_source,
             desktop_reread_tried: false,
@@ -697,33 +757,18 @@ impl App {
                     }
                 }
             }
-            Event::Shell { cmd, result } => match result {
-                Ok(o) => {
-                    let status = match o.code {
-                        Some(0) => "exit 0".to_string(),
-                        Some(127) => "exit 127 (command not found?)".to_string(),
-                        Some(c) => format!("exit {c}"),
-                        None => "killed by signal".to_string(),
-                    };
-                    let mut t = format!("$ {cmd}");
-                    if !o.text.is_empty() {
-                        t.push('\n');
-                        t.push_str(&o.text);
-                    }
-                    if o.truncated {
-                        t.push_str(&format!(
-                            "\n… output truncated (first {SHELL_MAX_LINES} lines / {} KB)",
-                            SHELL_MAX_BYTES / 1024
-                        ));
-                    }
-                    t.push_str(&format!("\n[{status}]"));
-                    if o.code == Some(0) {
-                        self.info(t);
-                    } else {
-                        self.error(t);
-                    }
+            Event::Shell { id, cmd, result } => match &mut self.shell {
+                Some(m) if m.id == id => {
+                    m.result = Some(result);
                 }
-                Err(e) => self.error(format!("$ {cmd}\n[shell error: {e}]")),
+                _ => {
+                    // Modal was closed while running: just note the outcome.
+                    let how = match &result {
+                        Ok(o) => shell_status(o.code),
+                        Err(e) => format!("error: {e}"),
+                    };
+                    self.info(format!("/shell {cmd} finished ({how}); output was closed."));
+                }
             },
             Event::BotCreated { epoch, result } => {
                 if epoch != self.epoch {
@@ -1300,14 +1345,33 @@ impl App {
         });
     }
 
-    /// `/shell <cmd>`: run locally off the UI thread; output arrives as a notice.
+    /// `/shell <cmd>`: run locally off the UI thread; output goes to the shell modal.
+    /// Purely local: no gateway call, nothing stored as chat.
     pub fn run_shell_command(&mut self, cmd: &str) {
         let cmd = cmd.trim().to_string();
-        self.info(format!("$ {cmd}  (running…)"));
+        self.shell_seq += 1;
+        let id = self.shell_seq;
+        self.help = None;
+        self.shell = Some(ShellModal {
+            id,
+            cmd: cmd.clone(),
+            result: None,
+            scroll: 0,
+        });
         self.spawn(async move {
             let result = run_shell(&cmd).await;
-            Event::Shell { cmd, result }
+            Event::Shell { id, cmd, result }
         });
+    }
+
+    pub fn close_shell(&mut self) {
+        self.shell = None;
+    }
+
+    pub fn shell_scroll(&mut self, delta: i32) {
+        if let Some(m) = &mut self.shell {
+            m.scroll = (m.scroll as i32 + delta).max(0) as u16;
+        }
     }
 
     /// `/bot new <name>`: create on the gateway, then select it.
@@ -1778,7 +1842,9 @@ impl App {
                 Some(cmd) => {
                     let run = cmd.run;
                     // Help opens a modal; don't echo it into the chat.
-                    if cmd.name != "help" && !(cmd.name == "login" && args.trim().is_empty()) {
+                    if !matches!(cmd.name, "help" | "shell")
+                        && !(cmd.name == "login" && args.trim().is_empty())
+                    {
                         self.push(EntryKind::User, trimmed.clone());
                     }
                     if let Err(e) = run(self, args.trim()) {
@@ -2167,32 +2233,96 @@ pub mod tests {
     }
 
     #[test]
-    fn shell_echo_shows_output_as_notice_not_chat() {
+    fn shell_shows_output_in_modal_not_chat() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = test_app(&rt);
         mock_login(&mut app, "tok");
         let before = app.feed().len();
+        let log_before = texts(&app);
         type_line(&mut app, "/shell echo hi");
+        let m = app.shell.as_ref().expect("modal opens immediately");
+        assert!(m.running() && m.body().contains("running…"));
         settle(&mut app);
-        let t = texts(&app).join("\n");
-        assert!(t.contains("$ echo hi\nhi\n[exit 0]"), "{t}");
+        let m = app.shell.as_ref().unwrap();
+        assert_eq!(m.body(), "$ echo hi\nhi\n\n[exit 0]");
+        assert!(!m.failed());
         assert_eq!(app.feed().len(), before, "not stored as chat");
+        assert_eq!(texts(&app), log_before, "nothing echoed to chat/notices");
+        app.shell_scroll(5);
+        app.shell_scroll(-10);
+        assert_eq!(app.shell.as_ref().unwrap().scroll, 0);
+        app.close_shell();
+        assert!(app.shell.is_none());
 
         type_line(&mut app, "/shell echo oops >&2; exit 3");
         settle(&mut app);
-        let t = texts(&app).join("\n");
-        assert!(t.contains("oops\n[exit 3]"), "{t}");
+        let m = app.shell.as_ref().unwrap();
+        assert!(m.body().contains("oops\n\n[exit 3]"), "{}", m.body());
+        assert!(m.failed());
 
         type_line(&mut app, "/shell definitely-not-a-command-xyz");
         settle(&mut app);
         assert!(
-            texts(&app)
-                .join("\n")
+            app.shell
+                .as_ref()
+                .unwrap()
+                .body()
                 .contains("[exit 127 (command not found?)]")
         );
 
+        app.close_shell();
         type_line(&mut app, "/shell");
+        assert!(app.shell.is_none());
         assert!(texts(&app).join("\n").contains("Usage: /shell"));
+    }
+
+    #[test]
+    fn shell_never_calls_the_gateway() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let server = rt.block_on(MockServer::start());
+        let uri = server.uri();
+        rt.block_on(async {
+            Mock::given(path("/api/listAgents"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(json!([{"id": "a1", "name": "A"}])),
+                )
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/getAgentTranscriptTail"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"entries": []})))
+                .mount(&server)
+                .await;
+        });
+        let (mut app, _d) = real_app(&rt, &server);
+        let (reader, _calls) = fake_reader(move |_, _| {
+            Ok((
+                gw::desktop::DesktopCredential::Session(Session::new(uri.clone(), "d1")),
+                Some("sandacct".into()),
+            ))
+        });
+        app.desktop_reader = reader;
+        type_line(&mut app, "/login desktop");
+        settle(&mut app);
+        assert!(app.active_bot().is_some());
+        // Only count requests made by /shell.
+        rt.block_on(server.reset());
+        rt.block_on(async {
+            Mock::given(path("/api/sendPrompt"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"accepted": true})))
+                .expect(0)
+                .mount(&server)
+                .await;
+        });
+        type_line(&mut app, "/shell echo hi");
+        type_line(&mut app, "/sh echo again");
+        settle(&mut app);
+        assert!(app.shell.as_ref().unwrap().body().contains("again"));
+        let reqs = rt.block_on(server.received_requests()).unwrap();
+        assert!(
+            !reqs.iter().any(|r| r.url.path().ends_with("/sendPrompt")),
+            "no sendPrompt from /shell"
+        );
+        rt.block_on(server.verify());
     }
 
     #[test]

@@ -198,6 +198,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     );
     if app.picker.is_some() {
         draw_picker(f, app);
+    } else if app.shell.is_some() {
+        draw_shell(f, app);
     } else if app.help.is_some() {
         draw_help(f, app);
     } else if app.focus == Focus::Input {
@@ -317,6 +319,44 @@ fn draw_picker(f: &mut Frame, app: &mut App) {
 }
 
 /// The help modal: bordered popup, distinct colours, related links at the bottom.
+fn draw_shell(f: &mut Frame, app: &mut App) {
+    let Some(m) = &mut app.shell else { return };
+    let area = centered(f.area(), 85, 85);
+    let body = m.body();
+    let inner_w = area.width.saturating_sub(2).max(1);
+    let total = Paragraph::new(body.as_str())
+        .wrap(Wrap { trim: false })
+        .line_count(inner_w);
+    let max = (total as u16).saturating_sub(area.height.saturating_sub(2));
+    m.scroll = m.scroll.min(max);
+    let border = if m.running() {
+        Color::Yellow
+    } else if m.failed() {
+        Color::Red
+    } else {
+        Color::Green
+    };
+    let state = if m.running() { " · running…" } else { "" };
+    f.render_widget(Clear, area);
+    f.render_widget(
+        Paragraph::new(body.as_str())
+            .wrap(Wrap { trim: false })
+            .scroll((m.scroll, 0))
+            .style(Style::default().bg(Color::Black).fg(Color::White))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(border))
+                    .title(Span::styled(
+                        format!(" Shell (local){state} "),
+                        Style::default().fg(border).add_modifier(Modifier::BOLD),
+                    ))
+                    .title_bottom(" ↑↓ PgUp/PgDn wheel scroll · Esc/q close "),
+            ),
+        area,
+    );
+}
+
 fn draw_help(f: &mut Frame, app: &mut App) {
     let Some(m) = &mut app.help else { return };
     let area = centered(f.area(), 80, 85);
@@ -446,6 +486,30 @@ mod tests {
         assert!(text.contains("bot: Helper"));
         assert!(text.contains("Coder"));
         assert_eq!(app.sidebar_area.width, 24);
+    }
+
+    #[test]
+    fn shell_modal_renders() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        app.shell = Some(crate::app::ShellModal {
+            id: 1,
+            cmd: "echo hi".into(),
+            result: None,
+            scroll: 0,
+        });
+        let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let screen: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(screen.contains("Shell (local)"));
+        assert!(screen.contains("$ echo hi"));
+        assert!(screen.contains("running…"));
     }
 
     #[test]

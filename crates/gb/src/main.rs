@@ -90,6 +90,19 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     app.open_account_picker();
                     continue;
                 }
+                if app.shell.is_some() {
+                    match k.code {
+                        KeyCode::Esc | KeyCode::Char('q') => app.close_shell(),
+                        KeyCode::Up | KeyCode::Char('k') => app.shell_scroll(-1),
+                        KeyCode::Down | KeyCode::Char('j') => app.shell_scroll(1),
+                        KeyCode::PageUp => app.shell_scroll(-10),
+                        KeyCode::PageDown | KeyCode::Char(' ') => app.shell_scroll(10),
+                        KeyCode::Home => app.shell_scroll(-100_000),
+                        KeyCode::End => app.shell_scroll(100_000),
+                        _ => {}
+                    }
+                    continue;
+                }
                 if app.help.as_ref().is_some_and(|m| m.query.is_some()) {
                     let q = app.help.as_mut().and_then(|m| m.query.as_mut()).unwrap();
                     match k.code {
@@ -188,6 +201,9 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                 }
             }
             Event::Mouse(m) => match m.kind {
+                MouseEventKind::ScrollUp if app.shell.is_some() => app.shell_scroll(-3),
+                MouseEventKind::ScrollDown if app.shell.is_some() => app.shell_scroll(3),
+                MouseEventKind::Down(MouseButton::Left) if app.shell.is_some() => {}
                 MouseEventKind::Down(MouseButton::Left) if app.help.is_none() => {
                     app.click(m.column, m.row)
                 }

@@ -406,12 +406,14 @@ fn command_extra(
             &["sync", "keys"],
         ),
         "shell" => (
-            "Run a command on THIS machine with $SHELL -c (sh if unset) and show its output.\n\
-             Output (stdout, then stderr) and the exit code appear as a local notice in the\n\
-             chat area; it is never sent to the bot or saved to chat history. Runs in the\n\
-             background so the UI stays responsive. No stdin (interactive programs won't work);\n\
-             killed after 120s; output capped at 500 lines / 64 KB (scroll with PgUp/PgDn).\n\
-             Nonzero exits are shown in red; exit 127 usually means command not found.",
+            "Run a command on THIS machine with $SHELL -c (sh if unset). Purely local:\n\
+             nothing is sent to the bot/gateway and nothing is saved to chat history.\n\
+             Output opens in a popup: the command line, stdout then stderr, and the exit\n\
+             code. It shows 'running…' until the command finishes (the UI stays usable).\n\
+             Scroll with ↑/↓, PgUp/PgDn, Home/End or the mouse wheel; Esc or q closes.\n\
+             No stdin (interactive programs won't work); killed after 120s; output capped\n\
+             at 500 lines / 64 KB. Red border = nonzero exit; exit 127 usually means\n\
+             command not found.",
             &["/shell ls -la", "/shell git status", "/sh uptime"],
             &["keys"],
         ),
