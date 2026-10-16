@@ -252,7 +252,7 @@ pub struct App {
     /// Saved login restore failed for a non-auth reason: retry at this time.
     login_retry: Option<(Instant, Duration)>,
     /// Last local DB refresh of the feed, and the (count, max id) stamp it saw.
-    db_refresh: (Instant, Option<(i64, i64)>),
+    db_refresh: (Instant, Option<(i64, i64, i64)>),
     tx: mpsc::UnboundedSender<Event>,
     rx: mpsc::UnboundedReceiver<Event>,
     pub should_quit: bool,
@@ -613,7 +613,7 @@ impl App {
             Event::Transcript {
                 epoch,
                 bot,
-                full: _full,
+                full,
                 result,
             } => {
                 // Always clear the poll gate — even for stale epochs — so a mid-flight
@@ -627,7 +627,7 @@ impl App {
                     Ok(msgs) => {
                         self.last_poll_error = None;
                         self.desktop_reread_tried = false;
-                        let added = match self.store.merge_remote(&bot, &msgs) {
+                        let added = match self.store.merge_remote(&bot, &msgs, full) {
                             Ok(a) => a,
                             Err(e) => {
                                 self.error(format!("Could not store transcript: {e:#}"));

@@ -153,7 +153,12 @@ const V4: &str = "CREATE TABLE credentials_v4 (
     DROP TABLE credentials;
     ALTER TABLE credentials_v4 RENAME TO credentials;";
 
-const MIGRATIONS: &[&str] = &[V1, V2, V3, V4];
+/// v4 -> v5: explicit display order (`ord`) following the gateway transcript order,
+/// instead of insertion order.
+const V5: &str = "ALTER TABLE messages ADD COLUMN ord REAL;
+    UPDATE messages SET ord = id;
+    CREATE INDEX messages_ord ON messages(account_id, bot_id, ord);";
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginMethod {
@@ -582,7 +587,9 @@ impl Store {
         self.ensure_bot(bot_id)?;
         let role = if m.role == Role::User { "user" } else { "bot" };
         self.conn.execute(
-            "INSERT INTO messages(account_id, bot_id, role, text, remote_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO messages(account_id, bot_id, role, text, remote_id, ord)
+             VALUES (?1, ?2, ?3, ?4, ?5,
+               (SELECT COALESCE(MAX(ord), 0) + 1 FROM messages WHERE account_id = ?1 AND bot_id = ?2))",
             params![self.account.id, bot_id, role, m.text, m.remote_id],
         )?;
         Ok(())
@@ -590,7 +597,7 @@ impl Store {
 
     pub fn messages(&self, bot_id: &str) -> Result<Vec<Message>> {
         let mut st = self.conn.prepare(
-            "SELECT role, text, remote_id FROM messages WHERE account_id = ?1 AND bot_id = ?2 ORDER BY id",
+            "SELECT role, text, remote_id FROM messages WHERE account_id = ?1 AND bot_id = ?2 ORDER BY ord, id",
         )?;
         let rows = st.query_map(params![self.account.id, bot_id], |r| {
             let role: String = r.get(0)?;
@@ -612,53 +619,177 @@ impl Store {
     /// Entries with an id are de-duplicated by id. A user entry matching a locally
     /// pending send (`remote_id` = `pending:<nonce>`) adopts the server id instead of
     /// duplicating. Entries without an id are added only if no identical message exists.
-    pub fn merge_remote(&self, bot_id: &str, msgs: &[Message]) -> Result<Vec<Message>> {
+    ///
+    /// `msgs` must be in gateway transcript order. Display order (`ord`) follows that
+    /// order: new entries are placed between the neighbours they arrived with. When
+    /// `from_start` is true (`msgs` is the whole history), every row's `ord` is
+    /// rewritten to match the gateway exactly, which also repairs older misordering.
+    pub fn merge_remote(
+        &self,
+        bot_id: &str,
+        msgs: &[Message],
+        from_start: bool,
+    ) -> Result<Vec<Message>> {
         let id = self.account.id;
         let mut added = vec![];
+        // (row id, ord before this merge; None for rows inserted now)
+        let mut window: Vec<(i64, Option<f64>)> = vec![];
+        let row_of =
+            |sql: &str, p: &[&dyn rusqlite::ToSql]| -> Result<Option<(i64, Option<f64>)>> {
+                Ok(self
+                    .conn
+                    .query_row(sql, p, |r| Ok((r.get(0)?, r.get(1)?)))
+                    .optional()?)
+            };
         for m in msgs {
             let role = if m.role == Role::User { "user" } else { "bot" };
-            if let Some(rid) = &m.remote_id {
-                let exists: bool = self.conn.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM messages WHERE account_id = ?1 AND bot_id = ?2 AND remote_id = ?3)",
-                    params![id, bot_id, rid],
-                    |r| r.get(0),
-                )?;
-                if exists {
-                    continue;
-                }
-                if m.role == Role::User {
-                    let n = self.conn.execute(
-                        "UPDATE messages SET remote_id = ?4 WHERE id = (
-                           SELECT id FROM messages WHERE account_id = ?1 AND bot_id = ?2 AND text = ?3
-                             AND remote_id LIKE 'pending:%' ORDER BY id LIMIT 1)",
-                        params![id, bot_id, m.text, rid],
-                    )?;
-                    if n > 0 {
-                        continue;
+            let found = if let Some(rid) = &m.remote_id {
+                match row_of(
+                    "SELECT id, ord FROM messages WHERE account_id = ?1 AND bot_id = ?2 AND remote_id = ?3",
+                    &[&id, &bot_id, rid],
+                )? {
+                    Some(r) => Some(r),
+                    None if m.role == Role::User => {
+                        let pending = row_of(
+                            "SELECT id, ord FROM messages WHERE account_id = ?1 AND bot_id = ?2 AND text = ?3
+                               AND remote_id LIKE 'pending:%' ORDER BY id LIMIT 1",
+                            &[&id, &bot_id, &m.text],
+                        )?;
+                        if let Some((rowid, _)) = pending {
+                            self.conn.execute(
+                                "UPDATE messages SET remote_id = ?2 WHERE id = ?1",
+                                params![rowid, rid],
+                            )?;
+                            // A placeholder takes its real place in the transcript.
+                            Some((rowid, None))
+                        } else {
+                            None
+                        }
                     }
+                    None => None,
                 }
             } else {
-                let exists: bool = self.conn.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM messages WHERE account_id = ?1 AND bot_id = ?2 AND role = ?3 AND text = ?4)",
-                    params![id, bot_id, role, m.text],
-                    |r| r.get(0),
-                )?;
-                if exists {
-                    continue;
+                row_of(
+                    "SELECT id, ord FROM messages WHERE account_id = ?1 AND bot_id = ?2 AND role = ?3 AND text = ?4",
+                    &[&id, &bot_id, &role, &m.text],
+                )?
+            };
+            let entry = match found {
+                Some(r) => r,
+                None => {
+                    self.append_message(bot_id, m)?;
+                    added.push(m.clone());
+                    (self.conn.last_insert_rowid(), None)
                 }
+            };
+            if !window.iter().any(|(r, _)| *r == entry.0) {
+                window.push(entry);
             }
-            self.append_message(bot_id, m)?;
-            added.push(m.clone());
+        }
+        if from_start {
+            self.reorder_full(bot_id, &window)?;
+        } else {
+            self.place_window(bot_id, &window)?;
         }
         Ok(added)
     }
 
-    /// Cheap change stamp for a bot's messages: (row count, max row id).
-    pub fn message_stamp(&self, bot_id: &str) -> Result<(i64, i64)> {
-        Ok(self.conn.query_row(
-            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM messages WHERE account_id = ?1 AND bot_id = ?2",
+    /// Give rows without a known position an `ord` between their window neighbours.
+    fn place_window(&self, bot_id: &str, window: &[(i64, Option<f64>)]) -> Result<()> {
+        let new_ids: Vec<i64> = window
+            .iter()
+            .filter(|w| w.1.is_none())
+            .map(|w| w.0)
+            .collect();
+        if new_ids.is_empty() {
+            return Ok(());
+        }
+        let max_known: f64 = self.conn.query_row(
+            &format!(
+                "SELECT COALESCE(MAX(ord), 0) FROM messages WHERE account_id = ?1 AND bot_id = ?2 AND id NOT IN ({})",
+                new_ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+            ),
             params![self.account.id, bot_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| r.get(0),
+        )?;
+        let mut i = 0;
+        let mut prev: Option<f64> = None;
+        while i < window.len() {
+            if let Some(o) = window[i].1 {
+                prev = Some(prev.map_or(o, |p| p.max(o)));
+                i += 1;
+                continue;
+            }
+            let start = i;
+            while i < window.len() && window[i].1.is_none() {
+                i += 1;
+            }
+            let next = window.get(i).and_then(|w| w.1);
+            let n = (i - start) as f64;
+            let mut last = prev.unwrap_or(max_known);
+            for (k, (rowid, _)) in window[start..i].iter().enumerate() {
+                let k = k as f64 + 1.0;
+                let ord = match (prev, next) {
+                    (Some(a), Some(b)) if b > a => a + (b - a) * k / (n + 1.0),
+                    (Some(a), Some(_)) => a + k * 1e-3,
+                    (Some(a), None) => a + k,
+                    (None, Some(b)) => b - (n + 1.0 - k),
+                    (None, None) => max_known + k,
+                };
+                self.conn.execute(
+                    "UPDATE messages SET ord = ?2 WHERE id = ?1",
+                    params![rowid, ord],
+                )?;
+                last = ord;
+            }
+            prev = Some(last);
+        }
+        Ok(())
+    }
+
+    /// Rewrite `ord` for the whole bot: rows not in the window (older than it) first,
+    /// then the window in gateway order, then still-pending local rows.
+    fn reorder_full(&self, bot_id: &str, window: &[(i64, Option<f64>)]) -> Result<()> {
+        let mut st = self.conn.prepare(
+            "SELECT id, COALESCE(remote_id LIKE 'pending:%', 0) FROM messages
+             WHERE account_id = ?1 AND bot_id = ?2 ORDER BY ord, id",
+        )?;
+        let all: Vec<(i64, bool)> = st
+            .query_map(params![self.account.id, bot_id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        let in_win: std::collections::HashSet<i64> = window.iter().map(|w| w.0).collect();
+        let order: Vec<i64> = all
+            .iter()
+            .filter(|(r, p)| !in_win.contains(r) && !p)
+            .map(|(r, _)| *r)
+            .chain(window.iter().map(|w| w.0))
+            .chain(
+                all.iter()
+                    .filter(|(r, p)| !in_win.contains(r) && *p)
+                    .map(|(r, _)| *r),
+            )
+            .collect();
+        let tx = self.conn.unchecked_transaction()?;
+        for (i, rowid) in order.iter().enumerate() {
+            tx.execute(
+                "UPDATE messages SET ord = ?2 WHERE id = ?1",
+                params![rowid, (i + 1) as f64],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Cheap change stamp for a bot's messages: (row count, max row id).
+    /// Includes an order checksum so re-ordering is noticed too.
+    pub fn message_stamp(&self, bot_id: &str) -> Result<(i64, i64, i64)> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*), COALESCE(MAX(id), 0),
+                    COALESCE(SUM(CAST(ord * 1000 AS INTEGER) * (id % 9973)), 0) FROM messages WHERE account_id = ?1 AND bot_id = ?2",
+            params![self.account.id, bot_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?)
     }
 
@@ -835,7 +966,7 @@ mod tests {
         let dir = d.path().join("gb");
         v1_db(&dir);
         let s = Store::open(&dir, None).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 4);
+        assert_eq!(s.schema_version().unwrap(), MIGRATIONS.len());
         assert_eq!(s.account().alias, "default");
         assert!(
             s.load_login().unwrap().is_none(),
@@ -885,7 +1016,7 @@ mod tests {
             .unwrap();
         }
         let mut s = Store::open(&dir, Some("work")).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 4);
+        assert_eq!(s.schema_version().unwrap(), MIGRATIONS.len());
         assert_eq!(s.messages("b").unwrap(), vec![msg(Role::User, "work msg")]);
         assert!(s.get_pref("paths.send").unwrap().is_none());
         s.use_account("default").unwrap();
@@ -1024,7 +1155,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&dir, None).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 4);
+        assert_eq!(s.schema_version().unwrap(), MIGRATIONS.len());
         let l = s.load_login().unwrap().unwrap();
         assert_eq!(l.method, LoginMethod::Cursor);
         assert_eq!(l.cursor_token.as_deref(), Some("cur"));
@@ -1051,6 +1182,7 @@ mod tests {
                     rmsg(Role::Bot, "hello", "e2"),
                     msg(Role::Bot, "noid"),
                 ],
+                false,
             )
             .unwrap();
         assert_eq!(
@@ -1065,6 +1197,7 @@ mod tests {
                     rmsg(Role::Bot, "hello", "e2"),
                     msg(Role::Bot, "noid"),
                 ],
+                false,
             )
             .unwrap();
         assert!(again.is_empty());
@@ -1112,5 +1245,120 @@ mod tests {
         s.clear_messages("a").unwrap();
         assert!(s.messages("a").unwrap().is_empty());
         assert!(s.set_pref("active_account", "x").is_err());
+    }
+
+    fn texts(s: &Store, bot: &str) -> Vec<String> {
+        s.messages(bot)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.text)
+            .collect()
+    }
+
+    #[test]
+    fn history_after_tail_is_ordered_by_gateway_not_insertion() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Store::open(d.path().join("gb"), None).unwrap();
+        // A tail poll stored only the newest entry first…
+        s.merge_remote("b", &[rmsg(Role::User, "u3", "t3u")], false)
+            .unwrap();
+        // …then the full history arrives (previously appended AFTER u3).
+        let all = [
+            rmsg(Role::User, "u1", "t1u"),
+            rmsg(Role::Bot, "b1", "t1s0"),
+            rmsg(Role::User, "u2", "t2u"),
+            rmsg(Role::Bot, "b2", "t2s0"),
+            rmsg(Role::User, "u3", "t3u"),
+        ];
+        s.merge_remote("b", &all, true).unwrap();
+        assert_eq!(texts(&s, "b"), ["u1", "b1", "u2", "b2", "u3"]);
+    }
+
+    #[test]
+    fn late_entry_in_tail_lands_between_neighbours() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Store::open(d.path().join("gb"), None).unwrap();
+        s.merge_remote(
+            "b",
+            &[
+                rmsg(Role::User, "q42", "t42u"),
+                rmsg(Role::Bot, "a42", "t42s0"),
+                rmsg(Role::User, "q43", "t43u"),
+            ],
+            false,
+        )
+        .unwrap();
+        // The gateway now shows a late t42s1 before t43u.
+        s.merge_remote(
+            "b",
+            &[
+                rmsg(Role::Bot, "a42", "t42s0"),
+                rmsg(Role::Bot, "a42b", "t42s1"),
+                rmsg(Role::User, "q43", "t43u"),
+                rmsg(Role::Bot, "a43", "t43s0"),
+            ],
+            false,
+        )
+        .unwrap();
+        assert_eq!(texts(&s, "b"), ["q42", "a42", "a42b", "q43", "a43"]);
+    }
+
+    #[test]
+    fn pending_placeholder_moves_to_its_real_place_and_full_repairs_order() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Store::open(d.path().join("gb"), None).unwrap();
+        s.merge_remote(
+            "b",
+            &[rmsg(Role::User, "q1", "t1u"), rmsg(Role::Bot, "a1", "t1s0")],
+            false,
+        )
+        .unwrap();
+        s.append_message(
+            "b",
+            &Message {
+                role: Role::User,
+                text: "mine".into(),
+                remote_id: Some("pending:n".into()),
+            },
+        )
+        .unwrap();
+        // Desktop message arrived on the gateway before mine; then mine; then reply.
+        s.merge_remote(
+            "b",
+            &[
+                rmsg(Role::Bot, "a1", "t1s0"),
+                rmsg(Role::User, "desk", "t2u"),
+                rmsg(Role::Bot, "a2", "t2s0"),
+                rmsg(Role::User, "mine", "t3u"),
+                rmsg(Role::Bot, "a3", "t3s0"),
+            ],
+            false,
+        )
+        .unwrap();
+        assert_eq!(texts(&s, "b"), ["q1", "a1", "desk", "a2", "mine", "a3"]);
+        assert_eq!(
+            s.messages("b").unwrap().len(),
+            6,
+            "no duplicate of the pending row"
+        );
+        // Corrupt the order, then a full fetch repairs it.
+        s.conn.execute("UPDATE messages SET ord = -id", []).unwrap();
+        let full: Vec<Message> = ["q1", "a1", "desk", "a2", "mine", "a3"]
+            .iter()
+            .zip(["t1u", "t1s0", "t2u", "t2s0", "t3u", "t3s0"])
+            .map(|(t, r)| {
+                rmsg(
+                    if r.ends_with('u') {
+                        Role::User
+                    } else {
+                        Role::Bot
+                    },
+                    t,
+                    r,
+                )
+            })
+            .collect();
+        s.merge_remote("b", &full, true).unwrap();
+        assert_eq!(texts(&s, "b"), ["q1", "a1", "desk", "a2", "mine", "a3"]);
     }
 }
