@@ -21,16 +21,21 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-/// Poll interval right after a send / while waiting for a reply.
 /// Max wait of the UI event loop between redraws. Purely local: gateway polling is
 /// gated separately by `poll.next` (POLL_IDLE / POLL_FAST / backoff), so a faster UI
 /// tick never causes extra API calls.
-pub const UI_TICK: Duration = Duration::from_millis(120);
-pub const POLL_FAST: Duration = Duration::from_millis(1500);
+pub const UI_TICK: Duration = Duration::from_millis(100);
+/// How often the visible feed is re-read from local SQLite (cheap, no network).
+pub const DB_REFRESH: Duration = Duration::from_millis(100);
+/// Retry delays for restoring a saved login after a non-auth failure (network etc.).
+const LOGIN_RETRY_MIN: Duration = Duration::from_secs(5);
+const LOGIN_RETRY_MAX: Duration = Duration::from_secs(60);
+/// Gateway poll interval right after a send / while waiting for a reply.
+pub const POLL_FAST: Duration = Duration::from_secs(1);
 /// Ceiling while waiting for a reply.
 pub const POLL_AWAIT_MAX: Duration = Duration::from_secs(8);
-/// Starting interval when idle.
-pub const POLL_IDLE: Duration = Duration::from_secs(3);
+/// Gateway poll interval while a bot is open (backs off when nothing changes).
+pub const POLL_IDLE: Duration = Duration::from_secs(1);
 /// Ceiling when idle (also used after errors).
 pub const POLL_IDLE_MAX: Duration = Duration::from_secs(15);
 /// Stop showing "typing" after this long without a reply.
@@ -244,6 +249,10 @@ pub struct App {
     pub client_version_source: &'static str,
     /// Set after one automatic desktop re-read on 401 so a bad session can't loop.
     desktop_reread_tried: bool,
+    /// Saved login restore failed for a non-auth reason: retry at this time.
+    login_retry: Option<(Instant, Duration)>,
+    /// Last local DB refresh of the feed, and the (count, max id) stamp it saw.
+    db_refresh: (Instant, Option<(i64, i64)>),
     tx: mpsc::UnboundedSender<Event>,
     rx: mpsc::UnboundedReceiver<Event>,
     pub should_quit: bool,
@@ -252,6 +261,12 @@ pub struct App {
 pub fn host_of(url: &str) -> &str {
     let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
     rest.split(['/', '?', '#']).next().unwrap_or(rest)
+}
+
+/// Whether a login error string means the credential itself was rejected.
+fn is_auth_error(e: &str) -> bool {
+    let e = e.to_lowercase();
+    e.contains("401") || e.contains("403") || e.contains("unauthorized")
 }
 
 async fn login_task(
@@ -339,6 +354,8 @@ impl App {
             help: None,
             client_version_source,
             desktop_reread_tried: false,
+            login_retry: None,
+            db_refresh: (Instant::now(), None),
             tx,
             rx,
             should_quit: false,
@@ -370,6 +387,16 @@ impl App {
     pub fn tick(&mut self) {
         self.pump();
         let now = Instant::now();
+        if let Some((at, _)) = self.login_retry
+            && now >= at
+            && !self.connecting
+            && self.api.is_none()
+        {
+            self.connect();
+        }
+        if now.duration_since(self.db_refresh.0) >= DB_REFRESH {
+            self.refresh_feed_from_db();
+        }
         self.awaiting
             .retain(|_, t| now.duration_since(*t) < AWAIT_TIMEOUT);
         let (Some(api), Some(bot)) = (self.api.clone(), self.active_bot().map(|b| b.id.clone()))
@@ -391,6 +418,21 @@ impl App {
                 result,
             }
         });
+    }
+
+    /// Re-read the active bot's feed from SQLite if it changed (local only, no network).
+    pub fn refresh_feed_from_db(&mut self) {
+        self.db_refresh.0 = Instant::now();
+        let Some(bot) = self.active_bot().map(|b| b.id.clone()) else {
+            return;
+        };
+        let stamp = self.store.message_stamp(&bot).ok();
+        if stamp != self.db_refresh.1 {
+            self.db_refresh.1 = stamp;
+            let scroll = self.scroll;
+            self.reload_bot_log(&bot);
+            self.scroll = scroll;
+        }
     }
 
     /// Poll the active bot on the next tick.
@@ -432,6 +474,7 @@ impl App {
                 self.connecting = false;
                 match result {
                     Ok((client, session, bots)) => {
+                        self.login_retry = None;
                         let label = match source {
                             LoginSource::Env => {
                                 format!("{TOKEN_ENV} · {}", host_of(&session.gateway_url))
@@ -483,8 +526,34 @@ impl App {
                             LoginSource::Interactive => {
                                 self.error(format!("Login failed: {e}{hint}"))
                             }
+                            // The saved login is never deleted on failure; only /logout removes it.
+                            LoginSource::Stored
+                                if method == LoginMethod::Desktop
+                                    && is_auth_error(&e)
+                                    && !self.desktop_reread_tried =>
+                            {
+                                // Desktop account opted in to re-reading the app session on 401.
+                                self.desktop_reread_tried = true;
+                                self.login_method = Some(method);
+                                self.info(
+                                    "Saved gateway session expired; re-reading the desktop app session…"
+                                        .into(),
+                                );
+                                self.start_desktop_login(desktop_entry, LoginSource::Stored);
+                            }
+                            LoginSource::Stored if !is_auth_error(&e) => {
+                                let delay = self
+                                    .login_retry
+                                    .map(|(_, d)| (d * 2).min(LOGIN_RETRY_MAX))
+                                    .unwrap_or(LOGIN_RETRY_MIN);
+                                self.login_retry = Some((Instant::now() + delay, delay));
+                                self.error(format!(
+                                    "Could not restore saved login: {e}. It is kept; retrying in {}s.{hint}",
+                                    delay.as_secs()
+                                ));
+                            }
                             LoginSource::Stored => self.error(format!(
-                                "Saved credential failed: {e}. Use /login desktop.{hint}"
+                                "Saved login was rejected: {e}. It is kept until /logout; log in again with /login desktop.{hint}"
                             )),
                             LoginSource::Env => {
                                 self.error(format!("{TOKEN_ENV} login failed: {e}{hint}"))
@@ -669,6 +738,8 @@ impl App {
         self.login_method = None;
         self.login_source = None;
         self.desktop_reread_tried = false;
+        self.login_retry = None;
+        self.db_refresh.1 = None;
         self.connecting = false;
         self.all_bots.clear();
         self.bots.clear();
@@ -755,11 +826,13 @@ impl App {
             let session = Session::new(url.trim(), tok.trim()).with_headers(headers);
             self.start_login(LoginMethod::Gateway, LoginSource::Env, Some(session), None);
         } else if let Some(l) = stored {
-            self.start_login(
+            // Restore the saved session as-is (keeping the desktop entry choice).
+            self.spawn_login(
                 l.method,
                 LoginSource::Stored,
                 Some(l.session),
                 l.cursor_token,
+                l.desktop_entry,
             );
         } else {
             self.info(format!(
@@ -1462,6 +1535,126 @@ pub mod tests {
         assert_eq!(app.help.as_ref().unwrap().page.id, first);
         app.help_back();
         assert!(app.help.as_ref().unwrap().page.id.starts_with("search"));
+    }
+
+    #[test]
+    fn saved_login_survives_quit_and_only_logout_removes_it() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("gb");
+        let mk = || App::new(Store::open(&dir, None).unwrap(), rt.handle().clone(), true).unwrap();
+        let mut app = mk();
+        mock_login(&mut app, "tok");
+        type_line(&mut app, "/quit");
+        assert!(app.should_quit);
+        drop(app);
+        for _ in 0..2 {
+            let mut app = mk();
+            app.init();
+            settle(&mut app);
+            assert!(app.user_label.is_some(), "restored without /login");
+            drop(app);
+        }
+        let mut app = mk();
+        app.init();
+        settle(&mut app);
+        type_line(&mut app, "hello");
+        settle(&mut app);
+        type_line(&mut app, "/memory add k v");
+        let bot = app.active_bot().unwrap().id.clone();
+        type_line(&mut app, "/logout");
+        assert!(app.store.load_login().unwrap().is_none());
+        assert!(!app.store.messages(&bot).unwrap().is_empty(), "chats kept");
+        assert!(
+            !app.store.list_memory(&bot).unwrap().is_empty(),
+            "memory kept"
+        );
+        drop(app);
+        let mut app = mk();
+        app.init();
+        settle(&mut app);
+        assert!(app.user_label.is_none());
+    }
+
+    #[test]
+    fn db_refresh_picks_up_external_writes_without_network() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "tok");
+        settle(&mut app);
+        let bot = app.active_bot().unwrap().id.clone();
+        app.poll.next = Instant::now() + POLL_IDLE_MAX;
+        app.store
+            .append_message(
+                &bot,
+                &Message {
+                    role: Role::Bot,
+                    text: "written elsewhere".into(),
+                    remote_id: Some("x1".into()),
+                },
+            )
+            .unwrap();
+        app.refresh_feed_from_db();
+        assert!(app.feed().iter().any(|e| e.text == "written elsewhere"));
+        assert!(!app.poll.inflight, "no gateway call");
+    }
+
+    #[test]
+    fn http_stored_desktop_401_rereads_app_session_and_keeps_login() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let server = rt.block_on(MockServer::start());
+        let uri = server.uri();
+        rt.block_on(async {
+            Mock::given(path("/api/listAgents"))
+                .and(header("authorization", "Bearer old-gw"))
+                .respond_with(ResponseTemplate::new(401).set_body_json(json!({"error": "expired"})))
+                .mount(&server)
+                .await;
+            Mock::given(path("/aiserver.v1.GrokBotService/EnsureSandBox"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "gatewayUrl": uri, "gatewayToken": "new-gw", "anyrunNetworkToken": "n"
+                })))
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/listAgents"))
+                .and(header("authorization", "Bearer new-gw"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(json!([{"id": "a1", "name": "A"}])),
+                )
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/getAgentTranscriptTail"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"entries": []})))
+                .mount(&server)
+                .await;
+        });
+        let (mut app, _d) = real_app(&rt, &server);
+        app.store
+            .save_login(&StoredLogin {
+                method: LoginMethod::Desktop,
+                session: Session::new(&uri, "old-gw"),
+                cursor_token: None,
+                desktop_entry: Some("acct2".into()),
+            })
+            .unwrap();
+        let (reader, calls) = fake_reader(|_, entry| {
+            Ok((
+                gw::desktop::DesktopCredential::CursorToken("cur".into()),
+                entry.map(str::to_string),
+            ))
+        });
+        app.desktop_reader = reader;
+        app.connect();
+        settle(&mut app);
+        assert!(app.user_label.is_some(), "restored via desktop re-read");
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        let l = app.store.load_login().unwrap().unwrap();
+        assert_eq!(l.session.gateway_token, "new-gw");
+        assert_eq!(
+            l.desktop_entry.as_deref(),
+            Some("acct2"),
+            "entry choice kept"
+        );
     }
 
     #[test]

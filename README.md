@@ -53,7 +53,7 @@ The screen never waits on the network. Every gateway call runs on a tokio task a
 Results that arrive after an account switch or logout are discarded.
 
 Only the **active bot** is polled (`getAgentTranscriptTail`, last 50 entries):
-- after a send: about every 1.5 s, backing off to 8 s while waiting for the reply ("… is replying" spinner in the body title, up to 5 min);
+- after a send: about every 1 s, backing off to 8 s while waiting for the reply ("… is replying" spinner in the body title, up to 5 min);
 - otherwise: every 10 s, backing off to 60 s when nothing changes or on errors.
 
 ## Commands

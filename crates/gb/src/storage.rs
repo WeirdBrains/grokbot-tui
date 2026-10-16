@@ -653,6 +653,15 @@ impl Store {
         Ok(added)
     }
 
+    /// Cheap change stamp for a bot's messages: (row count, max row id).
+    pub fn message_stamp(&self, bot_id: &str) -> Result<(i64, i64)> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM messages WHERE account_id = ?1 AND bot_id = ?2",
+            params![self.account.id, bot_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?)
+    }
+
     /// Delete a locally pending message (e.g. its send was rejected).
     pub fn delete_pending(&self, bot_id: &str, nonce: &str) -> Result<()> {
         self.conn.execute(

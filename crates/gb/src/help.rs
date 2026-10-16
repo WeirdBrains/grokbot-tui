@@ -265,8 +265,8 @@ Bots come from the gateway's listAgents. Messages come from getAgentTranscriptTa
   • Opening a bot (or /history) pages the whole transcript (up to 1000 entries),
     merges it into ~/.gb/context.db and redraws the chat from there — so messages
     from the desktop app appear too.
-  • While a bot is open gb polls for new messages every ~3 s, backing off to 15 s
-    when idle, and every 1.5 s right after you send.
+  • While a bot is open gb polls for new messages every ~1 s, backing off to 15 s
+    when idle, and every 1 s right after you send.
   • The chat you see is always rebuilt from that database. Your sent message is saved
     there first (as pending) and shows immediately; notices and errors appear in a
     separate section below the chat and are not saved.
