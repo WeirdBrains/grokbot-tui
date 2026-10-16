@@ -36,6 +36,8 @@ pub trait ApiClient: Send + Sync {
     async fn list_bots(&self) -> gw::Result<Vec<Bot>>;
     async fn send(&self, bot_id: &str, text: &str, nonce: &str) -> gw::Result<SendReceipt>;
     async fn transcript(&self, bot_id: &str, limit: u32) -> gw::Result<Vec<Message>>;
+    /// Page through chat history (oldest → newest), up to `max_entries`.
+    async fn transcript_history(&self, bot_id: &str, max_entries: u32) -> gw::Result<Vec<Message>>;
     /// A session refreshed by a 401 re-exchange since the last call, to persist.
     fn take_refreshed_session(&self) -> Option<Session> {
         None
@@ -96,7 +98,16 @@ impl ApiClient for GatewayApi {
     }
     async fn transcript(&self, bot_id: &str, limit: u32) -> gw::Result<Vec<Message>> {
         Ok(messages_from_entries(
-            &self.0.transcript_tail(bot_id, limit).await?.entries,
+            &self.0.transcript_tail(bot_id, limit, None).await?.entries,
+        ))
+    }
+    async fn transcript_history(&self, bot_id: &str, max_entries: u32) -> gw::Result<Vec<Message>> {
+        Ok(messages_from_entries(
+            &self
+                .0
+                .transcript_history(bot_id, 200, max_entries as usize)
+                .await?
+                .entries,
         ))
     }
     fn take_refreshed_session(&self) -> Option<Session> {
@@ -224,6 +235,9 @@ impl ApiClient for MockClient {
             delivery: Delivery::Accepted,
             raw: serde_json::json!({}),
         })
+    }
+    async fn transcript_history(&self, bot_id: &str, max_entries: u32) -> gw::Result<Vec<Message>> {
+        self.transcript(bot_id, max_entries).await
     }
     async fn transcript(&self, bot_id: &str, limit: u32) -> gw::Result<Vec<Message>> {
         self.check("getAgentTranscriptTail")?;

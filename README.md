@@ -139,6 +139,14 @@ Redirects are never followed, requests time out after 30 s, responses are capped
 | `GB_ALLOW_LOCAL_GATEWAY` | `1` to permit loopback gateways (development) |
 | `GB_ACCOUNT` | Starting account alias |
 
+## Chat sync
+
+Bots come from `listAgents`. Chat text comes from `getAgentTranscriptTail` (there is no separate
+listChats/getChat API). On bot select (and on `/history`), grokbot-tui pages that endpoint via
+`beforeSeq`/`nextBeforeSeq` up to 1000 entries, merges into SQLite, and rebuilds the body from the
+DB so messages from the desktop app show up. While a bot is active it also polls the newest page
+every few seconds (backing off to 15s when idle).
+
 ## Sending and delivery
 
 `sendPrompt` returns only a receipt (`messageId`). Replies are picked up by polling the transcript.

@@ -265,7 +265,7 @@ fn history(app: &mut App, _: &str) -> Result<()> {
     app.request_history();
     app.push(
         EntryKind::System,
-        "Fetching the last 200 transcript entries…".into(),
+        "Fetching chat history from the gateway…".into(),
     );
     Ok(())
 }

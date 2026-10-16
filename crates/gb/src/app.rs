@@ -26,13 +26,13 @@ pub const POLL_FAST: Duration = Duration::from_millis(1500);
 /// Ceiling while waiting for a reply.
 pub const POLL_AWAIT_MAX: Duration = Duration::from_secs(8);
 /// Starting interval when idle.
-pub const POLL_IDLE: Duration = Duration::from_secs(10);
+pub const POLL_IDLE: Duration = Duration::from_secs(3);
 /// Ceiling when idle (also used after errors).
-pub const POLL_IDLE_MAX: Duration = Duration::from_secs(60);
+pub const POLL_IDLE_MAX: Duration = Duration::from_secs(15);
 /// Stop showing "typing" after this long without a reply.
 pub const AWAIT_TIMEOUT: Duration = Duration::from_secs(300);
-const POLL_LIMIT: u32 = 50;
-const HISTORY_LIMIT: u32 = 200;
+const POLL_LIMIT: u32 = 100;
+const HISTORY_LIMIT: u32 = 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
@@ -154,6 +154,8 @@ pub enum Event {
     Transcript {
         epoch: u64,
         bot: String,
+        /// True when this was a full-history fetch (bot select / /history).
+        full: bool,
         result: gw::Result<Vec<Message>>,
     },
     Sent {
@@ -347,7 +349,12 @@ impl App {
         self.poll.limit = POLL_LIMIT;
         self.spawn(async move {
             let result = api.transcript(&bot, limit).await;
-            Event::Transcript { epoch, bot, result }
+            Event::Transcript {
+                epoch,
+                bot,
+                full: false,
+                result,
+            }
         });
     }
 
@@ -490,11 +497,18 @@ impl App {
                     }
                 }
             }
-            Event::Transcript { epoch, bot, result } => {
+            Event::Transcript {
+                epoch,
+                bot,
+                full: _full,
+                result,
+            } => {
+                // Always clear the poll gate — even for stale epochs — so a mid-flight
+                // account switch cannot leave polling permanently stuck.
+                self.poll.inflight = false;
                 if epoch != self.epoch {
                     return;
                 }
-                self.poll.inflight = false;
                 let waiting = self.awaiting.contains_key(&bot);
                 match result {
                     Ok(msgs) => {
@@ -508,9 +522,9 @@ impl App {
                             }
                         };
                         let got_reply = added.iter().any(|m| m.role == Role::Bot);
-                        for m in &added {
-                            self.push_to(&bot, entry_from_msg(m));
-                        }
+                        // Rebuild the visible log from SQLite so /clear, first select, and
+                        // desktop-app messages all converge on the same merged transcript.
+                        self.reload_bot_log(&bot);
                         if got_reply {
                             self.awaiting.remove(&bot);
                         }
@@ -905,30 +919,76 @@ impl App {
                 self.error(format!("Could not save active bot: {e:#}"));
             }
         }
-        if !self.logs.contains_key(&id) {
-            let entries = self
-                .store
-                .messages(&id)
-                .unwrap_or_default()
-                .iter()
-                .map(entry_from_msg)
-                .collect();
-            self.logs.insert(id.clone(), entries);
-        }
+        self.reload_bot_log(&id);
         if changed {
             self.poll.interval = if self.awaiting.contains_key(&id) {
                 POLL_FAST
             } else {
                 POLL_IDLE
             };
-            self.poll_now();
+            // Pull the server transcript whenever the active bot changes so chats
+            // from the desktop app show up without a manual /history.
+            if self.api.is_some() {
+                self.request_history();
+            } else {
+                self.poll_now();
+            }
         }
     }
 
-    /// Fetch a larger transcript window on the next tick.
+    /// Replace the in-memory log for `bot_id` with the merged SQLite transcript,
+    /// keeping only trailing system/error lines (e.g. delivery notices) so polls
+    /// don't wipe them and don't duplicate them.
+    fn reload_bot_log(&mut self, bot_id: &str) {
+        let mut entries: Vec<Entry> = self
+            .store
+            .messages(bot_id)
+            .unwrap_or_default()
+            .iter()
+            .map(entry_from_msg)
+            .collect();
+        if let Some(prev) = self.logs.get(bot_id) {
+            let mut trailing = Vec::new();
+            for e in prev.iter().rev() {
+                if matches!(e.kind, EntryKind::System | EntryKind::Error) {
+                    trailing.push(e.clone());
+                } else {
+                    break;
+                }
+            }
+            trailing.reverse();
+            entries.extend(trailing);
+        }
+        self.logs.insert(bot_id.to_string(), entries);
+        if self.active_bot().is_some_and(|b| b.id == bot_id) {
+            self.scroll = 0;
+        }
+    }
+
+    /// Fetch the full (paged) chat history for the active bot now.
     pub fn request_history(&mut self) {
-        self.poll.limit = HISTORY_LIMIT;
-        self.poll_now();
+        let (Some(api), Some(bot)) = (self.api.clone(), self.active_bot().map(|b| b.id.clone()))
+        else {
+            self.poll.limit = HISTORY_LIMIT;
+            self.poll_now();
+            return;
+        };
+        if self.poll.inflight {
+            // Queue a full fetch as soon as the in-flight poll finishes.
+            self.poll.limit = HISTORY_LIMIT;
+            return;
+        }
+        self.poll.inflight = true;
+        let epoch = self.epoch;
+        self.spawn(async move {
+            let result = api.transcript_history(&bot, HISTORY_LIMIT).await;
+            Event::Transcript {
+                epoch,
+                bot,
+                full: true,
+                result,
+            }
+        });
     }
 
     pub fn active_bot(&self) -> Option<&Bot> {
