@@ -115,6 +115,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Body
     let bot_name = app.active_bot().map(|b| b.name.clone());
+    // Inner padding between the border and the content (left/right 2, top 1).
+    let chat_block = Block::default()
+        .borders(Borders::ALL)
+        .padding(Padding::new(2, 2, 1, 0));
+    let inner = chat_block.inner(body);
+    let inner_w = inner.width.max(1) as usize;
+    let inner_h = inner.height;
+    // Message bubbles wrap at most 2/3 of the body width.
+    let bubble = bubble_width(inner_w);
     // Chat feed (from SQLite), then transient notices in their own section.
     // A blank line separates consecutive messages.
     let mut lines: Vec<Line> = vec![];
@@ -122,7 +131,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         if i > 0 {
             lines.push(Line::default());
         }
-        lines.extend(entry_lines(e.kind, &e.text, bot_name.as_deref(), true));
+        lines.extend(entry_lines(
+            e.kind,
+            &e.text,
+            bot_name.as_deref(),
+            Some(bubble),
+        ));
     }
     if !app.notices().is_empty() {
         if !lines.is_empty() {
@@ -135,7 +149,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         lines.extend(
             app.notices()
                 .iter()
-                .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref(), false)),
+                .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref(), None)),
         );
     }
     if lines.is_empty() {
@@ -144,13 +158,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             .map(|t| Line::styled(t, Style::default().fg(Color::DarkGray)))
             .collect();
     }
-    // Inner padding between the border and the content (left/right 2, top 1).
-    let chat_block = Block::default()
-        .borders(Borders::ALL)
-        .padding(Padding::new(2, 2, 1, 0));
-    let inner = chat_block.inner(body);
-    let inner_w = inner.width.max(1) as usize;
-    let inner_h = inner.height;
     // Exact wrapped height (word wrap can need more rows than width/cols), so
     // "scrolled to bottom" really shows the newest line.
     let total: usize = Paragraph::new(lines.clone())
@@ -449,15 +456,69 @@ fn draw_help(f: &mut Frame, app: &mut App) {
 
 /// Lines for one entry. In the chat feed (`feed`), the user's own messages are
 /// right-aligned like a typical chat UI; everything else stays left-aligned.
-fn entry_lines<'a>(kind: EntryKind, text: &'a str, bot: Option<&str>, feed: bool) -> Vec<Line<'a>> {
-    if feed && kind == EntryKind::User {
+/// Widest a chat message's text may be: 2/3 of the chat body's inner width.
+pub fn bubble_width(inner_w: usize) -> usize {
+    (inner_w * 2 / 3).max(1)
+}
+
+/// Word-wrap `text` to `width` display columns (long words are split). Keeps blank lines.
+pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    use unicode_width::UnicodeWidthChar;
+    let w = width.max(1);
+    let cw = |c: char| c.width().unwrap_or(0);
+    let mut out = vec![];
+    for para in text.split('\n') {
+        let mut line = String::new();
+        let mut lw = 0;
+        for word in para.split(' ') {
+            let ww: usize = word.chars().map(cw).sum();
+            let sep = usize::from(!line.is_empty() || lw > 0);
+            if lw + sep + ww <= w {
+                if sep == 1 {
+                    line.push(' ');
+                    lw += 1;
+                }
+                line.push_str(word);
+                lw += ww;
+                continue;
+            }
+            if !line.is_empty() {
+                out.push(std::mem::take(&mut line));
+                lw = 0;
+            }
+            for c in word.chars() {
+                if lw + cw(c) > w && !line.is_empty() {
+                    out.push(std::mem::take(&mut line));
+                    lw = 0;
+                }
+                line.push(c);
+                lw += cw(c);
+            }
+        }
+        out.push(line);
+    }
+    out
+}
+
+/// Lines for one entry. Chat messages (`bubble = Some(max)`) are pre-wrapped to `max`
+/// columns: yours right-aligned, the bot's left-aligned. Notices (`None`) wrap normally.
+fn entry_lines<'a>(
+    kind: EntryKind,
+    text: &'a str,
+    bot: Option<&str>,
+    bubble: Option<usize>,
+) -> Vec<Line<'a>> {
+    if let Some(max) = bubble
+        && kind == EntryKind::User
+    {
         let style = Style::default().fg(Color::Green);
         let mut out = vec![
             Line::from(Span::styled("you", style.add_modifier(Modifier::BOLD)))
                 .alignment(Alignment::Right),
         ];
         out.extend(
-            text.lines()
+            wrap_text(text, max)
+                .into_iter()
                 .map(|l| Line::from(Span::styled(l, style)).alignment(Alignment::Right)),
         );
         return out;
@@ -471,13 +532,19 @@ fn entry_lines<'a>(kind: EntryKind, text: &'a str, bot: Option<&str>, feed: bool
             Style::default().fg(Color::Cyan),
         ),
     };
-    text.lines()
+    let pw = unicode_width::UnicodeWidthStr::width(prefix.as_str());
+    let body: Vec<String> = match bubble {
+        // Prefix + text stay within the bubble; keep at least a third for text.
+        Some(max) => wrap_text(text, max.saturating_sub(pw).max(max / 3).max(1)),
+        None => text.lines().map(str::to_string).collect(),
+    };
+    body.into_iter()
         .enumerate()
         .map(|(i, l)| {
             let p = if i == 0 {
                 prefix.clone()
             } else {
-                " ".repeat(prefix.len())
+                " ".repeat(pw)
             };
             Line::from(vec![
                 Span::styled(p, style.add_modifier(Modifier::BOLD)),
@@ -577,6 +644,77 @@ mod tests {
         let y = term.get_cursor_position().unwrap().y as usize;
         assert!((19..=28).contains(&y));
         assert!(r[y].contains("line4"), "{r:#?}");
+    }
+
+    #[test]
+    fn wrap_text_respects_width() {
+        assert_eq!(wrap_text("aa bb cc", 5), vec!["aa bb", "cc"]);
+        assert_eq!(wrap_text("abcdefgh", 3), vec!["abc", "def", "gh"]);
+        assert_eq!(wrap_text("a\n\nb", 10), vec!["a", "", "b"]);
+        for l in wrap_text("日本語のテキスト です", 5) {
+            assert!(unicode_width::UnicodeWidthStr::width(l.as_str()) <= 5);
+        }
+    }
+
+    #[test]
+    fn chat_bubbles_wrap_within_two_thirds() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        crate::app::tests::mock_login(&mut app, "t");
+        let long = "lorem ipsum dolor sit amet consectetur ".repeat(8);
+        let bot = app.active_bot().unwrap().id.clone();
+        app.store
+            .merge_remote(
+                &bot,
+                &[
+                    crate::api::Message {
+                        role: crate::api::Role::User,
+                        text: long.clone(),
+                        remote_id: Some("u1".into()),
+                    },
+                    crate::api::Message {
+                        role: crate::api::Role::Bot,
+                        text: long.clone(),
+                        remote_id: Some("b1".into()),
+                    },
+                ],
+                true,
+            )
+            .unwrap();
+        app.refresh_feed_from_db();
+        let width = 120u16;
+        let mut term = Terminal::new(TestBackend::new(width, 60)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let b = term.backend().buffer().clone();
+        // Chat body: right of the sidebar; inner = body minus borders and 2+2 padding.
+        let body_x = app.config.sidebar_width;
+        let inner_x = body_x + 3;
+        let inner_w = (width - body_x - 6) as usize;
+        let max = inner_w * 2 / 3;
+        assert_eq!(bubble_width(inner_w), max);
+        let mut msg_rows = 0;
+        for y in 0..b.area.height {
+            let row: String = (inner_x..inner_x + inner_w as u16)
+                .map(|x| b[(x, y)].symbol())
+                .collect();
+            if !row.contains("lorem") && !row.contains("amet") && !row.contains("dolor") {
+                continue;
+            }
+            msg_rows += 1;
+            let first = row.find(|c: char| c != ' ').unwrap();
+            let last = row.trim_end().len();
+            assert!(last - first <= max, "row wider than 2/3 ({max}): {row:?}");
+            if row.contains(": ") {
+                assert!(first < 3, "bot message left-aligned: {row:?}");
+            }
+        }
+        assert!(msg_rows >= 8, "long messages wrapped onto several rows");
+        // Some user rows end flush right.
+        let right_flush = (0..b.area.height).any(|y| {
+            let c = b[(inner_x + inner_w as u16 - 1, y)].symbol();
+            c != " " && c != "│"
+        });
+        assert!(right_flush, "user message right-aligned");
     }
 
     #[test]

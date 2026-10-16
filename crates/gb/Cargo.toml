@@ -19,6 +19,7 @@ clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"
 async-trait = "0.1"
 anyhow = "1"
+unicode-width = "0.2"
 rusqlite = { version = "0.37", features = ["bundled"] }
 
 [dev-dependencies]
