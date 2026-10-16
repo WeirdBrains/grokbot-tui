@@ -7,7 +7,10 @@ use crate::api::{
     ApiClient, Bot, GatewayApi, Message, MockClient, Role, Session, mock_ensure_sandbox,
 };
 use crate::commands::{self, Registry};
-use crate::config::{CURSOR_API_ENV, Config, GATEWAY_HEADERS_ENV, GATEWAY_URL_ENV, TOKEN_ENV};
+use crate::config::{
+    CLIENT_TYPE_ENV, CLIENT_VERSION_ENV, CURSOR_API_ENV, Config, GATEWAY_HEADERS_ENV,
+    GATEWAY_URL_ENV, SANDBOX_NAMESPACE_ENV, TOKEN_ENV,
+};
 use crate::storage::{Account, LoginMethod, Store, StoredLogin};
 use anyhow::Result;
 use grokbot_api::{self as gw, ClientOptions, Delivery, Policy};
@@ -102,6 +105,36 @@ pub fn real_desktop_reader() -> DesktopReader {
         };
         Ok((cred, stored))
     })
+}
+
+/// Fill EnsureSandBox client identity on `opts`.
+/// Priority: env → prefs → detected desktop app version (when `detect`) → crate defaults.
+pub fn apply_client_identity(
+    opts: &mut ClientOptions,
+    config: &crate::config::Config,
+    detect: bool,
+) {
+    let env = |k: &str| std::env::var(k).ok().filter(|s| !s.trim().is_empty());
+    if let Some(v) = env(CLIENT_VERSION_ENV) {
+        opts.client_version = v;
+    } else if let Some(v) = config.client_version.clone() {
+        opts.client_version = v;
+    } else if detect
+        && let Some(platform) = gw::desktop::Platform::current()
+        && let Some(v) = gw::desktop::DesktopConfig::new(platform).detect_app_version()
+    {
+        opts.client_version = v;
+    }
+    if let Some(v) = env(CLIENT_TYPE_ENV) {
+        opts.client_type = v;
+    } else if let Some(v) = config.client_type.clone() {
+        opts.client_type = v;
+    }
+    if let Some(v) = env(SANDBOX_NAMESPACE_ENV) {
+        opts.sandbox_namespace = v;
+    } else if let Some(v) = config.sandbox_namespace.clone() {
+        opts.sandbox_namespace = v;
+    }
 }
 
 pub enum Event {
@@ -225,11 +258,12 @@ impl App {
             .ok()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| gw::DEFAULT_BACKEND_BASE.into());
-        let opts = ClientOptions {
+        let mut opts = ClientOptions {
             policy: Policy::from_env(),
             backend_base,
             ..Default::default()
         };
+        apply_client_identity(&mut opts, &config, /*detect=*/ true);
         let (tx, rx) = mpsc::unbounded_channel();
         Ok(Self {
             store,
@@ -721,6 +755,8 @@ impl App {
     /// `cursor-accounts` and exchanging the Cursor access token via EnsureSandBox (like
     /// `/login cursor`). Never reads the desktop session in any other code path.
     pub fn start_desktop_login(&mut self, entry: Option<String>, source: LoginSource) {
+        // Refresh detected desktop app version right before EnsureSandBox (env/prefs still win).
+        apply_client_identity(&mut self.opts, &self.config, true);
         self.connecting = true;
         let (epoch, mock, opts) = (self.epoch, self.mock, self.opts.clone());
         let reader = self.desktop_reader.clone();

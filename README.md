@@ -132,6 +132,9 @@ Redirects are never followed, requests time out after 30 s, responses are capped
 | `GB_GROKBOT_GATEWAY_URL` | Gateway URL for the token above (else the account's stored gateway URL) |
 | `GB_GROKBOT_GATEWAY_HEADERS` | Optional JSON object of extra gateway headers |
 | `GB_CURSOR_API_BASE_URL` | Override the EnsureSandBox backend (still must be `*.cursor.sh` / `*.cursor.com`) |
+| `GB_CURSOR_CLIENT_VERSION` | Override `x-cursor-client-version` (else pref `cursor.client_version`, else detect installed Grok Bot, else `0.70.2`) |
+| `GB_CURSOR_CLIENT_TYPE` | Override `x-cursor-client-type` (default `sand`) |
+| `GB_SAND_BOX_NAMESPACE` | Override `x-sand-box-namespace` (default `prod`) |
 | `GB_ALLOW_LOCAL_GATEWAY` | `1` to permit loopback gateways (development) |
 | `GB_ACCOUNT` | Starting account alias |
 

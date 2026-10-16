@@ -9,7 +9,18 @@ pub const GATEWAY_URL_ENV: &str = "GB_GROKBOT_GATEWAY_URL";
 pub const GATEWAY_HEADERS_ENV: &str = "GB_GROKBOT_GATEWAY_HEADERS";
 /// Override the Cursor backend used for EnsureSandBox (must still be *.cursor.sh / *.cursor.com).
 pub const CURSOR_API_ENV: &str = "GB_CURSOR_API_BASE_URL";
+/// Override `x-cursor-client-version` for EnsureSandBox (highest priority).
+pub const CLIENT_VERSION_ENV: &str = "GB_CURSOR_CLIENT_VERSION";
+/// Override `x-cursor-client-type` for EnsureSandBox.
+pub const CLIENT_TYPE_ENV: &str = "GB_CURSOR_CLIENT_TYPE";
+/// Override `x-sand-box-namespace` for EnsureSandBox.
+pub const SANDBOX_NAMESPACE_ENV: &str = "GB_SAND_BOX_NAMESPACE";
 pub const DEFAULT_ACCOUNT: &str = "default";
+
+/// Pref key for `x-cursor-client-version` (account-scoped).
+pub const PREF_CLIENT_VERSION: &str = "cursor.client_version";
+pub const PREF_CLIENT_TYPE: &str = "cursor.client_type";
+pub const PREF_SANDBOX_NAMESPACE: &str = "sand.box_namespace";
 
 /// Preference keys shared by all accounts. Every other key is account-scoped.
 pub const GLOBAL_KEYS: &[&str] = &["active_account", "ui.sidebar_width"];
@@ -26,6 +37,10 @@ pub struct Config {
     /// Show agents flagged `isHiddenFromSidebar`.
     pub show_hidden_bots: bool,
     pub sidebar_width: u16,
+    /// Optional EnsureSandBox `x-cursor-client-version` override (pref).
+    pub client_version: Option<String>,
+    pub client_type: Option<String>,
+    pub sandbox_namespace: Option<String>,
 }
 
 impl Default for Config {
@@ -35,6 +50,9 @@ impl Default for Config {
             active_bot: None,
             show_hidden_bots: false,
             sidebar_width: 24,
+            client_version: None,
+            client_type: None,
+            sandbox_namespace: None,
         }
     }
 }
@@ -47,6 +65,9 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         ("active_bot", String::new()),
         ("show_hidden_bots", c.show_hidden_bots.to_string()),
         ("ui.sidebar_width", c.sidebar_width.to_string()),
+        (PREF_CLIENT_VERSION, String::new()),
+        (PREF_CLIENT_TYPE, String::new()),
+        (PREF_SANDBOX_NAMESPACE, String::new()),
     ]
 }
 
@@ -63,6 +84,9 @@ impl Config {
                 .and_then(|v| v.parse().ok())
                 .filter(|w| (10..=80).contains(w))
                 .unwrap_or(d.sidebar_width),
+            client_version: o(PREF_CLIENT_VERSION),
+            client_type: o(PREF_CLIENT_TYPE),
+            sandbox_namespace: o(PREF_SANDBOX_NAMESPACE),
         }
     }
 }
