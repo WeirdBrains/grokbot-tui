@@ -33,7 +33,6 @@ struct Cli {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let custom = cli.data_dir.is_some();
     let store = Store::open(
         match cli.data_dir {
             Some(d) => d,
@@ -41,17 +40,8 @@ fn main() -> Result<()> {
         },
         cli.account.as_deref(),
     )?;
-    // One-time best-effort import from the pre-SQLite location.
-    let imported = if custom {
-        None
-    } else {
-        dirs::home_dir().and_then(|h| store.import_legacy(&h.join(".grokbot-tui")))
-    };
     let rt = tokio::runtime::Runtime::new()?;
     let mut app = App::new(store, rt.handle().clone(), cli.mock)?;
-    if let Some(msg) = imported {
-        app.info(msg);
-    }
     app.init();
 
     let mut term = ratatui::init();
@@ -64,8 +54,9 @@ fn main() -> Result<()> {
 
 fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     while !app.should_quit {
+        app.tick();
         term.draw(|f| ui::draw(f, app))?;
-        if !event::poll(Duration::from_millis(250))? {
+        if !event::poll(Duration::from_millis(100))? {
             continue;
         }
         match event::read()? {
@@ -91,16 +82,7 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     KeyCode::PageDown => app.scroll_down(10),
                     KeyCode::Esc => {
                         app.focus = Focus::Input;
-                        if app.mode == app::InputMode::ConfirmRemove {
-                            app.mode = app::InputMode::Normal;
-                            app.pending_remove = None;
-                            app.input.clear();
-                            app.info("Account removal cancelled.".into());
-                        } else if app.mode == app::InputMode::Token {
-                            app.mode = app::InputMode::Normal;
-                            app.input.clear();
-                            app.info("Login cancelled.".into());
-                        }
+                        app.cancel_input_mode();
                     }
                     code if app.focus == Focus::Sidebar => match code {
                         KeyCode::Up | KeyCode::Char('k') => {

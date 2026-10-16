@@ -20,11 +20,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     .areas(mid);
 
     // Top bar
-    let user = app
-        .user
-        .as_ref()
-        .map(|u| u.name.as_str())
-        .unwrap_or("not logged in");
+    let user = match (&app.user_label, app.connecting) {
+        (Some(l), _) => l.as_str(),
+        (None, true) => "connecting…",
+        (None, false) => "not logged in",
+    };
     let bot = app.active_bot().map(|b| b.name.as_str()).unwrap_or("none");
     let mut spans = vec![
         Span::styled(
@@ -35,7 +35,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(
-            "  account: {}   user: {user}   bot: {bot}",
+            "  account: {}   login: {user}   bot: {bot}",
             app.account().alias
         )),
     ];
@@ -113,6 +113,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let scroll = app.scroll.min(max_off);
     let off = max_off - scroll;
     let title = match &bot_name {
+        Some(n) if app.is_typing() => {
+            const SPIN: [char; 4] = ['⠋', '⠙', '⠹', '⠸'];
+            let ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            format!(
+                " Chat: {n} · {n} is replying {} ",
+                SPIN[(ms / 150 % 4) as usize]
+            )
+        }
         Some(n) => format!(" Chat: {n} "),
         None => " Output ".into(),
     };
@@ -127,7 +138,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Bottom input bar
     let (shown, title) = match app.mode {
-        InputMode::Token => ("*".repeat(app.input.chars().count()), " Token (masked) "),
+        InputMode::GatewayToken => (
+            "*".repeat(app.input.chars().count()),
+            " Gateway token (masked, Esc cancels) ",
+        ),
+        InputMode::CursorToken => (
+            "*".repeat(app.input.chars().count()),
+            " Cursor access token (masked, Esc cancels) ",
+        ),
+        InputMode::GatewayUrl => (app.input.clone(), " Gateway URL (Esc cancels) "),
         InputMode::Normal => (app.input.clone(), " /command or message "),
         InputMode::ConfirmRemove => (
             app.input.clone(),
@@ -192,14 +211,13 @@ mod tests {
     fn renders_bars() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = crate::app::tests::test_app(&rt);
-        app.input = "/login t".into();
-        app.submit();
+        crate::app::tests::mock_login(&mut app, "t");
         let mut term = Terminal::new(TestBackend::new(80, 20)).unwrap();
         term.draw(|f| draw(f, &mut app)).unwrap();
         let buf = term.backend().buffer().clone();
         let text: String = buf.content().iter().map(|c| c.symbol()).collect();
         assert!(text.contains("account: default"));
-        assert!(text.contains("user: mock-user"));
+        assert!(text.contains("login: gateway · box.cursorvm.com"), "{text}");
         assert!(text.contains("@default"));
         assert!(text.contains("bot: Helper"));
         assert!(text.contains("Coder"));

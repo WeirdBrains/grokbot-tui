@@ -39,8 +39,8 @@ pub fn registry() -> Registry {
             Command {
                 name: "login",
                 aliases: &[],
-                usage: "/login [token]",
-                help: "Log in with an API token (prompted, masked, if omitted)",
+                usage: "/login gateway [url] | cursor",
+                help: "Log in the active account: gateway URL + token, or a Cursor access token",
                 run: login,
             },
             Command {
@@ -54,7 +54,7 @@ pub fn registry() -> Registry {
                 name: "whoami",
                 aliases: &[],
                 usage: "/whoami",
-                help: "Show the logged-in user",
+                help: "Show the active account's login details",
                 run: whoami,
             },
             Command {
@@ -82,7 +82,7 @@ pub fn registry() -> Registry {
                 name: "account",
                 aliases: &["acct"],
                 usage: "/account [add|use|rename|remove]",
-                help: "List accounts; add <alias> [api_base_url], use <alias>, rename <old> <new>, remove <alias>",
+                help: "List accounts; add <alias>, use <alias>, rename <old> <new>, remove <alias>",
                 run: account,
             },
             Command {
@@ -136,33 +136,48 @@ fn help(app: &mut App, args: &str) -> Result<()> {
 }
 
 fn login(app: &mut App, args: &str) -> Result<()> {
-    if args.is_empty() {
-        app.mode = InputMode::Token;
-        app.info("Paste your API token and press Enter (input is masked; empty cancels).".into());
-    } else {
-        finish_login(app, args);
+    let mut it = args.split_whitespace();
+    match (it.next(), it.next(), it.next()) {
+        (Some("gateway"), url, None) => {
+            app.mode = InputMode::GatewayUrl;
+            match url {
+                Some(u) => set_gateway_url(app, u),
+                None => app.info(
+                    "Enter the gateway URL (e.g. https://<box>.cursorvm.com). Empty cancels."
+                        .into(),
+                ),
+            }
+        }
+        (Some("cursor"), None, None) => {
+            app.mode = InputMode::CursorToken;
+            app.info(
+                "Paste your Cursor access token (masked; not a dashboard API key). It is exchanged via EnsureSandBox and stored so gb can re-exchange when the gateway token expires. Empty cancels."
+                    .into(),
+            );
+        }
+        _ => bail!("Usage: /login gateway [url]  |  /login cursor"),
     }
     Ok(())
 }
 
-/// Validate via whoami; persist only on success.
-// Future: an OAuth device-code flow would obtain `token` here instead of a paste.
-pub fn finish_login(app: &mut App, token: &str) {
-    if token.is_empty() {
-        app.info("Login cancelled.".into());
-        return;
-    }
-    match app.authenticate(token.to_string()) {
-        Ok(()) => {
-            match app
-                .store
-                .save_credentials(token, app.user.as_ref(), &app.config.api_base_url)
-            {
-                Ok(()) => app.info(format!("Token saved to {}", app.store.db_path().display())),
-                Err(e) => app.error(format!("Logged in, but could not save token: {e:#}")),
-            }
+/// Validate a gateway URL against the host allowlist, then ask for the token.
+pub fn set_gateway_url(app: &mut App, url: &str) {
+    let checked = if app.mock {
+        Ok(url.trim_end_matches('/').to_string())
+    } else {
+        app.opts.policy.check_gateway(url)
+    };
+    match checked {
+        Ok(u) => {
+            app.login_url_draft = Some(u);
+            app.mode = InputMode::GatewayToken;
+            app.info("Paste the gateway token (masked). Empty cancels.".into());
         }
-        Err(e) => app.error(format!("Login failed: {e:#}")),
+        Err(e) => {
+            app.mode = InputMode::Normal;
+            app.login_url_draft = None;
+            app.error(e);
+        }
     }
 }
 
@@ -172,24 +187,57 @@ fn logout(app: &mut App, _: &str) -> Result<()> {
 }
 
 fn whoami(app: &mut App, _: &str) -> Result<()> {
-    let u = app.block(app.api.whoami())?;
-    app.info(format!("{} (id {})", u.name, u.id));
+    let alias = app.account().alias.clone();
+    let mut lines = vec![format!("account: {alias}")];
+    match &app.user_label {
+        Some(l) => lines.push(format!("session: {l}")),
+        None => lines.push(if app.connecting {
+            "session: connecting…".into()
+        } else {
+            "session: not logged in".into()
+        }),
+    }
+    if let Some(l) = app.store.load_login()? {
+        lines.push(format!("stored login: {:?}", l.method).to_lowercase());
+        lines.push(format!("gateway: {}", l.session.gateway_url));
+        if !l.session.headers.is_empty() {
+            lines.push(format!(
+                "extra headers: {}",
+                l.session
+                    .headers
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        lines.push(format!(
+            "cursor token stored: {}",
+            if l.cursor_token.is_some() {
+                "yes"
+            } else {
+                "no"
+            }
+        ));
+    } else {
+        lines.push("stored login: none".into());
+    }
+    if app.store.is_startup_account()
+        && std::env::var(crate::config::TOKEN_ENV).is_ok_and(|t| !t.trim().is_empty())
+    {
+        lines.push(format!(
+            "{} override: active for this account",
+            crate::config::TOKEN_ENV
+        ));
+    }
+    lines.push(format!("database: {}", app.store.db_path().display()));
+    lines.push("(The gateway has no identity call, so no user name is available.)".into());
+    app.info(lines.join("\n"));
     Ok(())
 }
 
 fn bots(app: &mut App, _: &str) -> Result<()> {
-    let b = app.block(app.api.list_bots())?;
-    app.bots = b;
-    let list = app
-        .bots
-        .iter()
-        .map(|b| format!("  {:<12} {:<12} {}", b.id, b.name, b.description))
-        .collect::<Vec<_>>()
-        .join("\n");
-    app.info(format!("Bots:\n{list}"));
-    if app.active.is_none_or(|i| i >= app.bots.len()) && !app.bots.is_empty() {
-        app.select_bot(0);
-    }
+    app.refresh_bots(true);
     Ok(())
 }
 
@@ -207,11 +255,14 @@ fn bot(app: &mut App, args: &str) -> Result<()> {
 }
 
 fn history(app: &mut App, _: &str) -> Result<()> {
-    let Some(id) = app.active_bot().map(|b| b.id.clone()) else {
+    if app.active_bot().is_none() {
         bail!("No active bot")
-    };
-    app.load_history(&id);
-    app.push(EntryKind::System, "History reloaded.".into());
+    }
+    app.request_history();
+    app.push(
+        EntryKind::System,
+        "Fetching the last 200 transcript entries…".into(),
+    );
     Ok(())
 }
 
@@ -229,8 +280,8 @@ fn account(app: &mut App, args: &str) -> Result<()> {
                 .join("\n");
             app.info(format!("Accounts (* = active):\n{list}"));
         }
-        ["add", alias] | ["add", alias, _] => {
-            let a = app.store.add_account(alias, parts.get(2).copied())?;
+        ["add", alias] => {
+            let a = app.store.add_account(alias)?;
             app.info(format!(
                 "Added account '{}'. Switch with /account use {}.",
                 a.alias, a.alias
@@ -257,7 +308,7 @@ fn account(app: &mut App, args: &str) -> Result<()> {
             ));
         }
         _ => bail!(
-            "Usage: /account [list | add <alias> [api_base_url] | use <alias> | rename <old> <new> | remove <alias>]"
+            "Usage: /account [list | add <alias> | use <alias> | rename <old> <new> | remove <alias>]"
         ),
     }
     Ok(())
@@ -307,13 +358,10 @@ fn prefs(app: &mut App, args: &str) -> Result<()> {
         ("set", Some(k), v) => {
             let v = v.unwrap_or("").trim();
             app.store.set_pref(k, v)?;
-            if k.starts_with("api_") || k.starts_with("paths.") || k == "request_timeout_secs" {
-                // Apply API changes now: rebuild the client and keep the session token.
-                app.reload_account_config()?;
-                let tok = app.store.load_token();
-                app.api.set_token(tok);
-            } else {
-                app.config = app.store.load_config()?;
+            app.reload_config()?;
+            if k == "show_hidden_bots" && !app.all_bots.is_empty() {
+                let all = app.all_bots.clone();
+                app.apply_bots(all);
             }
             let scope = if crate::config::is_global(k) {
                 "global"

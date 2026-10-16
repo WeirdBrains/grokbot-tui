@@ -4,8 +4,8 @@
 //! account prefs all carry `account_id` (FK → `accounts`, `ON DELETE CASCADE`).
 //! A [`Store`] is always bound to one active account and every scoped query
 //! filters by it; only `global_prefs` is shared.
-use crate::api::{Bot, Message, Role, User};
-use crate::config::{Config, DEFAULT_ACCOUNT, TOKEN_ENV, default_prefs, is_global};
+use crate::api::{Bot, Message, Role, Session};
+use crate::config::{Config, DEFAULT_ACCOUNT, default_prefs, is_global};
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::BTreeMap;
@@ -115,8 +115,44 @@ const V2: &str = "CREATE TABLE accounts (
         WHERE key NOT IN ('ui.sidebar_width', 'legacy_imported', 'active_account');
     DROP TABLE prefs;";
 
+/// v2 -> v3: gateway credentials (the v2 placeholder-API token is dropped, it never
+/// worked), transcript ids on messages, bot flags, and removal of placeholder API prefs.
+const V3: &str = "DROP TABLE credentials;
+    CREATE TABLE credentials (
+        account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+        method TEXT NOT NULL CHECK (method IN ('gateway', 'cursor')),
+        gateway_url TEXT NOT NULL,
+        gateway_token TEXT NOT NULL,
+        gateway_headers TEXT NOT NULL DEFAULT '{}',
+        cursor_token TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    ALTER TABLE messages ADD COLUMN remote_id TEXT;
+    CREATE UNIQUE INDEX messages_remote ON messages(account_id, bot_id, remote_id) WHERE remote_id IS NOT NULL;
+    ALTER TABLE bots ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE bots ADD COLUMN is_group INTEGER NOT NULL DEFAULT 0;
+    DELETE FROM account_prefs WHERE key IN ('api_base_url', 'request_timeout_secs') OR key LIKE 'paths.%';
+    DELETE FROM global_prefs WHERE key = 'legacy_imported';";
+
 /// Ordered migrations; index + 1 == resulting `PRAGMA user_version`.
-const MIGRATIONS: &[&str] = &[V1, V2];
+const MIGRATIONS: &[&str] = &[V1, V2, V3];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginMethod {
+    /// Gateway URL + gateway token pasted by the user.
+    Gateway,
+    /// Cursor access token exchanged via EnsureSandBox (re-exchanged on 401).
+    Cursor,
+}
+
+/// A stored login for one account.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredLogin {
+    pub method: LoginMethod,
+    pub session: Session,
+    pub cursor_token: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Account {
@@ -187,7 +223,7 @@ impl Store {
                 Some(a) => a,
                 None => match s.find_account(DEFAULT_ACCOUNT)? {
                     Some(a) => a,
-                    None => s.add_account(DEFAULT_ACCOUNT, None)?,
+                    None => s.add_account(DEFAULT_ACCOUNT)?,
                 },
             },
         };
@@ -246,8 +282,8 @@ impl Store {
             .optional()?)
     }
 
-    /// Create an account with default prefs (optionally its own API base URL).
-    pub fn add_account(&self, alias: &str, api_base: Option<&str>) -> Result<Account> {
+    /// Create an account with default prefs.
+    pub fn add_account(&self, alias: &str) -> Result<Account> {
         let alias = validate_alias(alias)?;
         if self.find_account(alias)?.is_some() {
             bail!("account '{alias}' already exists");
@@ -259,12 +295,6 @@ impl Store {
             tx.execute(
                 "INSERT INTO account_prefs(account_id, key, value) VALUES (?1, ?2, ?3)",
                 params![id, k, v],
-            )?;
-        }
-        if let Some(b) = api_base {
-            tx.execute(
-                "UPDATE account_prefs SET value = ?2 WHERE account_id = ?1 AND key = 'api_base_url'",
-                params![id, b],
             )?;
         }
         tx.commit()?;
@@ -408,40 +438,62 @@ impl Store {
 
     // ---- credentials (active account)
 
-    /// `GB_GROKBOT_TOKEN` wins, but only for the account selected at startup; then the stored credential.
-    pub fn load_token(&self) -> Option<String> {
-        if self.env_account == Some(self.account.id)
-            && let Ok(t) = std::env::var(TOKEN_ENV)
-            && !t.trim().is_empty()
-        {
-            return Some(t.trim().to_string());
-        }
-        self.load_stored_token()
-    }
-
-    pub fn env_token_applies(&self) -> bool {
+    /// True when the active account is the one selected at startup (where `GB_GROKBOT_TOKEN` applies).
+    pub fn is_startup_account(&self) -> bool {
         self.env_account == Some(self.account.id)
-            && std::env::var(TOKEN_ENV).is_ok_and(|t| !t.trim().is_empty())
     }
 
-    pub fn load_stored_token(&self) -> Option<String> {
-        self.conn
+    pub fn load_login(&self) -> Result<Option<StoredLogin>> {
+        let row = self
+            .conn
             .query_row(
-                "SELECT token FROM credentials WHERE account_id = ?1",
+                "SELECT method, gateway_url, gateway_token, gateway_headers, cursor_token FROM credentials WHERE account_id = ?1",
                 [self.account.id],
-                |r| r.get(0),
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, Option<String>>(4)?,
+                    ))
+                },
             )
-            .optional()
-            .ok()
-            .flatten()
+            .optional()?;
+        Ok(row.map(|(m, url, tok, hdrs, cur)| StoredLogin {
+            method: if m == "cursor" {
+                LoginMethod::Cursor
+            } else {
+                LoginMethod::Gateway
+            },
+            session: Session {
+                gateway_url: url,
+                gateway_token: tok,
+                headers: serde_json::from_str(&hdrs).unwrap_or_default(),
+            },
+            cursor_token: cur,
+        }))
     }
 
-    pub fn save_credentials(&self, token: &str, user: Option<&User>, api_base: &str) -> Result<()> {
+    pub fn save_login(&self, l: &StoredLogin) -> Result<()> {
+        let method = match l.method {
+            LoginMethod::Gateway => "gateway",
+            LoginMethod::Cursor => "cursor",
+        };
         self.conn.execute(
-            "INSERT INTO credentials(account_id, token, user_id, user_name, api_base) VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(account_id) DO UPDATE SET token = excluded.token, user_id = excluded.user_id,
-               user_name = excluded.user_name, api_base = excluded.api_base, updated_at = datetime('now')",
-            params![self.account.id, token.trim(), user.map(|u| &u.id), user.map(|u| &u.name), api_base],
+            "INSERT INTO credentials(account_id, method, gateway_url, gateway_token, gateway_headers, cursor_token)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(account_id) DO UPDATE SET method = excluded.method, gateway_url = excluded.gateway_url,
+               gateway_token = excluded.gateway_token, gateway_headers = excluded.gateway_headers,
+               cursor_token = excluded.cursor_token, updated_at = datetime('now')",
+            params![
+                self.account.id,
+                method,
+                l.session.gateway_url,
+                l.session.gateway_token,
+                serde_json::to_string(&l.session.headers)?,
+                l.cursor_token
+            ],
         )?;
         Ok(())
     }
@@ -460,9 +512,10 @@ impl Store {
     pub fn save_bots(&self, bots: &[Bot]) -> Result<()> {
         for b in bots {
             self.conn.execute(
-                "INSERT INTO bots(account_id, bot_id, name, description) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(account_id, bot_id) DO UPDATE SET name = excluded.name, description = excluded.description",
-                params![self.account.id, b.id, b.name, b.description],
+                "INSERT INTO bots(account_id, bot_id, name, description, hidden, is_group) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(account_id, bot_id) DO UPDATE SET name = excluded.name, description = excluded.description,
+                   hidden = excluded.hidden, is_group = excluded.is_group",
+                params![self.account.id, b.id, b.name, b.description, b.hidden, b.is_group],
             )?;
         }
         Ok(())
@@ -470,13 +523,15 @@ impl Store {
 
     pub fn bots(&self) -> Result<Vec<Bot>> {
         let mut st = self.conn.prepare(
-            "SELECT bot_id, name, description FROM bots WHERE account_id = ?1 ORDER BY rowid",
+            "SELECT bot_id, name, description, hidden, is_group FROM bots WHERE account_id = ?1 ORDER BY rowid",
         )?;
         let rows = st.query_map([self.account.id], |r| {
             Ok(Bot {
                 id: r.get(0)?,
                 name: r.get(1)?,
                 description: r.get(2)?,
+                hidden: r.get(3)?,
+                is_group: r.get(4)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -496,15 +551,15 @@ impl Store {
         self.ensure_bot(bot_id)?;
         let role = if m.role == Role::User { "user" } else { "bot" };
         self.conn.execute(
-            "INSERT INTO messages(account_id, bot_id, role, text) VALUES (?1, ?2, ?3, ?4)",
-            params![self.account.id, bot_id, role, m.text],
+            "INSERT INTO messages(account_id, bot_id, role, text, remote_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![self.account.id, bot_id, role, m.text, m.remote_id],
         )?;
         Ok(())
     }
 
     pub fn messages(&self, bot_id: &str) -> Result<Vec<Message>> {
         let mut st = self.conn.prepare(
-            "SELECT role, text FROM messages WHERE account_id = ?1 AND bot_id = ?2 ORDER BY id",
+            "SELECT role, text, remote_id FROM messages WHERE account_id = ?1 AND bot_id = ?2 ORDER BY id",
         )?;
         let rows = st.query_map(params![self.account.id, bot_id], |r| {
             let role: String = r.get(0)?;
@@ -515,16 +570,64 @@ impl Store {
                     Role::Bot
                 },
                 text: r.get(1)?,
+                remote_id: r.get(2)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn replace_messages(&self, bot_id: &str, msgs: &[Message]) -> Result<()> {
-        self.clear_messages(bot_id)?;
+    /// Merge transcript entries into the stored chat; returns the newly added messages.
+    ///
+    /// Entries with an id are de-duplicated by id. A user entry matching a locally
+    /// pending send (`remote_id` = `pending:<nonce>`) adopts the server id instead of
+    /// duplicating. Entries without an id are added only if no identical message exists.
+    pub fn merge_remote(&self, bot_id: &str, msgs: &[Message]) -> Result<Vec<Message>> {
+        let id = self.account.id;
+        let mut added = vec![];
         for m in msgs {
+            let role = if m.role == Role::User { "user" } else { "bot" };
+            if let Some(rid) = &m.remote_id {
+                let exists: bool = self.conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM messages WHERE account_id = ?1 AND bot_id = ?2 AND remote_id = ?3)",
+                    params![id, bot_id, rid],
+                    |r| r.get(0),
+                )?;
+                if exists {
+                    continue;
+                }
+                if m.role == Role::User {
+                    let n = self.conn.execute(
+                        "UPDATE messages SET remote_id = ?4 WHERE id = (
+                           SELECT id FROM messages WHERE account_id = ?1 AND bot_id = ?2 AND text = ?3
+                             AND remote_id LIKE 'pending:%' ORDER BY id LIMIT 1)",
+                        params![id, bot_id, m.text, rid],
+                    )?;
+                    if n > 0 {
+                        continue;
+                    }
+                }
+            } else {
+                let exists: bool = self.conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM messages WHERE account_id = ?1 AND bot_id = ?2 AND role = ?3 AND text = ?4)",
+                    params![id, bot_id, role, m.text],
+                    |r| r.get(0),
+                )?;
+                if exists {
+                    continue;
+                }
+            }
             self.append_message(bot_id, m)?;
+            added.push(m.clone());
         }
+        Ok(added)
+    }
+
+    /// Delete a locally pending message (e.g. its send was rejected).
+    pub fn delete_pending(&self, bot_id: &str, nonce: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM messages WHERE account_id = ?1 AND bot_id = ?2 AND remote_id = ?3",
+            params![self.account.id, bot_id, format!("pending:{nonce}")],
+        )?;
         Ok(())
     }
 
@@ -571,47 +674,6 @@ impl Store {
             )?,
         })
     }
-
-    // ---- legacy import
-
-    /// One-time best-effort import from `~/.grokbot-tui` into the active account.
-    pub fn import_legacy(&self, old: &Path) -> Option<String> {
-        if self.get_pref("legacy_imported").ok().flatten().is_some() || !old.is_dir() {
-            return None;
-        }
-        let mut done = vec![];
-        if let Ok(s) = fs::read_to_string(old.join("config.toml"))
-            && let Ok(v) = s.parse::<toml::Table>()
-        {
-            let n = flatten(&v, "")
-                .iter()
-                .filter(|(k, val)| self.set_pref(k, val).is_ok())
-                .count();
-            done.push(format!("{n} preferences"));
-        }
-        if let Ok(t) = fs::read_to_string(old.join("credentials"))
-            && !t.trim().is_empty()
-            && self.load_stored_token().is_none()
-        {
-            let base = self
-                .get_pref("api_base_url")
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            if self.save_credentials(t.trim(), None, &base).is_ok() {
-                done.push("credential".into());
-            }
-        }
-        let _ = self.set_pref("legacy_imported", "1");
-        (!done.is_empty()).then(|| {
-            format!(
-                "Imported {} from {} into account '{}'",
-                done.join(" and "),
-                old.display(),
-                self.account.alias
-            )
-        })
-    }
 }
 
 fn user_version(conn: &Connection) -> Result<usize> {
@@ -643,19 +705,6 @@ fn validate_alias(a: &str) -> Result<&str> {
     Ok(a)
 }
 
-fn flatten(t: &toml::Table, prefix: &str) -> Vec<(String, String)> {
-    let mut out = vec![];
-    for (k, v) in t {
-        let key = format!("{prefix}{k}");
-        match v {
-            toml::Value::Table(sub) => out.extend(flatten(sub, &format!("{key}."))),
-            toml::Value::String(s) => out.push((key, s.clone())),
-            other => out.push((key, other.to_string())),
-        }
-    }
-    out
-}
-
 #[cfg(unix)]
 fn set_mode(p: &Path, mode: u32) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -676,6 +725,23 @@ mod tests {
         Message {
             role,
             text: t.into(),
+            remote_id: None,
+        }
+    }
+
+    fn rmsg(role: Role, t: &str, id: &str) -> Message {
+        Message {
+            role,
+            text: t.into(),
+            remote_id: Some(id.into()),
+        }
+    }
+
+    fn login(tok: &str) -> StoredLogin {
+        StoredLogin {
+            method: LoginMethod::Gateway,
+            session: Session::new("https://x.cursorvm.com", tok),
+            cursor_token: None,
         }
     }
 
@@ -706,27 +772,33 @@ mod tests {
         }
     }
 
+    fn v1_db(dir: &Path) {
+        fs::create_dir_all(dir).unwrap();
+        let c = Connection::open(dir.join("context.db")).unwrap();
+        c.execute_batch(V1).unwrap();
+        c.execute_batch(
+            "PRAGMA user_version = 1;
+             INSERT INTO credentials(id, token, user_id, user_name, api_base) VALUES (1, 'tok', 'u1', 'me', 'http://old');
+             INSERT INTO messages(bot_id, role, text) VALUES ('helper', 'user', 'hi'), ('helper', 'bot', 'yo');
+             INSERT INTO memory(bot_id, key, value) VALUES ('coder', 'lang', 'rust');
+             INSERT INTO prefs VALUES ('api_base_url', 'http://old'), ('paths.bots', '/b'), ('active_bot', 'helper'),
+               ('ui.sidebar_width', '30'), ('legacy_imported', '1');",
+        )
+        .unwrap();
+    }
+
     #[test]
-    fn migration_from_v1_moves_data_to_default_account() {
+    fn migration_from_v1_to_v3() {
         let d = tempfile::tempdir().unwrap();
         let dir = d.path().join("gb");
-        fs::create_dir_all(&dir).unwrap();
-        {
-            let c = Connection::open(dir.join("context.db")).unwrap();
-            c.execute_batch(V1).unwrap();
-            c.execute_batch(
-                "PRAGMA user_version = 1;
-                 INSERT INTO credentials(id, token, user_id, user_name, api_base) VALUES (1, 'tok', 'u1', 'me', 'http://old');
-                 INSERT INTO messages(bot_id, role, text) VALUES ('helper', 'user', 'hi'), ('helper', 'bot', 'yo');
-                 INSERT INTO memory(bot_id, key, value) VALUES ('coder', 'lang', 'rust');
-                 INSERT INTO prefs VALUES ('api_base_url', 'http://old'), ('active_bot', 'helper'), ('ui.sidebar_width', '30');",
-            )
-            .unwrap();
-        }
+        v1_db(&dir);
         let s = Store::open(&dir, None).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 2);
+        assert_eq!(s.schema_version().unwrap(), 3);
         assert_eq!(s.account().alias, "default");
-        assert_eq!(s.load_stored_token().as_deref(), Some("tok"));
+        assert!(
+            s.load_login().unwrap().is_none(),
+            "placeholder token dropped"
+        );
         assert_eq!(
             s.messages("helper").unwrap(),
             vec![msg(Role::User, "hi"), msg(Role::Bot, "yo")]
@@ -736,59 +808,77 @@ mod tests {
             vec![("lang".into(), "rust".into())]
         );
         let c = s.load_config().unwrap();
-        assert_eq!(c.api_base_url, "http://old");
         assert_eq!(c.active_bot.as_deref(), Some("helper"));
         assert_eq!(c.sidebar_width, 30);
-        let scopes = s.list_prefs_scoped().unwrap();
+        let keys: Vec<String> = s
+            .list_prefs_scoped()
+            .unwrap()
+            .into_iter()
+            .map(|(_, k, _)| k)
+            .collect();
         assert!(
-            scopes
+            !keys
                 .iter()
-                .any(|(sc, k, _)| *sc == Scope::Global && k == "ui.sidebar_width")
+                .any(|k| k == "api_base_url" || k.starts_with("paths.") || k == "legacy_imported"),
+            "{keys:?}"
         );
-        assert!(
-            scopes
-                .iter()
-                .any(|(sc, k, _)| *sc == Scope::Account && k == "api_base_url")
-        );
+        assert!(keys.iter().any(|k| k == "show_hidden_bots"));
+    }
+
+    #[test]
+    fn migration_from_v2_keeps_accounts_and_chats() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("gb");
+        v1_db(&dir);
+        {
+            let c = Connection::open(dir.join("context.db")).unwrap();
+            c.execute_batch(V2).unwrap();
+            c.execute_batch(
+                "PRAGMA user_version = 2;
+                 INSERT INTO accounts(id, alias) VALUES (2, 'work');
+                 INSERT INTO bots(account_id, bot_id, name) VALUES (2, 'b', 'B');
+                 INSERT INTO messages(account_id, bot_id, role, text) VALUES (2, 'b', 'user', 'work msg');
+                 INSERT INTO account_prefs VALUES (2, 'paths.send', '/s');",
+            )
+            .unwrap();
+        }
+        let mut s = Store::open(&dir, Some("work")).unwrap();
+        assert_eq!(s.schema_version().unwrap(), 3);
+        assert_eq!(s.messages("b").unwrap(), vec![msg(Role::User, "work msg")]);
+        assert!(s.get_pref("paths.send").unwrap().is_none());
+        s.use_account("default").unwrap();
+        assert_eq!(s.messages("helper").unwrap().len(), 2);
     }
 
     #[test]
     fn accounts_are_strictly_isolated() {
         let (mut s, _d) = store();
-        s.add_account("work", Some("http://work")).unwrap();
-        // Populate "default" (A).
-        s.save_credentials(
-            "tokA",
-            Some(&User {
-                id: "a".into(),
-                name: "alice".into(),
-            }),
-            "http://a",
-        )
-        .unwrap();
+        s.add_account("work").unwrap();
+        s.save_login(&login("tokA")).unwrap();
         s.append_message("helper", &msg(Role::User, "secret A"))
             .unwrap();
         s.set_memory("helper", "k", "memA").unwrap();
-        s.set_pref("api_base_url", "http://a").unwrap();
+        s.set_pref("default_bot", "helper").unwrap();
         s.set_pref("ui.sidebar_width", "40").unwrap(); // global
 
-        // Switch to "work" (B): sees none of A's data.
         s.use_account("work").unwrap();
-        assert!(s.load_stored_token().is_none());
+        assert!(s.load_login().unwrap().is_none());
         assert!(s.messages("helper").unwrap().is_empty());
         assert!(s.list_memory("helper").unwrap().is_empty());
         assert!(s.bots().unwrap().is_empty());
-        assert_eq!(s.load_config().unwrap().api_base_url, "http://work");
-        assert_eq!(s.load_config().unwrap().sidebar_width, 40); // global pref shared
-        s.save_credentials("tokB", None, "http://work").unwrap();
+        assert_eq!(s.load_config().unwrap().default_bot, None);
+        assert_eq!(s.load_config().unwrap().sidebar_width, 40);
+        s.save_login(&login("tokB")).unwrap();
         s.append_message("helper", &msg(Role::User, "secret B"))
             .unwrap();
         s.set_memory("helper", "k", "memB").unwrap();
         assert!(s.delete_credentials().unwrap());
 
-        // Back to A: untouched by B's writes and B's logout.
         s.use_account("default").unwrap();
-        assert_eq!(s.load_stored_token().as_deref(), Some("tokA"));
+        assert_eq!(
+            s.load_login().unwrap().unwrap().session.gateway_token,
+            "tokA"
+        );
         assert_eq!(
             s.messages("helper").unwrap(),
             vec![msg(Role::User, "secret A")]
@@ -797,40 +887,40 @@ mod tests {
             s.list_memory("helper").unwrap(),
             vec![("k".into(), "memA".into())]
         );
-        assert_eq!(s.load_config().unwrap().api_base_url, "http://a");
+        assert_eq!(
+            s.load_config().unwrap().default_bot.as_deref(),
+            Some("helper")
+        );
 
-        // Removing B cascades only B's rows.
         s.remove_account("work").unwrap();
         let n: i64 = s
             .conn
             .query_row("SELECT count(*) FROM messages", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 1);
-        let n: i64 = s.conn.query_row("SELECT count(*) FROM account_prefs WHERE account_id NOT IN (SELECT id FROM accounts)", [], |r| r.get(0)).unwrap();
+        let n: i64 = s
+            .conn
+            .query_row("SELECT count(*) FROM account_prefs WHERE account_id NOT IN (SELECT id FROM accounts)", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 0);
-        assert_eq!(s.messages("helper").unwrap().len(), 1);
     }
 
     #[test]
     fn account_management_rules() {
         let (mut s, d) = store();
-        assert!(s.add_account("bad alias!", None).is_err());
-        s.add_account("work", None).unwrap();
-        assert!(s.add_account("WORK", None).is_err()); // case-insensitive unique
-        assert!(s.remove_account("default").is_err()); // active
+        assert!(s.add_account("bad alias!").is_err());
+        s.add_account("work").unwrap();
+        assert!(s.add_account("WORK").is_err());
+        assert!(s.remove_account("default").is_err());
         s.rename_account("default", "personal").unwrap();
         assert_eq!(s.account().alias, "personal");
         assert!(s.rename_account("work", "personal").is_err());
         s.use_account("work").unwrap();
+        assert!(!s.is_startup_account());
         drop(s);
-        // Active account persists; --account overrides; unknown alias errors.
-        assert_eq!(
-            Store::open(d.path().join("gb"), None)
-                .unwrap()
-                .account()
-                .alias,
-            "work"
-        );
+        let s = Store::open(d.path().join("gb"), None).unwrap();
+        assert_eq!(s.account().alias, "work");
+        assert!(s.is_startup_account());
         assert_eq!(
             Store::open(d.path().join("gb"), Some("personal"))
                 .unwrap()
@@ -842,14 +932,77 @@ mod tests {
     }
 
     #[test]
-    fn credentials_crud() {
+    fn login_crud_roundtrips_headers_and_method() {
         let (s, _d) = store();
-        assert!(s.load_stored_token().is_none());
-        s.save_credentials(" abc ", None, "http://x").unwrap();
-        s.save_credentials("def", None, "http://x").unwrap();
-        assert_eq!(s.load_stored_token().as_deref(), Some("def"));
+        assert!(s.load_login().unwrap().is_none());
+        let l = StoredLogin {
+            method: LoginMethod::Cursor,
+            session: Session::new("https://x.cursorvm.com", "gw")
+                .with_headers([("x-anyrun-network-token".to_string(), "n".to_string())].into()),
+            cursor_token: Some("cur".into()),
+        };
+        s.save_login(&l).unwrap();
+        assert_eq!(s.load_login().unwrap().unwrap(), l);
+        s.save_login(&login("t2")).unwrap();
+        assert_eq!(
+            s.load_login().unwrap().unwrap().method,
+            LoginMethod::Gateway
+        );
         assert!(s.delete_credentials().unwrap());
         assert!(!s.delete_credentials().unwrap());
+    }
+
+    #[test]
+    fn merge_remote_dedupes_and_adopts_pending() {
+        let (s, _d) = store();
+        s.append_message(
+            "a",
+            &Message {
+                role: Role::User,
+                text: "hi".into(),
+                remote_id: Some("pending:n1".into()),
+            },
+        )
+        .unwrap();
+        let added = s
+            .merge_remote(
+                "a",
+                &[
+                    rmsg(Role::User, "hi", "e1"),
+                    rmsg(Role::Bot, "hello", "e2"),
+                    msg(Role::Bot, "noid"),
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            added,
+            vec![rmsg(Role::Bot, "hello", "e2"), msg(Role::Bot, "noid")]
+        );
+        let again = s
+            .merge_remote(
+                "a",
+                &[
+                    rmsg(Role::User, "hi", "e1"),
+                    rmsg(Role::Bot, "hello", "e2"),
+                    msg(Role::Bot, "noid"),
+                ],
+            )
+            .unwrap();
+        assert!(again.is_empty());
+        let all = s.messages("a").unwrap();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].remote_id.as_deref(), Some("e1"));
+        s.append_message(
+            "a",
+            &Message {
+                role: Role::User,
+                text: "x".into(),
+                remote_id: Some("pending:n2".into()),
+            },
+        )
+        .unwrap();
+        s.delete_pending("a", "n2").unwrap();
+        assert_eq!(s.messages("a").unwrap().len(), 3);
     }
 
     #[test]
@@ -861,6 +1014,8 @@ mod tests {
                 id: "a".into(),
                 name: "A".into(),
                 description: String::new(),
+                hidden: true,
+                is_group: false,
             }])
             .unwrap();
             s.append_message("a", &msg(Role::User, "hi")).unwrap();
@@ -868,35 +1023,15 @@ mod tests {
             s.set_memory("a", "tone", "terse").unwrap();
         }
         let s = Store::open(d.path(), None).unwrap();
-        assert_eq!(s.bots().unwrap()[0].name, "A");
+        assert!(s.bots().unwrap()[0].hidden);
         assert_eq!(s.messages("a").unwrap().len(), 1);
         assert_eq!(
             s.list_memory("a").unwrap(),
             vec![("tone".into(), "terse".into())]
         );
         assert_eq!(s.clear_memory("a", None).unwrap(), 1);
-        s.replace_messages("a", &[]).unwrap();
+        s.clear_messages("a").unwrap();
         assert!(s.messages("a").unwrap().is_empty());
         assert!(s.set_pref("active_account", "x").is_err());
-    }
-
-    #[test]
-    fn legacy_import_once() {
-        let d = tempfile::tempdir().unwrap();
-        let old = d.path().join("old");
-        fs::create_dir_all(&old).unwrap();
-        fs::write(
-            old.join("config.toml"),
-            "api_base_url = \"http://old\"\n[paths]\nbots = \"/b\"\n",
-        )
-        .unwrap();
-        fs::write(old.join("credentials"), "tok\n").unwrap();
-        let s = Store::open(d.path().join("new"), None).unwrap();
-        assert!(s.import_legacy(&old).is_some());
-        let c = s.load_config().unwrap();
-        assert_eq!(c.api_base_url, "http://old");
-        assert_eq!(c.paths.bots, "/b");
-        assert_eq!(s.load_stored_token().as_deref(), Some("tok"));
-        assert!(s.import_legacy(&old).is_none());
     }
 }
