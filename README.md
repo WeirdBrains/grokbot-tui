@@ -109,6 +109,14 @@ All methods are per account and stored in SQLite (see below).
    desktop session once automatically, for that account only. gb never reads the desktop session in any other code path.
    You get clear errors when the app isn't installed, you aren't signed in, or `secret-tool` is missing. Tokens are never printed or logged.
 
+   **Fallback when there is no `gateway-descriptor.json`:** some desktop builds only write `sand-secrets.json`.
+   In that case `/login desktop` decrypts the `cursor-accounts` field (Chromium Safe Storage, same scheme as above),
+   takes the Cursor access token, and exchanges it via EnsureSandBox exactly like `/login cursor`. The Cursor token
+   itself is **not** stored — method stays `desktop` and a 401 re-reads `sand-secrets.json`. With several Cursor
+   accounts, gb lists them as `1) <keyprefix>…` and you pick with `/login desktop <number>` (tip: `/account add`
+   first so each maps to its own gb account). `local-exec-file-key`, `cursor-machine-id`, Cookies and `~/.grokbot/`
+   are never read.
+
 **Host allowlist.** Credentials are only sent to:
 - gateway: `https` on `cursor.sh`, `cursor.com`, `*.cursor.sh`, `*.cursor.com`, `*.cursorvm.com`;
 - EnsureSandBox backend (gets the Cursor token): `https` on `*.cursor.sh` / `*.cursor.com` only, never `*.cursorvm.com`.

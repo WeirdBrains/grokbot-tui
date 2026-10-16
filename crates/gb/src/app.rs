@@ -77,9 +77,13 @@ pub enum LoginSource {
 
 type LoginOk = (Arc<dyn ApiClient>, Session, Vec<Bot>);
 
-/// Reads the desktop app's saved session for an optional descriptor entry.
+/// Outcome of an opt-in desktop read (descriptor session or sand Cursor token).
+pub type DesktopRead = (gw::desktop::DesktopCredential, Option<String>);
+
+/// Reads the desktop app's saved credential for an optional entry.
 /// Only invoked by `/login desktop` and the 401 re-read for desktop-method accounts.
-pub type DesktopReader = Arc<dyn Fn(Option<&str>, &Policy) -> gw::Result<Session> + Send + Sync>;
+pub type DesktopReader =
+    Arc<dyn Fn(Option<&str>, &Policy) -> gw::Result<DesktopRead> + Send + Sync>;
 
 /// The real reader: the platform's app-data dir + OS keychain (see `grokbot_api::desktop`).
 pub fn real_desktop_reader() -> DesktopReader {
@@ -89,7 +93,14 @@ pub fn real_desktop_reader() -> DesktopReader {
             message: "Reading the desktop session is supported on Linux, macOS and Windows only."
                 .into(),
         })?;
-        gw::desktop::DesktopConfig::new(platform).load_entry(entry, policy)
+        let cfg = gw::desktop::DesktopConfig::new(platform);
+        let cred = cfg.load_credential(entry, policy)?;
+        // Prefer the stable sand account key (so a number/`prefix` choice re-reads the same account).
+        let stored = match &cred {
+            gw::desktop::DesktopCredential::CursorToken(_) => cfg.sand_key_for(entry)?,
+            gw::desktop::DesktopCredential::Session(_) => entry.map(str::to_string),
+        };
+        Ok((cred, stored))
     })
 }
 
@@ -705,8 +716,10 @@ impl App {
         });
     }
 
-    /// `/login desktop [entry]`: read the desktop app's saved session (opt-in, user-initiated),
-    /// then validate it with listAgents and save it to the active account.
+    /// `/login desktop [entry]`: read the desktop app's saved session (opt-in, user-initiated).
+    /// Prefers `gateway-descriptor.json`; falls back to decrypting `sand-secrets.json`'s
+    /// `cursor-accounts` and exchanging the Cursor access token via EnsureSandBox (like
+    /// `/login cursor`). Never reads the desktop session in any other code path.
     pub fn start_desktop_login(&mut self, entry: Option<String>, source: LoginSource) {
         self.connecting = true;
         let (epoch, mock, opts) = (self.epoch, self.mock, self.opts.clone());
@@ -718,16 +731,25 @@ impl App {
                 .await
                 .map_err(|e| format!("desktop session reader failed: {e}"))
                 .and_then(|r| r.map_err(|e| e.to_string()));
-            let result = match read {
-                Ok(session) => login_task(mock, opts, Some(session), None).await,
-                Err(e) => Err(e),
+            let (result, desktop_entry) = match read {
+                Ok((gw::desktop::DesktopCredential::Session(session), stored)) => (
+                    login_task(mock, opts, Some(session), None).await,
+                    stored.or(entry),
+                ),
+                Ok((gw::desktop::DesktopCredential::CursorToken(tok), stored)) => (
+                    // Exchange like `/login cursor`, but do NOT persist the Cursor token:
+                    // on 401 we re-read sand-secrets instead.
+                    login_task(mock, opts, None, Some(tok)).await,
+                    stored.or(entry),
+                ),
+                Err(e) => (Err(e), entry),
             };
             Event::Login {
                 epoch,
                 method: LoginMethod::Desktop,
                 source,
                 cursor_token: None,
-                desktop_entry: entry,
+                desktop_entry,
                 result,
             }
         });
@@ -1480,7 +1502,7 @@ pub mod tests {
 
     /// A fake desktop reader that records calls (the entry asked for) and returns `f(n)`.
     fn fake_reader(
-        f: impl Fn(usize, Option<&str>) -> gw::Result<Session> + Send + Sync + 'static,
+        f: impl Fn(usize, Option<&str>) -> gw::Result<DesktopRead> + Send + Sync + 'static,
     ) -> (DesktopReader, Calls) {
         let calls: Calls = Default::default();
         let c = calls.clone();
@@ -1503,7 +1525,13 @@ pub mod tests {
                     "several saved sessions: personal, work. Choose one with /login desktop <name>."
                         .into(),
             }),
-            Some(_) => Ok(Session::new("https://box.cursorvm.com", "desk")),
+            Some(name) => Ok((
+                gw::desktop::DesktopCredential::Session(Session::new(
+                    "https://box.cursorvm.com",
+                    "desk",
+                )),
+                Some(name.to_string()),
+            )),
         });
         app.desktop_reader = reader;
         app.connect();
@@ -1577,7 +1605,13 @@ pub mod tests {
         });
         let (mut app, _d) = real_app(&rt, &server);
         let (reader, calls) = fake_reader(move |n, _| {
-            Ok(Session::new(uri.clone(), if n == 1 { "d1" } else { "d2" }))
+            Ok((
+                gw::desktop::DesktopCredential::Session(Session::new(
+                    uri.clone(),
+                    if n == 1 { "d1" } else { "d2" },
+                )),
+                Some("sandacct".into()),
+            ))
         });
         app.desktop_reader = reader;
         type_line(&mut app, "/login desktop");
@@ -1590,6 +1624,54 @@ pub mod tests {
             (l.method, l.session.gateway_token.as_str()),
             (LoginMethod::Desktop, "d2")
         );
+    }
+
+    #[test]
+    fn http_desktop_sand_exchanges_cursor_token_like_login_cursor() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let server = rt.block_on(MockServer::start());
+        let uri = server.uri();
+        rt.block_on(async {
+            Mock::given(path("/aiserver.v1.GrokBotService/EnsureSandBox"))
+                .and(header("authorization", "Bearer sand-cur"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "gatewayUrl": uri, "gatewayToken": "gw-from-sand", "anyrunNetworkToken": "n"
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/listAgents"))
+                .and(header("authorization", "Bearer gw-from-sand"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(json!([{"id": "a1", "name": "A"}])),
+                )
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/getAgentTranscriptTail"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"entries": []})))
+                .mount(&server)
+                .await;
+        });
+        let (mut app, _d) = real_app(&rt, &server);
+        let (reader, calls) = fake_reader(|_, entry| {
+            Ok((
+                gw::desktop::DesktopCredential::CursorToken("sand-cur".into()),
+                Some(entry.unwrap_or("acctkey").to_string()),
+            ))
+        });
+        app.desktop_reader = reader;
+        type_line(&mut app, "/login desktop");
+        settle(&mut app);
+        let l = app.store.load_login().unwrap().unwrap();
+        assert_eq!(l.method, LoginMethod::Desktop);
+        assert_eq!(l.session.gateway_token, "gw-from-sand");
+        assert_eq!(
+            l.cursor_token, None,
+            "sand Cursor token is not persisted; re-read on 401"
+        );
+        assert_eq!(l.desktop_entry.as_deref(), Some("acctkey"));
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        assert_eq!(app.bots.len(), 1);
     }
 
     #[test]
