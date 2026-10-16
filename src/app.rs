@@ -1,7 +1,8 @@
 //! Application state and input handling.
-use crate::api::{ApiClient, Bot, Message, Role, User};
+use crate::api::{ApiClient, Bot, HttpClient, Message, MockClient, Role, User};
 use crate::commands::{self, Registry};
 use crate::config::{Config, TOKEN_ENV};
+use crate::storage::Account;
 use crate::storage::Store;
 use anyhow::Result;
 use ratatui::layout::Rect;
@@ -27,6 +28,8 @@ pub enum InputMode {
     Normal,
     /// Masked token entry for `/login`.
     Token,
+    /// Type the alias in `App::pending_remove` to confirm deleting that account.
+    ConfirmRemove,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,18 +57,26 @@ pub struct App {
     /// Lines scrolled up from the bottom of the body.
     pub scroll: u16,
     pub sidebar_area: Rect,
+    /// Clickable account header in the sidebar (click cycles accounts).
+    pub account_area: Rect,
+    pub pending_remove: Option<String>,
     pub should_quit: bool,
 }
 
+/// Build the API client for an account's config.
+pub fn build_client(config: &Config, mock: bool) -> Result<Box<dyn ApiClient>> {
+    Ok(if mock {
+        Box::new(MockClient::new())
+    } else {
+        Box::new(HttpClient::new(config.clone())?)
+    })
+}
+
 impl App {
-    pub fn new(
-        api: Box<dyn ApiClient>,
-        store: Store,
-        config: Config,
-        rt: tokio::runtime::Handle,
-        mock: bool,
-    ) -> Self {
-        Self {
+    pub fn new(store: Store, rt: tokio::runtime::Handle, mock: bool) -> Result<Self> {
+        let config = store.load_config()?;
+        let api = build_client(&config, mock)?;
+        Ok(Self {
             api,
             store,
             config,
@@ -82,7 +93,56 @@ impl App {
             focus: Focus::Input,
             scroll: 0,
             sidebar_area: Rect::default(),
+            account_area: Rect::default(),
+            pending_remove: None,
             should_quit: false,
+        })
+    }
+
+    pub fn account(&self) -> &Account {
+        self.store.account()
+    }
+
+    /// Drop all in-memory session state (user, bots, chats).
+    fn reset_session(&mut self) {
+        self.api.set_token(None);
+        self.user = None;
+        self.bots.clear();
+        self.active = None;
+        self.sidebar_cursor = 0;
+        self.logs.clear();
+        self.scroll = 0;
+    }
+
+    /// Reload config from the DB and rebuild the API client for the active account.
+    pub fn reload_account_config(&mut self) -> Result<()> {
+        self.config = self.store.load_config()?;
+        self.api = build_client(&self.config, self.mock)?;
+        Ok(())
+    }
+
+    /// Switch to another account: reload config, client, bots and chats.
+    pub fn switch_account(&mut self, alias: &str) -> Result<()> {
+        self.store.use_account(alias)?;
+        self.reset_session();
+        self.reload_account_config()?;
+        self.info(format!("Switched to account '{}'.", self.account().alias));
+        self.connect();
+        Ok(())
+    }
+
+    /// Cycle to the next account (sidebar header click).
+    pub fn next_account(&mut self) {
+        let Ok(list) = self.store.accounts() else {
+            return;
+        };
+        let cur = self.account().id;
+        let i = list.iter().position(|a| a.id == cur).unwrap_or(0);
+        if let Some(next) = list.get((i + 1) % list.len().max(1)).cloned()
+            && next.id != cur
+            && let Err(e) = self.switch_account(&next.alias)
+        {
+            self.error(format!("{e:#}"));
         }
     }
 
@@ -96,6 +156,11 @@ impl App {
             "Welcome to gb{}. Type /help for commands.",
             if self.mock { " (mock mode)" } else { "" }
         ));
+        self.connect();
+    }
+
+    /// Log in with the active account's stored (or env) token, if any.
+    pub fn connect(&mut self) {
         if let Some(tok) = self.store.load_token() {
             if let Err(e) = self.authenticate(tok) {
                 self.error(format!("Saved credential rejected: {e:#}. Use /login."));
@@ -128,18 +193,13 @@ impl App {
         {
             self.error(format!("Server-side revoke failed: {e:#}"));
         }
-        self.api.set_token(None);
-        self.user = None;
-        self.bots.clear();
-        self.active = None;
-        self.logs.clear();
-        self.scroll = 0;
+        self.reset_session();
         match self.store.delete_credentials() {
             Ok(true) => self.info("Logged out; stored credential deleted.".into()),
             Ok(false) => self.info("Logged out (no stored credential).".into()),
             Err(e) => self.error(format!("Could not delete credential: {e:#}")),
         }
-        if std::env::var(TOKEN_ENV).is_ok() {
+        if self.store.env_token_applies() {
             self.info(format!(
                 "Note: {TOKEN_ENV} is set and will log you back in next start."
             ));
@@ -149,6 +209,9 @@ impl App {
     pub fn refresh_bots(&mut self) {
         match self.block(self.api.list_bots()) {
             Ok(b) => {
+                if let Err(e) = self.store.save_bots(&b) {
+                    self.error(format!("Could not save bots: {e:#}"));
+                }
                 self.bots = b;
                 let want = self
                     .config
@@ -162,7 +225,17 @@ impl App {
                     self.select_bot(i);
                 }
             }
-            Err(e) => self.error(format!("Could not list bots: {e:#}")),
+            Err(e) => {
+                self.error(format!("Could not list bots: {e:#}"));
+                // Fall back to this account's cached bot list so saved chats stay reachable.
+                if self.bots.is_empty()
+                    && let Ok(cached) = self.store.bots()
+                    && !cached.is_empty()
+                {
+                    self.bots = cached;
+                    self.info("Showing cached bots.".into());
+                }
+            }
         }
     }
 
@@ -250,6 +323,11 @@ impl App {
     /// Handle a submitted input line.
     pub fn submit(&mut self) {
         let line = std::mem::take(&mut self.input);
+        if self.mode == InputMode::ConfirmRemove {
+            self.mode = InputMode::Normal;
+            commands::finish_remove(self, line.trim());
+            return;
+        }
         if self.mode == InputMode::Token {
             self.mode = InputMode::Normal;
             commands::finish_login(self, line.trim());
@@ -302,6 +380,11 @@ impl App {
 
     /// Mouse click at terminal cell; selects a bot if it hit the sidebar list.
     pub fn click(&mut self, col: u16, row: u16) {
+        let h = self.account_area;
+        if h.contains(ratatui::layout::Position::new(col, row)) {
+            self.next_account();
+            return;
+        }
         let a = self.sidebar_area;
         // Inside the border.
         if col > a.x
@@ -338,18 +421,11 @@ fn entry_from_msg(m: Message) -> Entry {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::api::MockClient;
 
     pub fn test_app(rt: &tokio::runtime::Runtime) -> (App, tempfile::TempDir) {
         let d = tempfile::tempdir().unwrap();
-        let store = Store::open(d.path().join("gb")).unwrap();
-        let app = App::new(
-            Box::new(MockClient::new()),
-            store,
-            Config::default(),
-            rt.handle().clone(),
-            true,
-        );
+        let store = Store::open(d.path().join("gb"), None).unwrap();
+        let app = App::new(store, rt.handle().clone(), true).unwrap();
         (app, d)
     }
 
@@ -410,9 +486,8 @@ pub mod tests {
         let d = tempfile::tempdir().unwrap();
         let dir = d.path().join("gb");
         let mk = || {
-            let s = Store::open(&dir).unwrap();
-            let c = s.load_config().unwrap();
-            App::new(Box::new(MockClient::new()), s, c, rt.handle().clone(), true)
+            let s = Store::open(&dir, None).unwrap();
+            App::new(s, rt.handle().clone(), true).unwrap()
         };
         let mut app = mk();
         type_line(&mut app, "/login t");
@@ -446,6 +521,59 @@ pub mod tests {
         assert!(app.store.messages("scribe").unwrap().is_empty());
         type_line(&mut app, "/prefs bogus");
         assert_eq!(app.current_log().last().unwrap().kind, EntryKind::Error);
+    }
+
+    #[test]
+    fn accounts_switch_and_isolate_in_app() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        type_line(&mut app, "/login t");
+        type_line(&mut app, "personal msg");
+        type_line(&mut app, "/memory add who personal");
+
+        type_line(&mut app, "/account add work http://work.example");
+        type_line(&mut app, "/account use work");
+        assert_eq!(app.account().alias, "work");
+        assert!(app.user.is_none(), "work account has no login");
+        assert!(app.bots.is_empty());
+        assert_eq!(app.config.api_base_url, "http://work.example");
+        type_line(&mut app, "/login w");
+        assert!(app.current_log().iter().all(|e| e.text != "personal msg"));
+        type_line(&mut app, "/memory");
+        assert!(!app.current_log().last().unwrap().text.contains("personal"));
+        type_line(&mut app, "/logout");
+
+        type_line(&mut app, "/account use default");
+        assert_eq!(
+            app.user.as_ref().unwrap().name,
+            "mock-user",
+            "default login survives work logout"
+        );
+        assert!(app.current_log().iter().any(|e| e.text == "personal msg"));
+
+        // Removal needs confirmation by typing the alias.
+        type_line(&mut app, "/account remove work");
+        assert_eq!(app.mode, InputMode::ConfirmRemove);
+        type_line(&mut app, "nope");
+        assert!(app.store.find_account("work").unwrap().is_some());
+        type_line(&mut app, "/account remove work");
+        type_line(&mut app, "work");
+        assert!(app.store.find_account("work").unwrap().is_none());
+
+        type_line(&mut app, "/account rename default home");
+        assert_eq!(app.account().alias, "home");
+    }
+
+    #[test]
+    fn click_account_header_cycles() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        type_line(&mut app, "/account add b");
+        app.account_area = Rect::new(0, 1, 24, 1);
+        app.click(2, 1);
+        assert_eq!(app.account().alias, "b");
+        app.click(2, 1);
+        assert_eq!(app.account().alias, "default");
     }
 
     #[test]

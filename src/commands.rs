@@ -1,6 +1,7 @@
 //! Extensible slash-command registry. Add a [`Command`] to [`registry`].
 use crate::app::{App, EntryKind, InputMode};
-use anyhow::{Result, bail};
+use crate::storage::Scope;
+use anyhow::{Context, Result, bail};
 
 pub type Handler = fn(&mut App, &str) -> Result<()>;
 
@@ -46,7 +47,7 @@ pub fn registry() -> Registry {
                 name: "logout",
                 aliases: &[],
                 usage: "/logout",
-                help: "Delete stored credential and clear state",
+                help: "Log out of the active account (keeps chats and memory)",
                 run: logout,
             },
             Command {
@@ -76,6 +77,13 @@ pub fn registry() -> Registry {
                 usage: "/history",
                 help: "Reload the active bot's chat history",
                 run: history,
+            },
+            Command {
+                name: "account",
+                aliases: &["acct"],
+                usage: "/account [add|use|rename|remove]",
+                help: "List accounts; add <alias> [api_base_url], use <alias>, rename <old> <new>, remove <alias>",
+                run: account,
             },
             Command {
                 name: "prefs",
@@ -207,18 +215,90 @@ fn history(app: &mut App, _: &str) -> Result<()> {
     Ok(())
 }
 
+fn account(app: &mut App, args: &str) -> Result<()> {
+    let parts: Vec<&str> = args.split_whitespace().collect();
+    match parts.as_slice() {
+        [] | ["list"] => {
+            let cur = app.account().id;
+            let list = app
+                .store
+                .accounts()?
+                .into_iter()
+                .map(|a| format!("{} {}", if a.id == cur { "*" } else { " " }, a.alias))
+                .collect::<Vec<_>>()
+                .join("\n");
+            app.info(format!("Accounts (* = active):\n{list}"));
+        }
+        ["add", alias] | ["add", alias, _] => {
+            let a = app.store.add_account(alias, parts.get(2).copied())?;
+            app.info(format!(
+                "Added account '{}'. Switch with /account use {}.",
+                a.alias, a.alias
+            ));
+        }
+        ["use", alias] => app.switch_account(alias)?,
+        ["rename", old, new] => {
+            app.store.rename_account(old, new)?;
+            app.info(format!("Renamed account '{old}' to '{new}'."));
+        }
+        ["remove", alias] => {
+            let a = app
+                .store
+                .find_account(alias)?
+                .with_context(|| format!("no account named '{alias}'"))?;
+            if a.id == app.account().id {
+                bail!("cannot remove the active account; switch with /account use first");
+            }
+            app.pending_remove = Some(a.alias.clone());
+            app.mode = InputMode::ConfirmRemove;
+            app.info(format!(
+                "This deletes account '{}' and ALL its credentials, chats, memory and prefs. Type '{}' to confirm (anything else cancels).",
+                a.alias, a.alias
+            ));
+        }
+        _ => bail!(
+            "Usage: /account [list | add <alias> [api_base_url] | use <alias> | rename <old> <new> | remove <alias>]"
+        ),
+    }
+    Ok(())
+}
+
+pub fn finish_remove(app: &mut App, typed: &str) {
+    let Some(alias) = app.pending_remove.take() else {
+        return;
+    };
+    if typed != alias {
+        app.info("Account removal cancelled.".into());
+        return;
+    }
+    match app.store.remove_account(&alias) {
+        Ok(()) => app.info(format!("Removed account '{alias}' and all its data.")),
+        Err(e) => app.error(format!("{e:#}")),
+    }
+}
+
 fn prefs(app: &mut App, args: &str) -> Result<()> {
     let mut it = args.splitn(3, char::is_whitespace);
     match (it.next().unwrap_or(""), it.next(), it.next()) {
         ("" | "list", None, None) => {
             let list = app
                 .store
-                .list_prefs()?
+                .list_prefs_scoped()?
                 .into_iter()
-                .map(|(k, v)| format!("  {k:<22} {v}"))
+                .map(|(s, k, v)| {
+                    let scope = if s == Scope::Global {
+                        "global"
+                    } else {
+                        "account"
+                    };
+                    format!("  {scope:<8} {k:<22} {v}")
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
-            app.info(format!("Preferences:\n{list}"));
+            app.info(format!(
+                "Preferences (account '{}'):\n{list}",
+                app.account().alias
+            ));
         }
         ("get", Some(k), None) => {
             let v = app.store.get_pref(k)?;
@@ -227,16 +307,20 @@ fn prefs(app: &mut App, args: &str) -> Result<()> {
         ("set", Some(k), v) => {
             let v = v.unwrap_or("").trim();
             app.store.set_pref(k, v)?;
-            app.config = app.store.load_config()?;
-            let note = if k.starts_with("api_")
-                || k.starts_with("paths.")
-                || k == "request_timeout_secs"
-            {
-                " (restart gb for API changes to take effect)"
+            if k.starts_with("api_") || k.starts_with("paths.") || k == "request_timeout_secs" {
+                // Apply API changes now: rebuild the client and keep the session token.
+                app.reload_account_config()?;
+                let tok = app.store.load_token();
+                app.api.set_token(tok);
             } else {
-                ""
+                app.config = app.store.load_config()?;
+            }
+            let scope = if crate::config::is_global(k) {
+                "global"
+            } else {
+                "account"
             };
-            app.info(format!("{k} = {v}{note}"));
+            app.info(format!("{k} = {v} ({scope})"));
         }
         _ => bail!("Usage: /prefs [list | get <key> | set <key> <value>]"),
     }

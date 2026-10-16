@@ -1,16 +1,18 @@
-//! SQLite storage at `~/.gb/context.db`: credentials, bot memory, preferences.
-use crate::api::{Message, Role, User};
-use crate::config::{Config, TOKEN_ENV, default_prefs};
-use anyhow::{Context, Result};
+//! SQLite storage at `~/.gb/context.db`.
+//!
+//! Data is segregated per **account**: credentials, bots, messages, memory and
+//! account prefs all carry `account_id` (FK → `accounts`, `ON DELETE CASCADE`).
+//! A [`Store`] is always bound to one active account and every scoped query
+//! filters by it; only `global_prefs` is shared.
+use crate::api::{Bot, Message, Role, User};
+use crate::config::{Config, DEFAULT_ACCOUNT, TOKEN_ENV, default_prefs, is_global};
+use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Ordered migrations; index + 1 == resulting `PRAGMA user_version`.
-const MIGRATIONS: &[&str] = &[
-    // v1
-    "CREATE TABLE credentials (
+const V1: &str = "CREATE TABLE credentials (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         token TEXT NOT NULL,
         user_id TEXT,
@@ -37,12 +39,103 @@ const MIGRATIONS: &[&str] = &[
     CREATE TABLE prefs (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
-    );",
-];
+    );";
+
+/// v1 -> v2: multi-account. Existing data moves into account 1 ('default').
+const V2: &str = "CREATE TABLE accounts (
+        id INTEGER PRIMARY KEY,
+        alias TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO accounts(id, alias) VALUES (1, 'default');
+
+    CREATE TABLE credentials_v2 (
+        account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+        token TEXT NOT NULL,
+        user_id TEXT,
+        user_name TEXT,
+        api_base TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO credentials_v2 SELECT 1, token, user_id, user_name, api_base, created_at, updated_at FROM credentials;
+    DROP TABLE credentials;
+    ALTER TABLE credentials_v2 RENAME TO credentials;
+
+    CREATE TABLE bots (
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        bot_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (account_id, bot_id)
+    );
+    INSERT INTO bots(account_id, bot_id, name)
+        SELECT DISTINCT 1, bot_id, bot_id FROM (SELECT bot_id FROM messages UNION SELECT bot_id FROM memory);
+
+    CREATE TABLE messages_v2 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        bot_id TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('user','bot')),
+        text TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id, bot_id) REFERENCES bots(account_id, bot_id) ON DELETE CASCADE
+    );
+    INSERT INTO messages_v2(id, account_id, bot_id, role, text, created_at)
+        SELECT id, 1, bot_id, role, text, created_at FROM messages;
+    DROP INDEX messages_bot;
+    DROP TABLE messages;
+    ALTER TABLE messages_v2 RENAME TO messages;
+    CREATE INDEX messages_account_bot ON messages(account_id, bot_id, id);
+
+    CREATE TABLE memory_v2 (
+        account_id INTEGER NOT NULL,
+        bot_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (account_id, bot_id, key),
+        FOREIGN KEY (account_id, bot_id) REFERENCES bots(account_id, bot_id) ON DELETE CASCADE
+    );
+    INSERT INTO memory_v2 SELECT 1, bot_id, key, value, updated_at FROM memory;
+    DROP TABLE memory;
+    ALTER TABLE memory_v2 RENAME TO memory;
+
+    CREATE TABLE global_prefs (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    INSERT INTO global_prefs SELECT key, value FROM prefs WHERE key IN ('ui.sidebar_width', 'legacy_imported');
+    INSERT INTO global_prefs VALUES ('active_account', 'default');
+
+    CREATE TABLE account_prefs (
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        PRIMARY KEY (account_id, key)
+    );
+    INSERT INTO account_prefs SELECT 1, key, value FROM prefs
+        WHERE key NOT IN ('ui.sidebar_width', 'legacy_imported', 'active_account');
+    DROP TABLE prefs;";
+
+/// Ordered migrations; index + 1 == resulting `PRAGMA user_version`.
+const MIGRATIONS: &[&str] = &[V1, V2];
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Account {
+    pub id: i64,
+    pub alias: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    Global,
+    Account,
+}
 
 pub struct Store {
     pub dir: PathBuf,
     conn: Connection,
+    account: Account,
+    /// Account `GROKBOT_TOKEN` applies to (the one selected at startup).
+    env_account: Option<i64>,
 }
 
 impl Store {
@@ -52,8 +145,9 @@ impl Store {
             .join(".gb"))
     }
 
-    /// Open (creating if needed) `<dir>/context.db` and run migrations.
-    pub fn open(dir: impl Into<PathBuf>) -> Result<Self> {
+    /// Open `<dir>/context.db`, migrate, and bind to `account` (alias), else the
+    /// saved active account, else `default`. A named account must exist.
+    pub fn open(dir: impl Into<PathBuf>, account: Option<&str>) -> Result<Self> {
         let dir = dir.into();
         fs::create_dir_all(&dir)?;
         set_mode(&dir, 0o700)?;
@@ -62,9 +156,49 @@ impl Store {
             Connection::open(&path).with_context(|| format!("opening {}", path.display()))?;
         set_mode(&path, 0o600)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        let s = Self { dir, conn };
-        s.migrate()?;
-        s.seed_prefs()?;
+        migrate(&conn)?;
+
+        let saved: Option<String> = conn
+            .query_row(
+                "SELECT value FROM global_prefs WHERE key = 'active_account'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let mut s = Self {
+            dir,
+            conn,
+            account: Account {
+                id: 0,
+                alias: String::new(),
+            },
+            env_account: None,
+        };
+        let acct = match account {
+            Some(a) => s
+                .find_account(a)?
+                .with_context(|| format!("no account named '{a}' (see /account)"))?,
+            None => match saved
+                .as_deref()
+                .map(|a| s.find_account(a))
+                .transpose()?
+                .flatten()
+            {
+                Some(a) => a,
+                None => match s.find_account(DEFAULT_ACCOUNT)? {
+                    Some(a) => a,
+                    None => s.add_account(DEFAULT_ACCOUNT, None)?,
+                },
+            },
+        };
+        s.env_account = Some(acct.id);
+        s.bind(acct)?;
+        for (k, v) in default_prefs().into_iter().filter(|(k, _)| is_global(k)) {
+            s.conn.execute(
+                "INSERT OR IGNORE INTO global_prefs(key, value) VALUES (?1, ?2)",
+                params![k, v],
+            )?;
+        }
         Ok(s)
     }
 
@@ -72,69 +206,212 @@ impl Store {
         self.dir.join("context.db")
     }
 
+    #[cfg(test)]
     pub fn schema_version(&self) -> Result<usize> {
-        Ok(self
-            .conn
-            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))? as usize)
+        user_version(&self.conn)
     }
 
-    fn migrate(&self) -> Result<()> {
-        let v = self.schema_version()?;
-        for (i, sql) in MIGRATIONS.iter().enumerate().skip(v) {
-            let tx = self.conn.unchecked_transaction()?;
-            tx.execute_batch(sql)?;
-            tx.pragma_update(None, "user_version", (i + 1) as i64)?;
-            tx.commit()?;
+    // ---- accounts
+
+    pub fn account(&self) -> &Account {
+        &self.account
+    }
+
+    pub fn accounts(&self) -> Result<Vec<Account>> {
+        let mut st = self
+            .conn
+            .prepare("SELECT id, alias FROM accounts ORDER BY id")?;
+        let rows = st.query_map([], |r| {
+            Ok(Account {
+                id: r.get(0)?,
+                alias: r.get(1)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn find_account(&self, alias: &str) -> Result<Option<Account>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT id, alias FROM accounts WHERE alias = ?1",
+                [alias.trim()],
+                |r| {
+                    Ok(Account {
+                        id: r.get(0)?,
+                        alias: r.get(1)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// Create an account with default prefs (optionally its own API base URL).
+    pub fn add_account(&self, alias: &str, api_base: Option<&str>) -> Result<Account> {
+        let alias = validate_alias(alias)?;
+        if self.find_account(alias)?.is_some() {
+            bail!("account '{alias}' already exists");
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("INSERT INTO accounts(alias) VALUES (?1)", [alias])?;
+        let id = tx.last_insert_rowid();
+        for (k, v) in default_prefs().into_iter().filter(|(k, _)| !is_global(k)) {
+            tx.execute(
+                "INSERT INTO account_prefs(account_id, key, value) VALUES (?1, ?2, ?3)",
+                params![id, k, v],
+            )?;
+        }
+        if let Some(b) = api_base {
+            tx.execute(
+                "UPDATE account_prefs SET value = ?2 WHERE account_id = ?1 AND key = 'api_base_url'",
+                params![id, b],
+            )?;
+        }
+        tx.commit()?;
+        Ok(Account {
+            id,
+            alias: alias.to_string(),
+        })
+    }
+
+    /// Switch the store to another account and remember it as active.
+    pub fn use_account(&mut self, alias: &str) -> Result<&Account> {
+        let a = self
+            .find_account(alias)?
+            .with_context(|| format!("no account named '{alias}'"))?;
+        self.bind(a)?;
+        Ok(&self.account)
+    }
+
+    fn bind(&mut self, a: Account) -> Result<()> {
+        // Fill in any account prefs added since the account was created.
+        for (k, v) in default_prefs().into_iter().filter(|(k, _)| !is_global(k)) {
+            self.conn.execute(
+                "INSERT OR IGNORE INTO account_prefs(account_id, key, value) VALUES (?1, ?2, ?3)",
+                params![a.id, k, v],
+            )?;
+        }
+        self.conn.execute(
+            "INSERT INTO global_prefs(key, value) VALUES ('active_account', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [&a.alias],
+        )?;
+        self.account = a;
+        Ok(())
+    }
+
+    pub fn rename_account(&mut self, old: &str, new: &str) -> Result<()> {
+        let new = validate_alias(new)?;
+        let a = self
+            .find_account(old)?
+            .with_context(|| format!("no account named '{old}'"))?;
+        if let Some(b) = self.find_account(new)?
+            && b.id != a.id
+        {
+            bail!("account '{new}' already exists");
+        }
+        self.conn.execute(
+            "UPDATE accounts SET alias = ?2 WHERE id = ?1",
+            params![a.id, new],
+        )?;
+        if a.id == self.account.id {
+            self.bind(Account {
+                id: a.id,
+                alias: new.to_string(),
+            })?;
         }
         Ok(())
     }
 
-    fn seed_prefs(&self) -> Result<()> {
-        for (k, v) in default_prefs() {
+    /// Delete an account and (via cascade) all of its data. The active account cannot be removed.
+    pub fn remove_account(&self, alias: &str) -> Result<()> {
+        let a = self
+            .find_account(alias)?
+            .with_context(|| format!("no account named '{alias}'"))?;
+        if a.id == self.account.id {
+            bail!("cannot remove the active account; switch with /account use first");
+        }
+        self.conn
+            .execute("DELETE FROM accounts WHERE id = ?1", [a.id])?;
+        Ok(())
+    }
+
+    // ---- preferences (global keys -> global_prefs, everything else -> account_prefs)
+
+    pub fn get_pref(&self, key: &str) -> Result<Option<String>> {
+        let v = if is_global(key) {
+            self.conn.query_row(
+                "SELECT value FROM global_prefs WHERE key = ?1",
+                [key],
+                |r| r.get(0),
+            )
+        } else {
+            self.conn.query_row(
+                "SELECT value FROM account_prefs WHERE account_id = ?1 AND key = ?2",
+                params![self.account.id, key],
+                |r| r.get(0),
+            )
+        };
+        Ok(v.optional()?)
+    }
+
+    pub fn set_pref(&self, key: &str, value: &str) -> Result<()> {
+        if key == "active_account" {
+            bail!("use /account use <alias> to switch accounts");
+        }
+        if is_global(key) {
             self.conn.execute(
-                "INSERT OR IGNORE INTO prefs(key, value) VALUES (?1, ?2)",
-                params![k, v],
+                "INSERT INTO global_prefs(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )?;
+        } else {
+            self.conn.execute(
+                "INSERT INTO account_prefs(account_id, key, value) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(account_id, key) DO UPDATE SET value = excluded.value",
+                params![self.account.id, key, value],
             )?;
         }
         Ok(())
     }
 
-    // ---- preferences
-
-    pub fn get_pref(&self, key: &str) -> Result<Option<String>> {
-        Ok(self
+    /// Global prefs plus the active account's prefs, with their scope.
+    pub fn list_prefs_scoped(&self) -> Result<Vec<(Scope, String, String)>> {
+        let mut out = vec![];
+        let mut st = self
             .conn
-            .query_row("SELECT value FROM prefs WHERE key = ?1", [key], |r| {
-                r.get(0)
-            })
-            .optional()?)
-    }
-
-    pub fn set_pref(&self, key: &str, value: &str) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO prefs(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![key, value],
-        )?;
-        Ok(())
+            .prepare("SELECT key, value FROM global_prefs ORDER BY key")?;
+        for r in st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))? {
+            let (k, v) = r?;
+            out.push((Scope::Global, k, v));
+        }
+        let mut st = self
+            .conn
+            .prepare("SELECT key, value FROM account_prefs WHERE account_id = ?1 ORDER BY key")?;
+        for r in st.query_map([self.account.id], |r| Ok((r.get(0)?, r.get(1)?)))? {
+            let (k, v) = r?;
+            out.push((Scope::Account, k, v));
+        }
+        Ok(out)
     }
 
     pub fn list_prefs(&self) -> Result<BTreeMap<String, String>> {
-        let mut st = self
-            .conn
-            .prepare("SELECT key, value FROM prefs ORDER BY key")?;
-        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        Ok(self
+            .list_prefs_scoped()?
+            .into_iter()
+            .map(|(_, k, v)| (k, v))
+            .collect())
     }
 
     pub fn load_config(&self) -> Result<Config> {
         Ok(Config::from_prefs(&self.list_prefs()?))
     }
 
-    // ---- credentials
+    // ---- credentials (active account)
 
-    /// `GROKBOT_TOKEN` env var wins, then the stored credential.
+    /// `GROKBOT_TOKEN` wins, but only for the account selected at startup; then the stored credential.
     pub fn load_token(&self) -> Option<String> {
-        if let Ok(t) = std::env::var(TOKEN_ENV)
+        if self.env_account == Some(self.account.id)
+            && let Ok(t) = std::env::var(TOKEN_ENV)
             && !t.trim().is_empty()
         {
             return Some(t.trim().to_string());
@@ -142,11 +419,18 @@ impl Store {
         self.load_stored_token()
     }
 
+    pub fn env_token_applies(&self) -> bool {
+        self.env_account == Some(self.account.id)
+            && std::env::var(TOKEN_ENV).is_ok_and(|t| !t.trim().is_empty())
+    }
+
     pub fn load_stored_token(&self) -> Option<String> {
         self.conn
-            .query_row("SELECT token FROM credentials WHERE id = 1", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT token FROM credentials WHERE account_id = ?1",
+                [self.account.id],
+                |r| r.get(0),
+            )
             .optional()
             .ok()
             .flatten()
@@ -154,35 +438,75 @@ impl Store {
 
     pub fn save_credentials(&self, token: &str, user: Option<&User>, api_base: &str) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO credentials(id, token, user_id, user_name, api_base) VALUES (1, ?1, ?2, ?3, ?4)
-             ON CONFLICT(id) DO UPDATE SET token = excluded.token, user_id = excluded.user_id,
+            "INSERT INTO credentials(account_id, token, user_id, user_name, api_base) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(account_id) DO UPDATE SET token = excluded.token, user_id = excluded.user_id,
                user_name = excluded.user_name, api_base = excluded.api_base, updated_at = datetime('now')",
-            params![token.trim(), user.map(|u| &u.id), user.map(|u| &u.name), api_base],
+            params![self.account.id, token.trim(), user.map(|u| &u.id), user.map(|u| &u.name), api_base],
         )?;
         Ok(())
     }
 
     /// Returns true if a stored credential was deleted.
     pub fn delete_credentials(&self) -> Result<bool> {
-        Ok(self.conn.execute("DELETE FROM credentials", [])? > 0)
+        Ok(self.conn.execute(
+            "DELETE FROM credentials WHERE account_id = ?1",
+            [self.account.id],
+        )? > 0)
     }
 
-    // ---- bot memory: chat messages
+    // ---- bots (active account)
+
+    /// Upsert the bot list for the active account (removed bots are kept so history survives).
+    pub fn save_bots(&self, bots: &[Bot]) -> Result<()> {
+        for b in bots {
+            self.conn.execute(
+                "INSERT INTO bots(account_id, bot_id, name, description) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(account_id, bot_id) DO UPDATE SET name = excluded.name, description = excluded.description",
+                params![self.account.id, b.id, b.name, b.description],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn bots(&self) -> Result<Vec<Bot>> {
+        let mut st = self.conn.prepare(
+            "SELECT bot_id, name, description FROM bots WHERE account_id = ?1 ORDER BY rowid",
+        )?;
+        let rows = st.query_map([self.account.id], |r| {
+            Ok(Bot {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                description: r.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn ensure_bot(&self, bot_id: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO bots(account_id, bot_id, name) VALUES (?1, ?2, ?2)",
+            params![self.account.id, bot_id],
+        )?;
+        Ok(())
+    }
+
+    // ---- messages (active account)
 
     pub fn append_message(&self, bot_id: &str, m: &Message) -> Result<()> {
+        self.ensure_bot(bot_id)?;
         let role = if m.role == Role::User { "user" } else { "bot" };
         self.conn.execute(
-            "INSERT INTO messages(bot_id, role, text) VALUES (?1, ?2, ?3)",
-            params![bot_id, role, m.text],
+            "INSERT INTO messages(account_id, bot_id, role, text) VALUES (?1, ?2, ?3, ?4)",
+            params![self.account.id, bot_id, role, m.text],
         )?;
         Ok(())
     }
 
     pub fn messages(&self, bot_id: &str) -> Result<Vec<Message>> {
-        let mut st = self
-            .conn
-            .prepare("SELECT role, text FROM messages WHERE bot_id = ?1 ORDER BY id")?;
-        let rows = st.query_map([bot_id], |r| {
+        let mut st = self.conn.prepare(
+            "SELECT role, text FROM messages WHERE account_id = ?1 AND bot_id = ?2 ORDER BY id",
+        )?;
+        let rows = st.query_map(params![self.account.id, bot_id], |r| {
             let role: String = r.get(0)?;
             Ok(Message {
                 role: if role == "user" {
@@ -196,11 +520,8 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Replace a bot's stored transcript (e.g. with server history).
     pub fn replace_messages(&self, bot_id: &str, msgs: &[Message]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM messages WHERE bot_id = ?1", [bot_id])?;
-        tx.commit()?;
+        self.clear_messages(bot_id)?;
         for m in msgs {
             self.append_message(bot_id, m)?;
         }
@@ -208,47 +529,52 @@ impl Store {
     }
 
     pub fn clear_messages(&self, bot_id: &str) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM messages WHERE bot_id = ?1", [bot_id])?;
+        self.conn.execute(
+            "DELETE FROM messages WHERE account_id = ?1 AND bot_id = ?2",
+            params![self.account.id, bot_id],
+        )?;
         Ok(())
     }
 
-    // ---- bot memory: key-value notes
+    // ---- memory notes (active account)
 
     pub fn set_memory(&self, bot_id: &str, key: &str, value: &str) -> Result<()> {
+        self.ensure_bot(bot_id)?;
         self.conn.execute(
-            "INSERT INTO memory(bot_id, key, value) VALUES (?1, ?2, ?3)
-             ON CONFLICT(bot_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
-            params![bot_id, key, value],
+            "INSERT INTO memory(account_id, bot_id, key, value) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(account_id, bot_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
+            params![self.account.id, bot_id, key, value],
         )?;
         Ok(())
     }
 
     pub fn list_memory(&self, bot_id: &str) -> Result<Vec<(String, String)>> {
-        let mut st = self
-            .conn
-            .prepare("SELECT key, value FROM memory WHERE bot_id = ?1 ORDER BY key")?;
-        let rows = st.query_map([bot_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let mut st = self.conn.prepare(
+            "SELECT key, value FROM memory WHERE account_id = ?1 AND bot_id = ?2 ORDER BY key",
+        )?;
+        let rows = st.query_map(params![self.account.id, bot_id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Clear one key, or all keys for the bot when `key` is None. Returns rows removed.
     pub fn clear_memory(&self, bot_id: &str, key: Option<&str>) -> Result<usize> {
+        let id = self.account.id;
         Ok(match key {
             Some(k) => self.conn.execute(
-                "DELETE FROM memory WHERE bot_id = ?1 AND key = ?2",
-                params![bot_id, k],
+                "DELETE FROM memory WHERE account_id = ?1 AND bot_id = ?2 AND key = ?3",
+                params![id, bot_id, k],
             )?,
-            None => self
-                .conn
-                .execute("DELETE FROM memory WHERE bot_id = ?1", [bot_id])?,
+            None => self.conn.execute(
+                "DELETE FROM memory WHERE account_id = ?1 AND bot_id = ?2",
+                params![id, bot_id],
+            )?,
         })
     }
 
     // ---- legacy import
 
-    /// One-time best-effort import from the old `~/.grokbot-tui` (config.toml + credentials).
-    /// Marked done via the `legacy_imported` pref. Returns a summary when something was imported.
+    /// One-time best-effort import from `~/.grokbot-tui` into the active account.
     pub fn import_legacy(&self, old: &Path) -> Option<String> {
         if self.get_pref("legacy_imported").ok().flatten().is_some() || !old.is_dir() {
             return None;
@@ -257,12 +583,10 @@ impl Store {
         if let Ok(s) = fs::read_to_string(old.join("config.toml"))
             && let Ok(v) = s.parse::<toml::Table>()
         {
-            let mut n = 0;
-            for (k, val) in flatten(&v, "") {
-                if self.set_pref(&k, &val).is_ok() {
-                    n += 1;
-                }
-            }
+            let n = flatten(&v, "")
+                .iter()
+                .filter(|(k, val)| self.set_pref(k, val).is_ok())
+                .count();
             done.push(format!("{n} preferences"));
         }
         if let Ok(t) = fs::read_to_string(old.join("credentials"))
@@ -279,9 +603,44 @@ impl Store {
             }
         }
         let _ = self.set_pref("legacy_imported", "1");
-        (!done.is_empty())
-            .then(|| format!("Imported {} from {}", done.join(" and "), old.display()))
+        (!done.is_empty()).then(|| {
+            format!(
+                "Imported {} from {} into account '{}'",
+                done.join(" and "),
+                old.display(),
+                self.account.alias
+            )
+        })
     }
+}
+
+fn user_version(conn: &Connection) -> Result<usize> {
+    Ok(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))? as usize)
+}
+
+fn migrate(conn: &Connection) -> Result<()> {
+    let v = user_version(conn)?;
+    for (i, sql) in MIGRATIONS.iter().enumerate().skip(v) {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(sql)
+            .with_context(|| format!("migration to v{}", i + 1))?;
+        tx.pragma_update(None, "user_version", (i + 1) as i64)?;
+        tx.commit()?;
+    }
+    Ok(())
+}
+
+fn validate_alias(a: &str) -> Result<&str> {
+    let a = a.trim();
+    if a.is_empty()
+        || a.len() > 32
+        || !a
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+    {
+        bail!("alias must be 1-32 chars of letters, digits, '-', '_' or '.'");
+    }
+    Ok(a)
 }
 
 fn flatten(t: &toml::Table, prefix: &str) -> Vec<(String, String)> {
@@ -313,18 +672,26 @@ fn set_mode(_: &Path, _: u32) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn msg(role: Role, t: &str) -> Message {
+        Message {
+            role,
+            text: t.into(),
+        }
+    }
+
     fn store() -> (Store, tempfile::TempDir) {
         let d = tempfile::tempdir().unwrap();
-        (Store::open(d.path().join("gb")).unwrap(), d)
+        (Store::open(d.path().join("gb"), None).unwrap(), d)
     }
 
     #[test]
     fn migrates_and_permissions() {
         let (s, d) = store();
         assert_eq!(s.schema_version().unwrap(), MIGRATIONS.len());
+        assert_eq!(s.account().alias, DEFAULT_ACCOUNT);
         drop(s);
-        let s = Store::open(d.path().join("gb")).unwrap(); // re-open is idempotent
-        assert_eq!(s.schema_version().unwrap(), MIGRATIONS.len());
+        let s = Store::open(d.path().join("gb"), None).unwrap();
+        assert_eq!(s.accounts().unwrap().len(), 1);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -340,57 +707,169 @@ mod tests {
     }
 
     #[test]
-    fn prefs_and_config() {
-        let (s, _d) = store();
-        assert_eq!(s.load_config().unwrap(), Config::default());
-        s.set_pref("api_base_url", "http://local").unwrap();
-        assert_eq!(s.load_config().unwrap().api_base_url, "http://local");
-        assert_eq!(s.get_pref("nope").unwrap(), None);
+    fn migration_from_v1_moves_data_to_default_account() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("gb");
+        fs::create_dir_all(&dir).unwrap();
+        {
+            let c = Connection::open(dir.join("context.db")).unwrap();
+            c.execute_batch(V1).unwrap();
+            c.execute_batch(
+                "PRAGMA user_version = 1;
+                 INSERT INTO credentials(id, token, user_id, user_name, api_base) VALUES (1, 'tok', 'u1', 'me', 'http://old');
+                 INSERT INTO messages(bot_id, role, text) VALUES ('helper', 'user', 'hi'), ('helper', 'bot', 'yo');
+                 INSERT INTO memory(bot_id, key, value) VALUES ('coder', 'lang', 'rust');
+                 INSERT INTO prefs VALUES ('api_base_url', 'http://old'), ('active_bot', 'helper'), ('ui.sidebar_width', '30');",
+            )
+            .unwrap();
+        }
+        let s = Store::open(&dir, None).unwrap();
+        assert_eq!(s.schema_version().unwrap(), 2);
+        assert_eq!(s.account().alias, "default");
+        assert_eq!(s.load_stored_token().as_deref(), Some("tok"));
+        assert_eq!(
+            s.messages("helper").unwrap(),
+            vec![msg(Role::User, "hi"), msg(Role::Bot, "yo")]
+        );
+        assert_eq!(
+            s.list_memory("coder").unwrap(),
+            vec![("lang".into(), "rust".into())]
+        );
+        let c = s.load_config().unwrap();
+        assert_eq!(c.api_base_url, "http://old");
+        assert_eq!(c.active_bot.as_deref(), Some("helper"));
+        assert_eq!(c.sidebar_width, 30);
+        let scopes = s.list_prefs_scoped().unwrap();
+        assert!(
+            scopes
+                .iter()
+                .any(|(sc, k, _)| *sc == Scope::Global && k == "ui.sidebar_width")
+        );
+        assert!(
+            scopes
+                .iter()
+                .any(|(sc, k, _)| *sc == Scope::Account && k == "api_base_url")
+        );
+    }
+
+    #[test]
+    fn accounts_are_strictly_isolated() {
+        let (mut s, _d) = store();
+        s.add_account("work", Some("http://work")).unwrap();
+        // Populate "default" (A).
+        s.save_credentials(
+            "tokA",
+            Some(&User {
+                id: "a".into(),
+                name: "alice".into(),
+            }),
+            "http://a",
+        )
+        .unwrap();
+        s.append_message("helper", &msg(Role::User, "secret A"))
+            .unwrap();
+        s.set_memory("helper", "k", "memA").unwrap();
+        s.set_pref("api_base_url", "http://a").unwrap();
+        s.set_pref("ui.sidebar_width", "40").unwrap(); // global
+
+        // Switch to "work" (B): sees none of A's data.
+        s.use_account("work").unwrap();
+        assert!(s.load_stored_token().is_none());
+        assert!(s.messages("helper").unwrap().is_empty());
+        assert!(s.list_memory("helper").unwrap().is_empty());
+        assert!(s.bots().unwrap().is_empty());
+        assert_eq!(s.load_config().unwrap().api_base_url, "http://work");
+        assert_eq!(s.load_config().unwrap().sidebar_width, 40); // global pref shared
+        s.save_credentials("tokB", None, "http://work").unwrap();
+        s.append_message("helper", &msg(Role::User, "secret B"))
+            .unwrap();
+        s.set_memory("helper", "k", "memB").unwrap();
+        assert!(s.delete_credentials().unwrap());
+
+        // Back to A: untouched by B's writes and B's logout.
+        s.use_account("default").unwrap();
+        assert_eq!(s.load_stored_token().as_deref(), Some("tokA"));
+        assert_eq!(
+            s.messages("helper").unwrap(),
+            vec![msg(Role::User, "secret A")]
+        );
+        assert_eq!(
+            s.list_memory("helper").unwrap(),
+            vec![("k".into(), "memA".into())]
+        );
+        assert_eq!(s.load_config().unwrap().api_base_url, "http://a");
+
+        // Removing B cascades only B's rows.
+        s.remove_account("work").unwrap();
+        let n: i64 = s
+            .conn
+            .query_row("SELECT count(*) FROM messages", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        let n: i64 = s.conn.query_row("SELECT count(*) FROM account_prefs WHERE account_id NOT IN (SELECT id FROM accounts)", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        assert_eq!(s.messages("helper").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn account_management_rules() {
+        let (mut s, d) = store();
+        assert!(s.add_account("bad alias!", None).is_err());
+        s.add_account("work", None).unwrap();
+        assert!(s.add_account("WORK", None).is_err()); // case-insensitive unique
+        assert!(s.remove_account("default").is_err()); // active
+        s.rename_account("default", "personal").unwrap();
+        assert_eq!(s.account().alias, "personal");
+        assert!(s.rename_account("work", "personal").is_err());
+        s.use_account("work").unwrap();
+        drop(s);
+        // Active account persists; --account overrides; unknown alias errors.
+        assert_eq!(
+            Store::open(d.path().join("gb"), None)
+                .unwrap()
+                .account()
+                .alias,
+            "work"
+        );
+        assert_eq!(
+            Store::open(d.path().join("gb"), Some("personal"))
+                .unwrap()
+                .account()
+                .alias,
+            "personal"
+        );
+        assert!(Store::open(d.path().join("gb"), Some("nope")).is_err());
     }
 
     #[test]
     fn credentials_crud() {
         let (s, _d) = store();
         assert!(s.load_stored_token().is_none());
-        let u = User {
-            id: "u1".into(),
-            name: "me".into(),
-        };
-        s.save_credentials(" abc ", Some(&u), "http://x").unwrap();
-        s.save_credentials("def", Some(&u), "http://x").unwrap();
+        s.save_credentials(" abc ", None, "http://x").unwrap();
+        s.save_credentials("def", None, "http://x").unwrap();
         assert_eq!(s.load_stored_token().as_deref(), Some("def"));
         assert!(s.delete_credentials().unwrap());
         assert!(!s.delete_credentials().unwrap());
-        assert!(s.load_stored_token().is_none());
     }
 
     #[test]
-    fn messages_and_memory_persist_per_bot() {
+    fn messages_memory_bots_persist() {
         let d = tempfile::tempdir().unwrap();
         {
-            let s = Store::open(d.path()).unwrap();
-            s.append_message(
-                "a",
-                &Message {
-                    role: Role::User,
-                    text: "hi".into(),
-                },
-            )
+            let s = Store::open(d.path(), None).unwrap();
+            s.save_bots(&[Bot {
+                id: "a".into(),
+                name: "A".into(),
+                description: String::new(),
+            }])
             .unwrap();
-            s.append_message(
-                "a",
-                &Message {
-                    role: Role::Bot,
-                    text: "yo".into(),
-                },
-            )
-            .unwrap();
+            s.append_message("a", &msg(Role::User, "hi")).unwrap();
             s.set_memory("a", "tone", "brief").unwrap();
             s.set_memory("a", "tone", "terse").unwrap();
         }
-        let s = Store::open(d.path()).unwrap();
-        assert_eq!(s.messages("a").unwrap().len(), 2);
-        assert!(s.messages("b").unwrap().is_empty());
+        let s = Store::open(d.path(), None).unwrap();
+        assert_eq!(s.bots().unwrap()[0].name, "A");
+        assert_eq!(s.messages("a").unwrap().len(), 1);
         assert_eq!(
             s.list_memory("a").unwrap(),
             vec![("tone".into(), "terse".into())]
@@ -398,6 +877,7 @@ mod tests {
         assert_eq!(s.clear_memory("a", None).unwrap(), 1);
         s.replace_messages("a", &[]).unwrap();
         assert!(s.messages("a").unwrap().is_empty());
+        assert!(s.set_pref("active_account", "x").is_err());
     }
 
     #[test]
@@ -411,7 +891,7 @@ mod tests {
         )
         .unwrap();
         fs::write(old.join("credentials"), "tok\n").unwrap();
-        let s = Store::open(d.path().join("new")).unwrap();
+        let s = Store::open(d.path().join("new"), None).unwrap();
         assert!(s.import_legacy(&old).is_some());
         let c = s.load_config().unwrap();
         assert_eq!(c.api_base_url, "http://old");

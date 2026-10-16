@@ -7,7 +7,6 @@ mod storage;
 mod ui;
 
 use anyhow::Result;
-use api::{ApiClient, HttpClient, MockClient};
 use app::{App, Focus};
 use clap::Parser;
 use ratatui::crossterm::event::{
@@ -24,6 +23,9 @@ struct Cli {
     /// Use the offline mock API (fake bots, echo replies; any token except "bad" works).
     #[arg(long)]
     mock: bool,
+    /// Account alias to start in (default: last active account).
+    #[arg(long, env = "GB_ACCOUNT", value_name = "ALIAS")]
+    account: Option<String>,
     /// Data directory holding context.db (default ~/.gb).
     #[arg(long, value_name = "DIR")]
     data_dir: Option<std::path::PathBuf>,
@@ -32,24 +34,21 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let custom = cli.data_dir.is_some();
-    let store = Store::open(match cli.data_dir {
-        Some(d) => d,
-        None => Store::default_dir()?,
-    })?;
+    let store = Store::open(
+        match cli.data_dir {
+            Some(d) => d,
+            None => Store::default_dir()?,
+        },
+        cli.account.as_deref(),
+    )?;
     // One-time best-effort import from the pre-SQLite location.
     let imported = if custom {
         None
     } else {
         dirs::home_dir().and_then(|h| store.import_legacy(&h.join(".grokbot-tui")))
     };
-    let config = store.load_config()?;
     let rt = tokio::runtime::Runtime::new()?;
-    let api: Box<dyn ApiClient> = if cli.mock {
-        Box::new(MockClient::new())
-    } else {
-        Box::new(HttpClient::new(config.clone())?)
-    };
-    let mut app = App::new(api, store, config, rt.handle().clone(), cli.mock);
+    let mut app = App::new(store, rt.handle().clone(), cli.mock)?;
     if let Some(msg) = imported {
         app.info(msg);
     }
@@ -92,7 +91,12 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     KeyCode::PageDown => app.scroll_down(10),
                     KeyCode::Esc => {
                         app.focus = Focus::Input;
-                        if app.mode == app::InputMode::Token {
+                        if app.mode == app::InputMode::ConfirmRemove {
+                            app.mode = app::InputMode::Normal;
+                            app.pending_remove = None;
+                            app.input.clear();
+                            app.info("Account removal cancelled.".into());
+                        } else if app.mode == app::InputMode::Token {
                             app.mode = app::InputMode::Normal;
                             app.input.clear();
                             app.info("Login cancelled.".into());

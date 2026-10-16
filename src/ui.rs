@@ -34,7 +34,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(format!("  user: {user}   bot: {bot}")),
+        Span::raw(format!(
+            "  account: {}   user: {user}   bot: {bot}",
+            app.account().alias
+        )),
     ];
     if app.mock {
         spans.push(Span::styled(
@@ -47,7 +50,19 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         top,
     );
 
-    // Sidebar
+    // Sidebar: clickable account header (cycles accounts) above the bot list.
+    let [acct, side] = Layout::vertical([Constraint::Length(1), Constraint::Min(2)]).areas(side);
+    app.account_area = acct;
+    let n_accounts = app.store.accounts().map(|a| a.len()).unwrap_or(1);
+    let hint = if n_accounts > 1 { " ⇄" } else { "" };
+    f.render_widget(
+        Paragraph::new(format!(" @{}{hint}", app.account().alias)).style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        acct,
+    );
     app.sidebar_area = side;
     let items: Vec<ListItem> = app
         .bots
@@ -114,6 +129,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let (shown, title) = match app.mode {
         InputMode::Token => ("*".repeat(app.input.chars().count()), " Token (masked) "),
         InputMode::Normal => (app.input.clone(), " /command or message "),
+        InputMode::ConfirmRemove => (
+            app.input.clone(),
+            " Type the account alias to confirm removal (Esc cancels) ",
+        ),
     };
     let border = if app.focus == Focus::Input {
         Color::Cyan
@@ -179,7 +198,9 @@ mod tests {
         term.draw(|f| draw(f, &mut app)).unwrap();
         let buf = term.backend().buffer().clone();
         let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(text.contains("account: default"));
         assert!(text.contains("user: mock-user"));
+        assert!(text.contains("@default"));
         assert!(text.contains("bot: Helper"));
         assert!(text.contains("Coder"));
         assert_eq!(app.sidebar_area.width, 24);

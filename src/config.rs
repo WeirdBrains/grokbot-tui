@@ -2,6 +2,14 @@
 use std::collections::BTreeMap;
 
 pub const TOKEN_ENV: &str = "GROKBOT_TOKEN";
+pub const DEFAULT_ACCOUNT: &str = "default";
+
+/// Preference keys shared by all accounts. Every other key is account-scoped.
+pub const GLOBAL_KEYS: &[&str] = &["active_account", "ui.sidebar_width", "legacy_imported"];
+
+pub fn is_global(key: &str) -> bool {
+    GLOBAL_KEYS.contains(&key)
+}
 
 /// API endpoint paths. **PLACEHOLDERS** — no confirmed Grok Bot API spec yet.
 #[derive(Debug, Clone, PartialEq)]
