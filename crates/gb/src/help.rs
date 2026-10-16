@@ -137,6 +137,8 @@ x-sand-box-namespace (prod). Override with GB_CURSOR_CLIENT_* / prefs (see /help
 
 Errors
   401 'version no longer supported' → update the desktop app or set GB_CURSOR_CLIENT_VERSION.
+  417 (empty body) → the gateway session expired; gb re-authenticates like a 401
+    (desktop re-read / Cursor re-exchange). If it persists, run /login desktop.
   'no gatewayUrl/gatewayToken' → the token was rejected or is not an access token.",
         related: &["login", "login-desktop", "env", "troubleshooting"],
     },

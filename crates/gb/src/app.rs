@@ -319,7 +319,7 @@ pub fn host_of(url: &str) -> &str {
 /// Whether a login error string means the credential itself was rejected.
 fn is_auth_error(e: &str) -> bool {
     let e = e.to_lowercase();
-    e.contains("401") || e.contains("403") || e.contains("unauthorized")
+    e.contains("401") || e.contains("403") || e.contains("417") || e.contains("unauthorized")
 }
 
 async fn login_task(
@@ -710,7 +710,7 @@ impl App {
                             return;
                         }
                         let msg = if e.is_unauthorized() {
-                            "Gateway rejected the credential (401). Run /login desktop (or your login method) again → /help troubleshooting".to_string()
+                            "Gateway rejected the session (401/417, usually expired). Run /login desktop (or your login method) again → /help troubleshooting".to_string()
                         } else {
                             format!("Could not refresh chat: {e}")
                         };
@@ -1104,7 +1104,7 @@ impl App {
             .flatten()
             .and_then(|l| l.desktop_entry);
         self.info(
-            "Gateway rejected the credential (401); re-reading the desktop app session…".into(),
+            "Gateway rejected the session (401/417, usually expired); re-reading the desktop app session…".into(),
         );
         self.start_desktop_login(entry, LoginSource::Stored);
         true
@@ -2577,6 +2577,50 @@ pub mod tests {
             Mock::given(path("/api/getAgentTranscriptTail"))
                 .and(header("authorization", "Bearer d1"))
                 .respond_with(ResponseTemplate::new(401).set_body_json(json!({"error": "expired"})))
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/getAgentTranscriptTail"))
+                .and(header("authorization", "Bearer d2"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"entries": [{"id": "e1", "kind": "send-message", "message": {"content": "welcome"}}]})))
+                .mount(&server)
+                .await;
+        });
+        let (mut app, _d) = real_app(&rt, &server);
+        let (reader, calls) = fake_reader(move |n, _| {
+            Ok((
+                gw::desktop::DesktopCredential::Session(Session::new(
+                    uri.clone(),
+                    if n == 1 { "d1" } else { "d2" },
+                )),
+                Some("sandacct".into()),
+            ))
+        });
+        app.desktop_reader = reader;
+        type_line(&mut app, "/login desktop");
+        settle(&mut app);
+        settle(&mut app);
+        assert!(texts(&app).contains(&"welcome".to_string()));
+        assert_eq!(calls.lock().unwrap().len(), 2, "one automatic re-read");
+        let l = app.store.load_login().unwrap().unwrap();
+        assert_eq!(
+            (l.method, l.session.gateway_token.as_str()),
+            (LoginMethod::Desktop, "d2")
+        );
+    }
+
+    #[test]
+    fn http_desktop_login_rereads_on_417() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let server = rt.block_on(MockServer::start());
+        let uri = server.uri();
+        rt.block_on(async {
+            Mock::given(path("/api/listAgents"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!([{"id": "a1", "name": "A"}])))
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/getAgentTranscriptTail"))
+                .and(header("authorization", "Bearer d1"))
+                .respond_with(ResponseTemplate::new(417))
                 .mount(&server)
                 .await;
             Mock::given(path("/api/getAgentTranscriptTail"))
