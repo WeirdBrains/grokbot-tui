@@ -34,6 +34,10 @@ pub struct Message {
 #[async_trait]
 pub trait ApiClient: Send + Sync {
     async fn list_bots(&self) -> gw::Result<Vec<Bot>>;
+    /// `createAgent {name, …}`: create a bot with defaults and return it.
+    async fn create_bot(&self, name: &str) -> gw::Result<Bot>;
+    /// `deleteAgent {id}`.
+    async fn delete_bot(&self, bot_id: &str) -> gw::Result<()>;
     async fn send(&self, bot_id: &str, text: &str, nonce: &str) -> gw::Result<SendReceipt>;
     /// `promptAcceptanceStatus`: did the prompt with this nonce land?
     async fn acceptance(&self, bot_id: &str, nonce: &str) -> gw::Result<gw::AcceptanceStatus>;
@@ -94,6 +98,30 @@ impl ApiClient for GatewayApi {
             .map(bot_from_agent)
             .collect())
     }
+    async fn create_bot(&self, name: &str) -> gw::Result<Bot> {
+        let input = gw::CreateAgent {
+            name: name.trim().into(),
+            ..Default::default()
+        };
+        if let Some(a) = self.0.create_agent(&input).await? {
+            return Ok(bot_from_agent(&a));
+        }
+        // No agent in the reply: find it by name in a fresh list.
+        let want = gw::sanitize_text(name.trim());
+        self.list_bots()
+            .await?
+            .into_iter()
+            .rev()
+            .find(|b| b.name == want)
+            .ok_or_else(|| gw::Error::Http {
+                method: "createAgent".into(),
+                status: 502,
+                message: "created, but the new bot is not in listAgents yet; try /bots".into(),
+            })
+    }
+    async fn delete_bot(&self, bot_id: &str) -> gw::Result<()> {
+        self.0.delete_agent(bot_id).await.map(|_| ())
+    }
     async fn send(&self, bot_id: &str, text: &str, nonce: &str) -> gw::Result<SendReceipt> {
         let req = gw::SendPrompt {
             client_nonce: Some(nonce.into()),
@@ -128,6 +156,9 @@ pub struct MockClient {
     token: String,
     chats: Mutex<HashMap<String, Vec<(Message, Instant)>>>,
     nonces: Mutex<HashMap<String, gw::AcceptanceStatus>>,
+    /// Bots made with `create_bot` / removed with `delete_bot`.
+    extra: Mutex<Vec<Bot>>,
+    deleted: Mutex<Vec<String>>,
     next: AtomicU64,
     pub reply_delay: Duration,
 }
@@ -138,6 +169,8 @@ impl MockClient {
             token: token.into(),
             chats: Mutex::new(HashMap::new()),
             nonces: Mutex::new(HashMap::new()),
+            extra: Mutex::new(Vec::new()),
+            deleted: Mutex::new(Vec::new()),
             next: AtomicU64::new(1),
             reply_delay: Duration::from_millis(300),
         }
@@ -172,6 +205,16 @@ impl MockClient {
         .collect()
     }
 
+    /// Built-in bots plus created ones, minus deleted ones.
+    fn current_bots(&self) -> Vec<Bot> {
+        let deleted = self.deleted.lock().unwrap().clone();
+        Self::bots()
+            .into_iter()
+            .chain(self.extra.lock().unwrap().iter().cloned())
+            .filter(|b| !deleted.contains(&b.id))
+            .collect()
+    }
+
     fn id(&self) -> String {
         format!("m{}", self.next.fetch_add(1, Ordering::Relaxed))
     }
@@ -196,7 +239,39 @@ pub fn mock_ensure_sandbox(cursor_token: &str) -> gw::Result<Session> {
 impl ApiClient for MockClient {
     async fn list_bots(&self) -> gw::Result<Vec<Bot>> {
         self.check("listAgents")?;
-        Ok(Self::bots())
+        Ok(self.current_bots())
+    }
+    async fn create_bot(&self, name: &str) -> gw::Result<Bot> {
+        self.check("createAgent")?;
+        let name = name.trim();
+        if name.is_empty() || name == "reject" {
+            return Err(gw::Error::Http {
+                method: "createAgent".into(),
+                status: 400,
+                message: "invalid name (mock)".into(),
+            });
+        }
+        let b = Bot {
+            id: format!("new-{}", self.id()),
+            name: name.into(),
+            description: String::new(),
+            hidden: false,
+            is_group: false,
+        };
+        self.extra.lock().unwrap().push(b.clone());
+        Ok(b)
+    }
+    async fn delete_bot(&self, bot_id: &str) -> gw::Result<()> {
+        self.check("deleteAgent")?;
+        if !self.current_bots().iter().any(|b| b.id == bot_id) {
+            return Err(gw::Error::Http {
+                method: "deleteAgent".into(),
+                status: 404,
+                message: "unknown agent (mock)".into(),
+            });
+        }
+        self.deleted.lock().unwrap().push(bot_id.into());
+        Ok(())
     }
     async fn acceptance(&self, _bot_id: &str, nonce: &str) -> gw::Result<gw::AcceptanceStatus> {
         self.check("promptAcceptanceStatus")?;
@@ -227,7 +302,7 @@ impl ApiClient for MockClient {
             status,
             message: message.into(),
         };
-        if !Self::bots().iter().any(|b| b.id == bot_id) {
+        if !self.current_bots().iter().any(|b| b.id == bot_id) {
             return Err(err(404, "unknown agent (mock)"));
         }
         if text == "reject" {

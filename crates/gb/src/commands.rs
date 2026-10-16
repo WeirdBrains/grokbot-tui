@@ -67,8 +67,8 @@ pub fn registry() -> Registry {
             Command {
                 name: "bot",
                 aliases: &["use"],
-                usage: "/bot [name|id]",
-                help: "Switch to a bot's chat",
+                usage: "/bot [name|id] | /bot new <name> | /bot delete [name]",
+                help: "Switch to, create, or delete a bot",
                 run: bot,
             },
             Command {
@@ -247,12 +247,35 @@ fn bot(app: &mut App, args: &str) -> Result<()> {
         app.open_bot_picker();
         return Ok(());
     }
+    let (sub, rest) = args.split_once(' ').unwrap_or((args, ""));
+    let rest = rest.trim();
+    match sub {
+        "new" => {
+            if rest.is_empty() {
+                bail!("Usage: /bot new <name>");
+            }
+            app.create_bot(rest);
+            return Ok(());
+        }
+        "delete" => {
+            let i = if rest.is_empty() {
+                app.active
+                    .ok_or_else(|| anyhow::anyhow!("No active bot. Usage: /bot delete <name>"))?
+            } else {
+                app.find_bot(rest)
+                    .ok_or_else(|| anyhow::anyhow!("No bot named {rest}. Try /bots."))?
+            };
+            app.confirm_delete_bot(i);
+            return Ok(());
+        }
+        _ => {}
+    }
     match app.find_bot(args) {
         Some(i) => {
             app.select_bot(i);
             Ok(())
         }
-        None => bail!("No bot named {args}. Try /bots."),
+        None => bail!("No bot named {args}. Try /bots, or /bot new {args} to create it."),
     }
 }
 

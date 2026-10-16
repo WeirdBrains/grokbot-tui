@@ -229,6 +229,15 @@ pub enum Event {
         epoch: u64,
         choices: Vec<(String, String)>,
     },
+    /// `/bot new` finished.
+    BotCreated { epoch: u64, result: gw::Result<Bot> },
+    /// `/bot delete` finished.
+    BotDeleted {
+        epoch: u64,
+        id: String,
+        name: String,
+        result: gw::Result<()>,
+    },
     /// `promptAcceptanceStatus` answer for a send whose outcome was unknown.
     Acceptance {
         epoch: u64,
@@ -615,6 +624,50 @@ impl App {
                             }
                         }
                     }
+                }
+            }
+            Event::BotCreated { epoch, result } => {
+                if epoch != self.epoch {
+                    return;
+                }
+                match result {
+                    Ok(b) => {
+                        let mut all = self.all_bots.clone();
+                        if !all.iter().any(|x| x.id == b.id) {
+                            all.push(b.clone());
+                        }
+                        self.apply_bots(all);
+                        if let Some(i) = self.bots.iter().position(|x| x.id == b.id) {
+                            self.select_bot(i);
+                        }
+                        self.info(format!("Created bot {} ({}).", b.name, b.id));
+                        self.refresh_bots(false);
+                    }
+                    Err(e) => self.error(format!("Could not create bot: {e}")),
+                }
+            }
+            Event::BotDeleted {
+                epoch,
+                id,
+                name,
+                result,
+            } => {
+                if epoch != self.epoch {
+                    return;
+                }
+                match result {
+                    Ok(()) => {
+                        let all = self
+                            .all_bots
+                            .iter()
+                            .filter(|b| b.id != id)
+                            .cloned()
+                            .collect();
+                        self.apply_bots(all);
+                        self.info(format!("Deleted bot {name}."));
+                        self.refresh_bots(false);
+                    }
+                    Err(e) => self.error(format!("Could not delete bot {name}: {e}")),
                 }
             }
             Event::Bots {
@@ -1143,6 +1196,69 @@ impl App {
             Event::Bots {
                 epoch,
                 announce,
+                result,
+            }
+        });
+    }
+
+    /// `/bot new <name>`: create on the gateway, then select it.
+    pub fn create_bot(&mut self, name: &str) {
+        let Some(api) = self.api.clone() else {
+            self.error("Not logged in. Use /login desktop.".into());
+            return;
+        };
+        let name = name.trim().to_string();
+        let epoch = self.epoch;
+        self.info(format!("Creating bot {name}…"));
+        self.spawn(async move {
+            let result = api.create_bot(&name).await;
+            Event::BotCreated { epoch, result }
+        });
+    }
+
+    /// `/bot delete [name]`: confirm in a picker (Cancel is the default), then delete.
+    pub fn confirm_delete_bot(&mut self, i: usize) {
+        use crate::picker::{PickItem, Picker};
+        let Some(b) = self.bots.get(i).cloned() else {
+            return;
+        };
+        let items = vec![
+            PickItem::new("Cancel", "cancel"),
+            PickItem::new(format!("Delete {}", b.name), format!("delete:{}", b.id))
+                .detail("permanent"),
+        ];
+        self.open_picker(
+            Picker::new(format!("Delete bot {}?", b.name), items, |app, it| {
+                if let Some(id) = it.value.strip_prefix("delete:") {
+                    app.delete_bot(id);
+                } else {
+                    app.info("Delete cancelled.".into());
+                }
+            })
+            .with_selected("cancel")
+            .on_cancel(|app| app.info("Delete cancelled.".into())),
+        );
+    }
+
+    fn delete_bot(&mut self, id: &str) {
+        let Some(api) = self.api.clone() else {
+            self.error("Not logged in. Use /login desktop.".into());
+            return;
+        };
+        let name = self
+            .all_bots
+            .iter()
+            .find(|b| b.id == id)
+            .map(|b| b.name.clone())
+            .unwrap_or_else(|| id.to_string());
+        let id = id.to_string();
+        let epoch = self.epoch;
+        self.spawn(async move {
+            let result = api.delete_bot(&id).await;
+            Event::BotDeleted {
+                epoch,
+                id,
+                name,
                 result,
             }
         });
@@ -1939,6 +2055,58 @@ pub mod tests {
         p.cursor = w;
         app.picker_confirm();
         assert_eq!(app.account().alias, "work");
+    }
+
+    #[test]
+    fn bot_new_creates_selects_and_delete_confirms() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "tok");
+        type_line(&mut app, "/bot new Newbie");
+        settle(&mut app);
+        let b = app.active_bot().expect("new bot is selected").clone();
+        assert_eq!(b.name, "Newbie");
+        assert!(app.bots.iter().any(|x| x.id == b.id), "sidebar has it");
+
+        // Create error is shown, nothing added.
+        let n = app.bots.len();
+        type_line(&mut app, "/bot new reject");
+        settle(&mut app);
+        assert_eq!(app.bots.len(), n);
+        assert!(
+            texts(&app)
+                .iter()
+                .any(|t| t.contains("Could not create bot"))
+        );
+
+        // Delete: picker defaults to Cancel; confirming that keeps the bot.
+        type_line(&mut app, "/bot delete Newbie");
+        let p = app.picker.as_ref().expect("delete asks first");
+        assert_eq!(p.selected().unwrap().value, "cancel");
+        app.picker_confirm();
+        settle(&mut app);
+        assert!(app.bots.iter().any(|x| x.id == b.id));
+        // Esc also cancels.
+        type_line(&mut app, "/bot delete Newbie");
+        app.picker_cancel();
+        settle(&mut app);
+        assert!(app.bots.iter().any(|x| x.id == b.id));
+
+        // Choose Delete.
+        type_line(&mut app, "/bot delete");
+        let p = app.picker.as_mut().unwrap();
+        p.cursor = p
+            .items
+            .iter()
+            .position(|i| i.value.starts_with("delete:"))
+            .unwrap();
+        app.picker_confirm();
+        settle(&mut app);
+        assert!(!app.bots.iter().any(|x| x.id == b.id), "deleted bot gone");
+        assert!(!app.all_bots.iter().any(|x| x.id == b.id));
+
+        type_line(&mut app, "/bot delete Nope");
+        assert!(app.picker.is_none());
     }
 
     #[test]

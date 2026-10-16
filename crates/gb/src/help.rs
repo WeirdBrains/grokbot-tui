@@ -393,8 +393,16 @@ fn command_extra(
             &["sync", "prefs"],
         ),
         "bot" => (
-            "Open a bot by name or id (also: click it or use the sidebar).",
-            &["/bot Helper", "/use Helper"],
+            "Open a bot by name or id (also: click it, F2, or bare /bot for the pick list).\n\
+             /bot new <name> creates a bot on the gateway (createAgent) and opens it.\n\
+             /bot delete [name] deletes the named (or current) bot (deleteAgent) after a\n\
+             confirmation pick list where Cancel is the default. Deleting is permanent.",
+            &[
+                "/bot Helper",
+                "/use Helper",
+                "/bot new Researcher",
+                "/bot delete Researcher",
+            ],
             &["sync", "keys"],
         ),
         "history" => (
