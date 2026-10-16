@@ -35,6 +35,8 @@ pub struct Message {
 pub trait ApiClient: Send + Sync {
     async fn list_bots(&self) -> gw::Result<Vec<Bot>>;
     async fn send(&self, bot_id: &str, text: &str, nonce: &str) -> gw::Result<SendReceipt>;
+    /// `promptAcceptanceStatus`: did the prompt with this nonce land?
+    async fn acceptance(&self, bot_id: &str, nonce: &str) -> gw::Result<gw::AcceptanceStatus>;
     async fn transcript(&self, bot_id: &str, limit: u32) -> gw::Result<Vec<Message>>;
     /// Page through chat history (oldest → newest), up to `max_entries`.
     async fn transcript_history(&self, bot_id: &str, max_entries: u32) -> gw::Result<Vec<Message>>;
@@ -80,6 +82,9 @@ pub fn messages_from_entries(entries: &[gw::Entry]) -> Vec<Message> {
 
 #[async_trait]
 impl ApiClient for GatewayApi {
+    async fn acceptance(&self, bot_id: &str, nonce: &str) -> gw::Result<gw::AcceptanceStatus> {
+        self.0.prompt_acceptance_status(bot_id, nonce).await
+    }
     async fn list_bots(&self) -> gw::Result<Vec<Bot>> {
         Ok(self
             .0
@@ -122,6 +127,7 @@ impl ApiClient for GatewayApi {
 pub struct MockClient {
     token: String,
     chats: Mutex<HashMap<String, Vec<(Message, Instant)>>>,
+    nonces: Mutex<HashMap<String, gw::AcceptanceStatus>>,
     next: AtomicU64,
     pub reply_delay: Duration,
 }
@@ -131,6 +137,7 @@ impl MockClient {
         Self {
             token: token.into(),
             chats: Mutex::new(HashMap::new()),
+            nonces: Mutex::new(HashMap::new()),
             next: AtomicU64::new(1),
             reply_delay: Duration::from_millis(300),
         }
@@ -191,8 +198,30 @@ impl ApiClient for MockClient {
         self.check("listAgents")?;
         Ok(Self::bots())
     }
+    async fn acceptance(&self, _bot_id: &str, nonce: &str) -> gw::Result<gw::AcceptanceStatus> {
+        self.check("promptAcceptanceStatus")?;
+        Ok(match self.nonces.lock().unwrap().get(nonce) {
+            Some(s) => s.clone(),
+            None => gw::AcceptanceStatus::NotFound,
+        })
+    }
     async fn send(&self, bot_id: &str, text: &str, nonce: &str) -> gw::Result<SendReceipt> {
         self.check("sendPrompt")?;
+        // Mock texts drive the acceptance status seen by a later check.
+        let status = match text {
+            "lost" => None,
+            "refused-later" => Some(gw::AcceptanceStatus::Rejected(Some("mock_refused".into()))),
+            _ => Some(gw::AcceptanceStatus::Accepted),
+        };
+        if let Some(s) = status {
+            self.nonces.lock().unwrap().insert(nonce.into(), s);
+        }
+        if matches!(text, "lost" | "refused-later") {
+            return Err(gw::Error::Transport {
+                method: "sendPrompt".into(),
+                message: "connection reset (mock)".into(),
+            });
+        }
         let err = |status, message: &str| gw::Error::Http {
             method: "sendPrompt".into(),
             status,

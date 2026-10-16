@@ -192,7 +192,20 @@ pub enum Event {
         nonce: String,
         result: gw::Result<gw::SendReceipt>,
     },
+    /// `promptAcceptanceStatus` answer for a send whose outcome was unknown.
+    Acceptance {
+        epoch: u64,
+        bot: String,
+        nonce: String,
+        attempt: u32,
+        result: gw::Result<gw::AcceptanceStatus>,
+    },
 }
+
+/// Notice shown while asking the gateway whether an unconfirmed send landed.
+const CHECKING_NOTICE: &str = "No receipt yet; checking delivery status with the gateway…";
+/// How many times to re-ask while the gateway says "pending".
+const ACCEPTANCE_MAX_ATTEMPTS: u32 = 5;
 
 #[derive(Debug, Clone)]
 pub struct PollState {
@@ -683,11 +696,7 @@ impl App {
                         self.awaiting.insert(bot.clone(), Instant::now());
                         self.schedule_fast(&bot, Duration::from_millis(500));
                     }
-                    Ok(_) => {
-                        self.push_to(&bot, Entry { kind: EntryKind::Error, text: "No receipt from the gateway: delivery unknown. Checking the transcript; don't resend until it does or doesn't appear.".into() });
-                        self.awaiting.insert(bot.clone(), Instant::now());
-                        self.schedule_fast(&bot, Duration::ZERO);
-                    }
+                    Ok(_) => self.check_acceptance(bot, nonce, 1, Duration::ZERO),
                     Err(e) if e.delivery() == Delivery::Rejected => {
                         let _ = self.store.delete_pending(&bot, &nonce);
                         self.reload_bot_log(&bot);
@@ -699,10 +708,63 @@ impl App {
                             },
                         );
                     }
-                    Err(e) => {
+                    // Network error / 5xx: ask the gateway whether it landed.
+                    Err(_) => self.check_acceptance(bot, nonce, 1, Duration::ZERO),
+                }
+            }
+            Event::Acceptance {
+                epoch,
+                bot,
+                nonce,
+                attempt,
+                result,
+            } => {
+                if epoch != self.epoch {
+                    return;
+                }
+                use gw::AcceptanceStatus as A;
+                match result {
+                    Ok(A::Pending) if attempt < ACCEPTANCE_MAX_ATTEMPTS => {
+                        self.check_acceptance(bot, nonce, attempt + 1, Duration::from_millis(1500));
+                        return;
+                    }
+                    _ => {}
+                }
+                self.drop_checking_notice(&bot);
+                match result {
+                    Ok(A::Accepted) => {
+                        // Confirmed: no warning; the transcript will replace the placeholder.
+                        self.awaiting.insert(bot.clone(), Instant::now());
+                        self.schedule_fast(&bot, Duration::ZERO);
+                    }
+                    Ok(A::Rejected(code)) => {
+                        let _ = self.store.delete_pending(&bot, &nonce);
+                        self.reload_bot_log(&bot);
+                        let code = code.map(|c| format!(": {c}")).unwrap_or_default();
+                        self.push_to(
+                            &bot,
+                            Entry {
+                                kind: EntryKind::Error,
+                                text: format!("Not delivered (rejected by the gateway{code})."),
+                            },
+                        );
+                    }
+                    Ok(A::NotFound) => {
+                        let _ = self.store.delete_pending(&bot, &nonce);
+                        self.reload_bot_log(&bot);
+                        self.push_to(
+                            &bot,
+                            Entry {
+                                kind: EntryKind::Error,
+                                text: "Not delivered: the gateway has no record of it. Safe to resend."
+                                    .into(),
+                            },
+                        );
+                    }
+                    Ok(A::Pending) | Ok(A::Unknown) | Err(_) => {
                         self.push_to(&bot, Entry {
                             kind: EntryKind::Error,
-                            text: format!("Delivery unknown ({e}). Checking the transcript; don't resend until it does or doesn't appear."),
+                            text: "Delivery unknown: the gateway couldn't confirm it. Watching the transcript; don't resend until it does or doesn't appear.".into(),
                         });
                         self.awaiting.insert(bot.clone(), Instant::now());
                         self.schedule_fast(&bot, Duration::ZERO);
@@ -719,6 +781,42 @@ impl App {
             if self.store.save_login(&l).is_ok() {
                 self.info("Gateway session refreshed via Cursor token.".into());
             }
+        }
+    }
+
+    /// Ask `promptAcceptanceStatus` whether the send with `nonce` landed.
+    fn check_acceptance(&mut self, bot: String, nonce: String, attempt: u32, after: Duration) {
+        if attempt == 1 {
+            self.push_to(
+                &bot,
+                Entry {
+                    kind: EntryKind::System,
+                    text: CHECKING_NOTICE.into(),
+                },
+            );
+        }
+        let Some(api) = self.api.clone() else {
+            return;
+        };
+        let epoch = self.epoch;
+        self.spawn(async move {
+            if !after.is_zero() {
+                tokio::time::sleep(after).await;
+            }
+            let result = api.acceptance(&bot, &nonce).await;
+            Event::Acceptance {
+                epoch,
+                bot,
+                nonce,
+                attempt,
+                result,
+            }
+        });
+    }
+
+    fn drop_checking_notice(&mut self, bot: &str) {
+        if let Some(n) = self.notices.get_mut(bot) {
+            n.retain(|e| e.text != CHECKING_NOTICE);
         }
     }
 
@@ -1805,6 +1903,40 @@ pub mod tests {
     }
 
     #[test]
+    fn unknown_send_resolved_by_acceptance_status() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "t");
+        // Never reached the gateway → not-found: placeholder removed, safe to resend.
+        type_line(&mut app, "lost");
+        settle(&mut app);
+        assert!(texts(&app).iter().any(|t| t.contains("Safe to resend")));
+        assert!(
+            !app.store
+                .messages("helper")
+                .unwrap()
+                .iter()
+                .any(|m| m.text == "lost")
+        );
+        assert!(!texts(&app).iter().any(|t| t == CHECKING_NOTICE));
+        // Gateway refused it after all → rejected with its code.
+        type_line(&mut app, "refused-later");
+        settle(&mut app);
+        assert!(
+            texts(&app)
+                .iter()
+                .any(|t| t.contains("Not delivered (rejected by the gateway: mock_refused)"))
+        );
+        assert!(
+            !app.store
+                .messages("helper")
+                .unwrap()
+                .iter()
+                .any(|m| m.text == "refused-later")
+        );
+    }
+
+    #[test]
     fn rejected_and_unknown_delivery() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = test_app(&rt);
@@ -1822,9 +1954,11 @@ pub mod tests {
         );
         assert!(!app.is_typing());
 
+        // 503 but the prompt landed: promptAcceptanceStatus says accepted → no warning.
         type_line(&mut app, "unknown");
         settle(&mut app);
-        assert!(texts(&app).iter().any(|t| t.contains("Delivery unknown")));
+        assert!(!texts(&app).iter().any(|t| t.contains("Delivery unknown")));
+        assert!(!texts(&app).iter().any(|t| t == CHECKING_NOTICE));
         // The transcript check finds the prompt that did land; no duplicate.
         let msgs = app.store.messages("helper").unwrap();
         assert_eq!(msgs.iter().filter(|m| m.text == "unknown").count(), 1);

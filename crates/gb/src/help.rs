@@ -281,9 +281,14 @@ Every message you send shows as pending until the transcript confirms it.
 
   Accepted  The gateway returned a receipt. The message is confirmed when it appears.
   Rejected  The gateway refused it (4xx, policy). It was NOT delivered; fix and resend.
-  Unknown   5xx, network error or timeout, no receipt. It may or may not have arrived.
-            gb never resends automatically; it checks the transcript right away.
-            Wait for it to appear (or not) before resending yourself.",
+  Unknown   5xx, network error, timeout or no receipt. gb then asks the gateway
+            (promptAcceptanceStatus, by the message's nonce) whether it landed:
+              accepted  → nothing to do; it will appear in the chat.
+              rejected  → "Not delivered (rejected by the gateway: <code>)".
+              not found → "Not delivered … Safe to resend" (it never arrived).
+              pending   → asked again a few times.
+            Only if the gateway can't tell does gb show "Delivery unknown"; then wait
+            for the message to appear (or not) before resending. gb never resends itself.",
         related: &["sync", "troubleshooting"],
     },
     Topic {

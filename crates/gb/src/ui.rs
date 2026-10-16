@@ -4,7 +4,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap};
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let [top, mid, bottom] = Layout::vertical([
@@ -99,13 +99,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // Body
     let bot_name = app.active_bot().map(|b| b.name.clone());
     // Chat feed (from SQLite), then transient notices in their own section.
-    let mut lines: Vec<Line> = app
-        .feed()
-        .iter()
-        .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref(), true))
-        .collect();
+    // A blank line separates consecutive messages.
+    let mut lines: Vec<Line> = vec![];
+    for (i, e) in app.feed().iter().enumerate() {
+        if i > 0 {
+            lines.push(Line::default());
+        }
+        lines.extend(entry_lines(e.kind, &e.text, bot_name.as_deref(), true));
+    }
     if !app.notices().is_empty() {
         if !lines.is_empty() {
+            lines.push(Line::default());
             lines.push(Line::styled(
                 "── notices (not saved) ──",
                 Style::default().fg(Color::DarkGray),
@@ -123,8 +127,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             .map(|t| Line::styled(t, Style::default().fg(Color::DarkGray)))
             .collect();
     }
-    let inner_w = body.width.saturating_sub(2).max(1) as usize;
-    let inner_h = body.height.saturating_sub(2);
+    // Inner padding between the border and the content (left/right 2, top 1).
+    let chat_block = Block::default()
+        .borders(Borders::ALL)
+        .padding(Padding::new(2, 2, 1, 0));
+    let inner = chat_block.inner(body);
+    let inner_w = inner.width.max(1) as usize;
+    let inner_h = inner.height;
     // Exact wrapped height (word wrap can need more rows than width/cols), so
     // "scrolled to bottom" really shows the newest line.
     let total: usize = Paragraph::new(lines.clone())
@@ -152,7 +161,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
             .scroll((off, 0))
-            .block(Block::default().borders(Borders::ALL).title(title)),
+            .block(chat_block.title(title)),
         body,
     );
     app.scroll = scroll;
@@ -462,5 +471,49 @@ mod tests {
             line.find("MY-OWN-MSG").unwrap() > 50,
             "right side: {line:?}"
         );
+    }
+
+    #[test]
+    fn chat_has_blank_line_between_messages_and_inner_padding() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        crate::app::tests::mock_login(&mut app, "t");
+        let bot = app.active_bot().unwrap().id.clone();
+        for (i, t) in ["FIRST-MSG", "SECOND-MSG"].iter().enumerate() {
+            app.store
+                .append_message(
+                    &bot,
+                    &crate::api::Message {
+                        role: crate::api::Role::Bot,
+                        text: (*t).into(),
+                        remote_id: Some(format!("p{i}")),
+                    },
+                )
+                .unwrap();
+        }
+        app.refresh_feed_from_db();
+        app.notices.clear();
+        let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let row_of = |needle: &str| {
+            (0..30u16)
+                .find(|&y| {
+                    (0..100u16)
+                        .map(|x| buf[(x, y)].symbol())
+                        .collect::<String>()
+                        .contains(needle)
+                })
+                .unwrap()
+        };
+        let (a, b) = (row_of("FIRST-MSG"), row_of("SECOND-MSG"));
+        assert_eq!(b, a + 2, "one blank line between messages");
+        let blank: String = (0..100u16).map(|x| buf[(x, a + 1)].symbol()).collect();
+        assert!(!blank.contains("MSG"));
+        // Left padding: two spaces between the chat border and the text.
+        let line: String = (0..100u16).map(|x| buf[(x, a)].symbol()).collect();
+        let border = line[..line.find("FIRST-MSG").unwrap()].rfind('│').unwrap();
+        let after_border = &line[border + '│'.len_utf8()..];
+        assert!(after_border.starts_with("  "), "{line:?}");
     }
 }
