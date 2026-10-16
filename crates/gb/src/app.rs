@@ -414,6 +414,10 @@ pub struct App {
     /// rendered in their own section below it.
     pub notices: HashMap<String, Vec<Entry>>,
     pub input: String,
+    /// Byte offset of the cursor in `input`.
+    pub input_cursor: usize,
+    /// First visible row of the input box (when over 10 rows).
+    pub input_scroll: usize,
     pub mode: InputMode,
     pub focus: Focus,
     pub scroll: u16,
@@ -524,6 +528,8 @@ impl App {
             logs: HashMap::new(),
             notices: HashMap::new(),
             input: String::new(),
+            input_cursor: 0,
+            input_scroll: 0,
             mode: InputMode::Normal,
             focus: Focus::Input,
             scroll: 0,
@@ -1783,10 +1789,46 @@ impl App {
 
     // ------------------------------------------------------------ input
 
+    pub fn input_insert(&mut self, t: &str) {
+        crate::input::insert(&mut self.input, &mut self.input_cursor, t);
+    }
+    /// Newline in the message (Shift/Alt-Enter, Ctrl-J). Login prompts stay one line.
+    pub fn input_newline(&mut self) {
+        if self.mode == InputMode::Normal {
+            self.input_insert("\n");
+        }
+    }
+    pub fn input_backspace(&mut self) {
+        crate::input::backspace(&mut self.input, &mut self.input_cursor);
+    }
+    pub fn input_delete(&mut self) {
+        crate::input::delete(&mut self.input, &mut self.input_cursor);
+    }
+    pub fn input_left(&mut self) {
+        crate::input::left(&self.input, &mut self.input_cursor);
+    }
+    pub fn input_right(&mut self) {
+        crate::input::right(&self.input, &mut self.input_cursor);
+    }
+    pub fn input_home(&mut self) {
+        crate::input::home(&self.input, &mut self.input_cursor);
+    }
+    pub fn input_end(&mut self) {
+        crate::input::end(&self.input, &mut self.input_cursor);
+    }
+    pub fn input_up(&mut self) -> bool {
+        crate::input::up(&self.input, &mut self.input_cursor)
+    }
+    pub fn input_down(&mut self) -> bool {
+        crate::input::down(&self.input, &mut self.input_cursor)
+    }
+
     pub fn cancel_input_mode(&mut self) {
         let was = self.mode;
         self.mode = InputMode::Normal;
         self.input.clear();
+        self.input_cursor = 0;
+        self.input_scroll = 0;
         self.login_url_draft = None;
         match was {
             InputMode::Normal => {}
@@ -1796,6 +1838,8 @@ impl App {
 
     pub fn submit(&mut self) {
         let line = std::mem::take(&mut self.input);
+        self.input_cursor = 0;
+        self.input_scroll = 0;
         let trimmed = line.trim().to_string();
         match self.mode {
             InputMode::GatewayUrl | InputMode::GatewayToken | InputMode::CursorToken

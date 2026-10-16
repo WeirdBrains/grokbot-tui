@@ -4,6 +4,7 @@ mod app;
 mod commands;
 mod config;
 mod help;
+mod input;
 mod picker;
 mod storage;
 mod ui;
@@ -47,7 +48,25 @@ fn main() -> Result<()> {
 
     let mut term = ratatui::init();
     execute!(std::io::stdout(), EnableMouseCapture)?;
+    // Ask the terminal to report modifiers on Enter so Shift-Enter is distinct (kitty
+    // keyboard protocol). Terminals without it fall back to Alt-Enter / Ctrl-J.
+    let enhanced = matches!(
+        ratatui::crossterm::terminal::supports_keyboard_enhancement(),
+        Ok(true)
+    ) && execute!(
+        std::io::stdout(),
+        ratatui::crossterm::event::PushKeyboardEnhancementFlags(
+            ratatui::crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+        )
+    )
+    .is_ok();
     let res = run(&mut term, &mut app);
+    if enhanced {
+        let _ = execute!(
+            std::io::stdout(),
+            ratatui::crossterm::event::PopKeyboardEnhancementFlags
+        );
+    }
     let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     res
@@ -175,17 +194,33 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                         }
                         _ => {}
                     },
-                    KeyCode::Enter => app.submit(),
-                    KeyCode::Backspace => {
-                        app.input.pop();
+                    KeyCode::Enter if is_newline_key(&k) => app.input_newline(),
+                    KeyCode::Char('j') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.input_newline()
                     }
-                    KeyCode::Up => app.scroll_up(1),
-                    KeyCode::Down => app.scroll_down(1),
-                    KeyCode::Char(c) => app.input.push(c),
+                    KeyCode::Enter => app.submit(),
+                    KeyCode::Backspace => app.input_backspace(),
+                    KeyCode::Delete => app.input_delete(),
+                    KeyCode::Left => app.input_left(),
+                    KeyCode::Right => app.input_right(),
+                    KeyCode::Home => app.input_home(),
+                    KeyCode::End => app.input_end(),
+                    // Move between input lines; at the top/bottom line, scroll the chat.
+                    KeyCode::Up => {
+                        if !app.input_up() {
+                            app.scroll_up(1)
+                        }
+                    }
+                    KeyCode::Down => {
+                        if !app.input_down() {
+                            app.scroll_down(1)
+                        }
+                    }
+                    KeyCode::Char(c) => app.input_insert(&c.to_string()),
                     _ => {}
                 }
             }
-            Event::Paste(s) => app.input.push_str(s.trim_end_matches(['\r', '\n'])),
+            Event::Paste(s) => app.input_insert(s.trim_end_matches(['\r', '\n'])),
             Event::Mouse(m) if app.picker.is_some() => {
                 let p = app.picker.as_mut().unwrap();
                 match m.kind {
@@ -217,4 +252,32 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Shift-Enter (needs keyboard enhancement) or Alt-Enter (works everywhere) inserts a newline.
+fn is_newline_key(k: &event::KeyEvent) -> bool {
+    k.code == KeyCode::Enter
+        && k.modifiers
+            .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+    use ratatui::crossterm::event::KeyEvent;
+    #[test]
+    fn shift_or_alt_enter_is_newline_plain_enter_submits() {
+        assert!(is_newline_key(&KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::SHIFT
+        )));
+        assert!(is_newline_key(&KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::ALT
+        )));
+        assert!(!is_newline_key(&KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE
+        )));
+    }
 }

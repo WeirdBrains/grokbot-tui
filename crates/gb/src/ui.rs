@@ -6,11 +6,28 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap};
 
+/// Input text as shown (masked for token prompts) and its cursor byte offset.
+fn input_shown(app: &App) -> (String, usize) {
+    match app.mode {
+        InputMode::GatewayToken | InputMode::CursorToken => {
+            let n = app.input.chars().count();
+            ("*".repeat(n), n)
+        }
+        _ => (app.input.clone(), app.input_cursor.min(app.input.len())),
+    }
+}
+
 pub fn draw(f: &mut Frame, app: &mut App) {
+    // Input box: char-wrapped to its width, grows to 10 rows, then scrolls.
+    let (shown, cur) = input_shown(app);
+    let text_w = f.area().width.saturating_sub(4).max(1) as usize; // borders + "> "
+    let il = crate::input::layout(&shown, cur, text_w);
+    let vis = crate::input::visible_rows(il.rows.len());
+    app.input_scroll = crate::input::scroll_for(app.input_scroll, il.cursor.0, il.rows.len(), vis);
     let [top, mid, bottom] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(3),
-        Constraint::Length(3),
+        Constraint::Length(vis as u16 + 2),
     ])
     .areas(f.area());
     let [side, body] = Layout::horizontal([
@@ -167,20 +184,25 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     app.scroll = scroll;
 
     // Bottom input bar
-    let (shown, title) = match app.mode {
-        InputMode::GatewayToken => (
-            "*".repeat(app.input.chars().count()),
-            " Gateway token (masked, Esc cancels) ",
-        ),
-        InputMode::CursorToken => (
-            "*".repeat(app.input.chars().count()),
-            " Cursor access token (masked, Esc cancels) ",
-        ),
-        InputMode::GatewayUrl => (app.input.clone(), " Gateway URL (Esc cancels) "),
-        InputMode::Normal => (
-            app.input.clone(),
-            " /command or message · F1 or ? help · /help login ",
-        ),
+    let title = match app.mode {
+        InputMode::GatewayToken => " Gateway token (masked, Esc cancels) ",
+        InputMode::CursorToken => " Cursor access token (masked, Esc cancels) ",
+        InputMode::GatewayUrl => " Gateway URL (Esc cancels) ",
+        InputMode::Normal => " message or /command · Shift/Alt-Enter newline · F1 help ",
+    };
+    let scroll = app.input_scroll;
+    let input_lines: Vec<Line> = il
+        .rows
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(vis)
+        .map(|(i, r)| Line::raw(format!("{}{r}", if i == 0 { "> " } else { "  " })))
+        .collect();
+    let more = if il.rows.len() > vis {
+        format!(" {}/{} ", il.cursor.0 + 1, il.rows.len())
+    } else {
+        String::new()
     };
     let border = if app.focus == Focus::Input {
         Color::Cyan
@@ -188,10 +210,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Color::Gray
     };
     f.render_widget(
-        Paragraph::new(format!("> {shown}")).block(
+        Paragraph::new(input_lines).block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(title)
+                .title_bottom(Line::from(more).right_aligned())
                 .border_style(Style::default().fg(border)),
         ),
         bottom,
@@ -203,11 +226,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else if app.help.is_some() {
         draw_help(f, app);
     } else if app.focus == Focus::Input {
-        let x = bottom.x + 3 + shown.chars().count() as u16;
-        f.set_cursor_position(Position::new(
-            x.min(bottom.right().saturating_sub(2)),
-            bottom.y + 1,
-        ));
+        let (row, col) = il.cursor;
+        let x = bottom.x + 3 + col as u16;
+        let y = bottom.y + 1 + (row - scroll) as u16;
+        f.set_cursor_position(Position::new(x.min(bottom.right().saturating_sub(2)), y));
     }
 }
 
@@ -486,6 +508,75 @@ mod tests {
         assert!(text.contains("bot: Helper"));
         assert!(text.contains("Coder"));
         assert_eq!(app.sidebar_area.width, 24);
+    }
+
+    fn screen_rows(term: &Terminal<TestBackend>) -> Vec<String> {
+        let b = term.backend().buffer();
+        (0..b.area.height)
+            .map(|y| (0..b.area.width).map(|x| b[(x, y)].symbol()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn input_box_grows_wraps_caps_and_scrolls() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        let mut term = Terminal::new(TestBackend::new(40, 30)).unwrap();
+        // One line: 3 rows tall (borders + 1).
+        app.input_insert("hi");
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let r = screen_rows(&term);
+        assert!(r[28].contains("> hi"), "{r:#?}");
+        // Shift-Enter newline: box grows by one row, chat shrinks.
+        app.input_newline();
+        app.input_insert("there");
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let r = screen_rows(&term);
+        assert!(
+            r[27].contains("> hi") && r[28].contains("  there"),
+            "{r:#?}"
+        );
+        assert_eq!(
+            term.get_cursor_position().unwrap(),
+            Position::new(3 + 5, 28)
+        );
+        // A long line wraps at 36 columns (40 - borders - "> ") instead of running off.
+        app.input_insert(&"y".repeat(50));
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let r = screen_rows(&term);
+        assert!(
+            r[27].contains("  there") && r[27].contains(&"y".repeat(31)),
+            "{r:#?}"
+        );
+        assert!(
+            r[28].contains(&format!("│  {} ", "y".repeat(19))) && !r[28].contains(&"y".repeat(20)),
+            "{r:#?}"
+        );
+        // cursor after 55 chars on that line: row 2 of it, col 55-36 = 19
+        assert_eq!(
+            term.get_cursor_position().unwrap(),
+            Position::new(3 + 19, 28)
+        );
+        // 20 lines: capped at 10 visible rows (box height 12), scrolled to the cursor.
+        for i in 0..20 {
+            app.input_newline();
+            app.input_insert(&format!("line{i}"));
+        }
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let r = screen_rows(&term);
+        assert!(r[18].starts_with('┌'), "box is 12 rows: {r:#?}");
+        assert!(r[28].contains("line19"));
+        assert!(!r.iter().any(|l| l.contains("line9 ")));
+        assert_eq!(term.get_cursor_position().unwrap().y, 28);
+        // Move up past the top of the view: it scrolls to keep the cursor visible.
+        for _ in 0..15 {
+            app.input_up();
+        }
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let r = screen_rows(&term);
+        let y = term.get_cursor_position().unwrap().y as usize;
+        assert!((19..=28).contains(&y));
+        assert!(r[y].contains("line4"), "{r:#?}");
     }
 
     #[test]

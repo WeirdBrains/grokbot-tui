@@ -177,10 +177,16 @@ Anywhere
   PgUp / PgDn, mouse wheel     Scroll the chat
   Esc                          Cancel a prompt (login, confirm) / return focus to input
 
-Input focused
-  Enter      Send message or run /command
-  ↑ / ↓      Scroll the chat one line
-  Backspace  Delete
+Input focused (multi-line)
+  Enter                     Send message or run /command
+  Shift-Enter               New line (terminals with the kitty keyboard protocol:
+                            kitty, WezTerm, foot, Ghostty, recent Alacritty/iTerm2)
+  Alt-Enter or Ctrl-J       New line (fallback that works in any terminal)
+  ← → / Home End            Move the cursor / to the start or end of the line
+  ↑ / ↓                     Previous / next line; on the first / last line, scroll the chat
+  Backspace / Delete        Delete before / at the cursor
+  Long lines wrap; the box grows up to 10 rows, then scrolls to keep the cursor
+  visible (row/total shown bottom-right). Pasted text keeps its line breaks.
 
 Sidebar focused
   ↑ ↓ / k j  Move      Enter  Open bot
