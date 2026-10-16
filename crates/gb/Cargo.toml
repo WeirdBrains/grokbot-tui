@@ -5,7 +5,7 @@ edition.workspace = true
 description = "Terminal UI for Grok Bot"
 
 [[bin]]
-name = "gb"
+name = "grokbot-tui"
 path = "src/main.rs"
 
 [dependencies]

@@ -658,7 +658,7 @@ impl App {
 
     pub fn init(&mut self) {
         self.info(format!(
-            "Welcome to gb{}. Type /help for commands.",
+            "Welcome to grokbot-tui{}. Type /help for commands.",
             if self.mock { " (mock mode)" } else { "" }
         ));
         self.connect();

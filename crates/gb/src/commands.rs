@@ -110,7 +110,7 @@ pub fn registry() -> Registry {
                 name: "quit",
                 aliases: &["q", "exit"],
                 usage: "/quit",
-                help: "Exit gb",
+                help: "Exit grokbot-tui",
                 run: quit,
             },
         ],
@@ -151,7 +151,7 @@ fn login(app: &mut App, args: &str) -> Result<()> {
         (Some("cursor"), None, None) => {
             app.mode = InputMode::CursorToken;
             app.info(
-                "Paste your Cursor access token (masked; not a dashboard API key). It is exchanged via EnsureSandBox and stored so gb can re-exchange when the gateway token expires. Empty cancels."
+                "Paste your Cursor access token (masked; not a dashboard API key). It is exchanged via EnsureSandBox and stored so grokbot-tui can re-exchange when the gateway token expires. Empty cancels."
                     .into(),
             );
         }

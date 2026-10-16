@@ -1,4 +1,4 @@
-//! gb — terminal UI for Grok Bot.
+//! grokbot-tui — terminal UI for Grok Bot.
 mod api;
 mod app;
 mod commands;
@@ -18,7 +18,7 @@ use std::time::Duration;
 use storage::Store;
 
 #[derive(Parser)]
-#[command(name = "gb", version, about = "Terminal UI for Grok Bot")]
+#[command(name = "grokbot-tui", version, about = "Terminal UI for Grok Bot")]
 struct Cli {
     /// Use the offline mock API (fake bots, echo replies; any token except "bad" works).
     #[arg(long)]

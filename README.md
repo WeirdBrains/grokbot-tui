@@ -1,38 +1,33 @@
-# gb — Grok Bot TUI
+# grokbot-tui — Grok Bot TUI
 
 A terminal UI for Grok Bot, written in Rust (2024 edition) with ratatui + crossterm. It's a Cargo workspace:
 
 | Crate | What |
 |---|---|
 | [`crates/grokbot_api`](crates/grokbot_api) | Library: async client for every known Grok Bot gateway call, the Cursor EnsureSandBox exchange, and the credential host allowlist |
-| [`crates/gb`](crates/gb) | The `gb` binary (TUI). All networking goes through `grokbot_api` |
+| [`crates/gb`](crates/gb) | The `grokbot-tui` binary (TUI). All networking goes through `grokbot_api` |
 
 > ⚠️ **Unofficial and undocumented.** The Grok Bot gateway is a private API with no public spec.
 > Its protocol was reverse-engineered from [grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli)
-> and **can change or break at any time**. Use `gb --mock` to try the UI without a server.
+> and **can change or break at any time**. Use `grokbot-tui --mock` to try the UI without a server.
 
 ## Run
 
 ```sh
-cargo run -p gb -- --mock        # offline: fake bots, delayed echo replies
-cargo run -p gb                  # real gateway
-cargo install --path crates/gb   # installs the `gb` binary
-gb --data-dir /tmp/gbtest        # different data directory (holds context.db)
-gb --account work                # start in an account (or GB_ACCOUNT=work gb)
+cargo run -p gb -- --mock              # offline: fake bots, delayed echo replies
+cargo run -p gb                        # real gateway
+cargo install --path crates/gb         # installs the `grokbot-tui` binary
+grokbot-tui --data-dir /tmp/gbtest     # different data directory (holds context.db)
+grokbot-tui --account work             # start in an account (or GB_ACCOUNT=work)
 ```
 
 In mock mode any token logs in except `bad`. Sending `reject` simulates a 4xx and `unknown` simulates a 5xx after the prompt has landed.
-
-> **Shell alias conflict.** Many setups define `alias gb='git branch'`, which shadows
-> `~/.cargo/bin/gb`. If you see `fatal: not a git repository` when running `gb`, that is
-> git — not this app (gb never invokes `git` at runtime). Check with `type -a gb`, then
-> `unalias gb` (and remove the alias from your shell rc), or run `~/.cargo/bin/gb` directly.
 
 
 ## Layout
 
 ```
-┌ gb  account: default  login: cursor · box.cursorvm.com  bot: Helper ┐  top bar
+┌ grokbot-tui  account: default  login: cursor · box.cursorvm.com  bot: Helper ┐  top bar
 │ @default ⇄    ┌ Chat: Helper · Helper is replying ⠹ ─────────────────┐│  account header (click to cycle)
 │┌ Bots ──────┐│ you: hi                                               ││
 ││ Helper     ││ Helper: hello!                                        ││  body: command output
@@ -90,37 +85,37 @@ Commands live in a registry in `crates/gb/src/commands.rs`.
 
 All methods are per account and stored in SQLite (see below).
 
-1. **Gateway token** — `/login gateway <url>`, then paste the token. gb checks the URL against the allowlist,
+1. **Gateway token** — `/login gateway <url>`, then paste the token. grokbot-tui checks the URL against the allowlist,
    then validates the credential with `listAgents` (the gateway has no "who am I" call). It is saved only if that succeeds.
-2. **Cursor access token** — `/login cursor`, then paste the token. gb calls
+2. **Cursor access token** — `/login cursor`, then paste the token. grokbot-tui calls
    `POST https://api2.cursor.sh/aiserver.v1.GrokBotService/EnsureSandBox` to get a gateway URL, token and
    extra headers (e.g. `x-anyrun-network-token`). The Cursor token is stored too, so when the gateway answers
-   **401** gb re-exchanges once, retries, and saves the new session. A Cursor dashboard API key does not work here.
+   **401** grokbot-tui re-exchanges once, retries, and saves the new session. A Cursor dashboard API key does not work here.
 
-3. **Desktop app session (opt-in)** — `/login desktop [entry]`. gb reads the desktop app's saved session only when
+3. **Desktop app session (opt-in)** — `/login desktop [entry]`. grokbot-tui reads the desktop app's saved session only when
    you run this command, mirroring grok-bot-cli's `app-session.js`. It reads `gateway-descriptor.json` from the app data dir:
    - Linux: `$XDG_CONFIG_HOME/Grok Bot` or `~/.config/Grok Bot`;
    - macOS: `~/Library/Application Support/Grok Bot`;
    - Windows: `%APPDATA%\Grok Bot`.
 
    Both descriptor formats are supported: v1 `{version, encrypted}` and v2 `{version: 2, entries}`. When a v2 file has
-   several entries, gb lists them and you choose one with `/login desktop <entry>`. The payload is Chromium Safe Storage:
+   several entries, grokbot-tui lists them and you choose one with `/login desktop <entry>`. The payload is Chromium Safe Storage:
    - Linux `v11`: the password comes from `secret-tool lookup xdg:schema chrome_libsecret_os_crypt_password_v2 application 'Grok Bot'`;
    - Linux `v10`: the fixed `peanuts` password;
    - macOS: Keychain item `Grok Bot Safe Storage`, PBKDF2-SHA1 (`saltysalt`, 1003 rounds) and AES-128-CBC;
    - Windows: the DPAPI-protected key in `Local State` and AES-256-GCM.
 
    The decrypted `{baseUrl, token, headers?}` must pass the host allowlist and is validated with `listAgents`.
-   It is then saved to the active account with method `desktop`. If the gateway later answers **401**, gb re-reads the
-   desktop session once automatically, for that account only. gb never reads the desktop session in any other code path.
+   It is then saved to the active account with method `desktop`. If the gateway later answers **401**, grokbot-tui re-reads the
+   desktop session once automatically, for that account only. grokbot-tui never reads the desktop session in any other code path.
    You get clear errors when the app isn't installed, you aren't signed in, or `secret-tool` is missing. Tokens are never printed or logged.
 
    **Fallback when there is no `gateway-descriptor.json`:** some desktop builds only write `sand-secrets.json`.
    In that case `/login desktop` decrypts the `cursor-accounts` field (Chromium Safe Storage, same scheme as above),
    takes the Cursor access token, and exchanges it via EnsureSandBox exactly like `/login cursor`. The Cursor token
    itself is **not** stored — method stays `desktop` and a 401 re-reads `sand-secrets.json`. With several Cursor
-   accounts, gb lists them as `1) <keyprefix>…` and you pick with `/login desktop <number>` (tip: `/account add`
-   first so each maps to its own gb account). `local-exec-file-key`, `cursor-machine-id`, Cookies and `~/.grokbot/`
+   accounts, grokbot-tui lists them as `1) <keyprefix>…` and you pick with `/login desktop <number>` (tip: `/account add`
+   first so each maps to its own grokbot-tui account). `local-exec-file-key`, `cursor-machine-id`, Cookies and `~/.grokbot/`
    are never read.
 
 **Host allowlist.** Credentials are only sent to:
@@ -149,7 +144,7 @@ Redirects are never followed, requests time out after 30 s, responses are capped
 `sendPrompt` returns only a receipt (`messageId`). Replies are picked up by polling the transcript.
 - **Accepted** (receipt) → "replying" indicator until a new bot entry shows up.
 - **Rejected** (4xx, or a disallowed URL) → shown as not delivered, and the local copy is removed.
-- **Unknown** (5xx, network error, timeout, or no receipt) → gb **does not resend**. It checks the transcript right away, and the message shows as confirmed if it appears there. Check before resending yourself.
+- **Unknown** (5xx, network error, timeout, or no receipt) → grokbot-tui **does not resend**. It checks the transcript right away, and the message shows as confirmed if it appears there. Check before resending yourself.
 
 Your message is stored locally as pending and takes the transcript entry id once the gateway echoes it, so it is never duplicated.
 Transcript text is parsed like grok-bot-cli's `transcript.js` (`text` / `prompt` / `message` / `content` parts / `message.content` / `preview`).

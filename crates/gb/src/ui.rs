@@ -28,7 +28,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let bot = app.active_bot().map(|b| b.name.as_str()).unwrap_or("none");
     let mut spans = vec![
         Span::styled(
-            " gb ",
+            " grokbot-tui ",
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)
@@ -212,10 +212,11 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = crate::app::tests::test_app(&rt);
         crate::app::tests::mock_login(&mut app, "t");
-        let mut term = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        let mut term = Terminal::new(TestBackend::new(120, 20)).unwrap();
         term.draw(|f| draw(f, &mut app)).unwrap();
         let buf = term.backend().buffer().clone();
         let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(text.contains("grokbot-tui"), "{text}");
         assert!(text.contains("account: default"));
         assert!(text.contains("login: gateway · box.cursorvm.com"), "{text}");
         assert!(text.contains("@default"));

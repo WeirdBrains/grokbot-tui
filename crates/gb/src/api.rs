@@ -1,5 +1,5 @@
 //! gb's view of the backend: a small [`ApiClient`] trait with a real implementation on
-//! top of the `grokbot_api` crate ([`GatewayApi`]) and an offline [`MockClient`] (`gb --mock`).
+//! top of the `grokbot_api` crate ([`GatewayApi`]) and an offline [`MockClient`] (`grokbot-tui --mock`).
 use async_trait::async_trait;
 use grokbot_api as gw;
 pub use grokbot_api::{Delivery, SendReceipt, Session};
