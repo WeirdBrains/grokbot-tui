@@ -1,7 +1,7 @@
 //! Rendering: top bar, left sidebar, body, bottom input bar.
 use crate::app::{App, EntryKind, Focus, InputMode};
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Position, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
@@ -102,7 +102,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let mut lines: Vec<Line> = app
         .feed()
         .iter()
-        .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref()))
+        .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref(), true))
         .collect();
     if !app.notices().is_empty() {
         if !lines.is_empty() {
@@ -114,7 +114,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         lines.extend(
             app.notices()
                 .iter()
-                .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref())),
+                .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref(), false)),
         );
     }
     if lines.is_empty() {
@@ -125,10 +125,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     let inner_w = body.width.saturating_sub(2).max(1) as usize;
     let inner_h = body.height.saturating_sub(2);
-    let total: usize = lines
-        .iter()
-        .map(|l| l.width().max(1).div_ceil(inner_w))
-        .sum();
+    // Exact wrapped height (word wrap can need more rows than width/cols), so
+    // "scrolled to bottom" really shows the newest line.
+    let total: usize = Paragraph::new(lines.clone())
+        .wrap(Wrap { trim: false })
+        .line_count(inner_w as u16);
     let max_off = (total as u16).saturating_sub(inner_h);
     let scroll = app.scroll.min(max_off);
     let off = max_off - scroll;
@@ -243,12 +244,9 @@ fn draw_help(f: &mut Frame, app: &mut App) {
     let [text_area, links_area] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(3)]).areas(area);
     let inner_w = text_area.width.saturating_sub(2).max(1) as usize;
-    let total: usize = m
-        .page
-        .body
-        .lines()
-        .map(|l| l.chars().count().max(1).div_ceil(inner_w))
-        .sum();
+    let total: usize = Paragraph::new(m.page.body.as_str())
+        .wrap(Wrap { trim: false })
+        .line_count(inner_w as u16);
     let max = (total as u16).saturating_sub(text_area.height.saturating_sub(2));
     m.scroll = m.scroll.min(max);
     let style = Style::default().bg(Color::Black).fg(Color::White);
@@ -308,7 +306,21 @@ fn draw_help(f: &mut Frame, app: &mut App) {
     );
 }
 
-fn entry_lines<'a>(kind: EntryKind, text: &'a str, bot: Option<&str>) -> Vec<Line<'a>> {
+/// Lines for one entry. In the chat feed (`feed`), the user's own messages are
+/// right-aligned like a typical chat UI; everything else stays left-aligned.
+fn entry_lines<'a>(kind: EntryKind, text: &'a str, bot: Option<&str>, feed: bool) -> Vec<Line<'a>> {
+    if feed && kind == EntryKind::User {
+        let style = Style::default().fg(Color::Green);
+        let mut out = vec![
+            Line::from(Span::styled("you", style.add_modifier(Modifier::BOLD)))
+                .alignment(Alignment::Right),
+        ];
+        out.extend(
+            text.lines()
+                .map(|l| Line::from(Span::styled(l, style)).alignment(Alignment::Right)),
+        );
+        return out;
+    }
     let (prefix, style) = match kind {
         EntryKind::System => ("".to_string(), Style::default().fg(Color::Gray)),
         EntryKind::Error => ("! ".to_string(), Style::default().fg(Color::Red)),
@@ -379,5 +391,76 @@ mod tests {
         assert!(screen.contains("Help: Logging in"));
         assert!(screen.contains("Related:"));
         assert!(screen.contains("/help login desktop"));
+    }
+
+    #[test]
+    fn newest_message_visible_at_bottom_with_word_wrap() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        crate::app::tests::mock_login(&mut app, "t");
+        let bot = app.active_bot().unwrap().id.clone();
+        // Many long messages of short words: word wrap needs more rows than width/cols.
+        for i in 0..30 {
+            let text = format!("m{i} ") + &"abcdefg hij klmnop qrs tuvw xyz ".repeat(12);
+            app.store
+                .append_message(
+                    &bot,
+                    &crate::api::Message {
+                        role: crate::api::Role::Bot,
+                        text,
+                        remote_id: Some(format!("r{i}")),
+                    },
+                )
+                .unwrap();
+        }
+        app.store
+            .append_message(
+                &bot,
+                &crate::api::Message {
+                    role: crate::api::Role::Bot,
+                    text: "NEWEST-LINE".into(),
+                    remote_id: Some("rz".into()),
+                },
+            )
+            .unwrap();
+        app.refresh_feed_from_db();
+        app.notices.clear();
+        let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let screen: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(
+            screen.contains("NEWEST-LINE"),
+            "newest message must be on screen"
+        );
+        // The user's own message: pending row in SQLite, shown at once at the bottom,
+        // right-aligned.
+        crate::app::tests::type_line(&mut app, "MY-OWN-MSG");
+        app.notices.clear();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let row = (0..30u16)
+            .find(|&y| {
+                (0..90u16)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+                    .contains("MY-OWN-MSG")
+            })
+            .expect("sent message must be on screen");
+        let line: String = (0..90u16).map(|x| buf[(x, row)].symbol()).collect();
+        let end = line.find("MY-OWN-MSG").unwrap() + "MY-OWN-MSG".len();
+        assert!(
+            line[end..].trim_end_matches(['│', ' ']).is_empty(),
+            "right-aligned: {line:?}"
+        );
+        assert!(
+            line.find("MY-OWN-MSG").unwrap() > 50,
+            "right side: {line:?}"
+        );
     }
 }

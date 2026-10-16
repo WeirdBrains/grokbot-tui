@@ -158,7 +158,18 @@ const V4: &str = "CREATE TABLE credentials_v4 (
 const V5: &str = "ALTER TABLE messages ADD COLUMN ord REAL;
     UPDATE messages SET ord = id;
     CREATE INDEX messages_ord ON messages(account_id, bot_id, ord);";
-const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5];
+/// v5 -> v6: rows inserted without `ord` (e.g. by an older grokbot-tui still running
+/// against this DB) get one automatically, so they sort last instead of first.
+const V6: &str = "UPDATE messages SET ord = (SELECT COALESCE(MAX(m.ord), 0) FROM messages m
+        WHERE m.account_id = messages.account_id AND m.bot_id = messages.bot_id) + id
+      WHERE ord IS NULL;
+    CREATE TRIGGER messages_ord_default AFTER INSERT ON messages WHEN NEW.ord IS NULL
+    BEGIN
+      UPDATE messages SET ord = (SELECT COALESCE(MAX(ord), 0) + 1 FROM messages
+        WHERE account_id = NEW.account_id AND bot_id = NEW.bot_id AND id != NEW.id)
+      WHERE id = NEW.id;
+    END;";
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginMethod {
@@ -597,7 +608,7 @@ impl Store {
 
     pub fn messages(&self, bot_id: &str) -> Result<Vec<Message>> {
         let mut st = self.conn.prepare(
-            "SELECT role, text, remote_id FROM messages WHERE account_id = ?1 AND bot_id = ?2 ORDER BY ord, id",
+            "SELECT role, text, remote_id FROM messages WHERE account_id = ?1 AND bot_id = ?2 ORDER BY ord IS NULL, ord, id",
         )?;
         let rows = st.query_map(params![self.account.id, bot_id], |r| {
             let role: String = r.get(0)?;
@@ -752,7 +763,7 @@ impl Store {
     fn reorder_full(&self, bot_id: &str, window: &[(i64, Option<f64>)]) -> Result<()> {
         let mut st = self.conn.prepare(
             "SELECT id, COALESCE(remote_id LIKE 'pending:%', 0) FROM messages
-             WHERE account_id = ?1 AND bot_id = ?2 ORDER BY ord, id",
+             WHERE account_id = ?1 AND bot_id = ?2 ORDER BY ord IS NULL, ord, id",
         )?;
         let all: Vec<(i64, bool)> = st
             .query_map(params![self.account.id, bot_id], |r| {
@@ -1360,5 +1371,25 @@ mod tests {
             .collect();
         s.merge_remote("b", &full, true).unwrap();
         assert_eq!(texts(&s, "b"), ["q1", "a1", "desk", "a2", "mine", "a3"]);
+    }
+
+    #[test]
+    fn rows_inserted_without_ord_sort_last() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Store::open(d.path().join("gb"), None).unwrap();
+        s.merge_remote(
+            "b",
+            &[rmsg(Role::User, "q", "t1u"), rmsg(Role::Bot, "a", "t1s0")],
+            false,
+        )
+        .unwrap();
+        // Simulate an older build inserting without `ord`.
+        s.conn
+            .execute(
+                "INSERT INTO messages(account_id, bot_id, role, text, remote_id) VALUES (?1, 'b', 'bot', 'newest', 't1s1')",
+                params![s.account.id],
+            )
+            .unwrap();
+        assert_eq!(texts(&s, "b"), ["q", "a", "newest"]);
     }
 }
