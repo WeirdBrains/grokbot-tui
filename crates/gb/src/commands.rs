@@ -58,6 +58,20 @@ pub fn registry() -> Registry {
                 run: whoami,
             },
             Command {
+                name: "mouse",
+                aliases: &[],
+                usage: "/mouse [on|off]",
+                help: "Toggle mouse capture (off = select/copy text with your terminal; also F6)",
+                run: mouse,
+            },
+            Command {
+                name: "copy",
+                aliases: &[],
+                usage: "/copy",
+                help: "Copy the last bot message to the clipboard (OSC 52)",
+                run: copy,
+            },
+            Command {
                 name: "bots",
                 aliases: &[],
                 usage: "/bots",
@@ -242,6 +256,20 @@ fn whoami(app: &mut App, _: &str) -> Result<()> {
     lines.push("(The gateway has no identity call, so no user name is available.)".into());
     app.info(lines.join("\n"));
     Ok(())
+}
+
+fn mouse(app: &mut App, args: &str) -> Result<()> {
+    match args.trim() {
+        "" | "toggle" => app.toggle_mouse_capture(),
+        "on" => app.set_mouse_capture(true),
+        "off" => app.set_mouse_capture(false),
+        _ => bail!("Usage: /mouse [on|off]"),
+    }
+    Ok(())
+}
+
+fn copy(app: &mut App, _: &str) -> Result<()> {
+    app.copy_last_message().map_err(|e| anyhow::anyhow!(e))
 }
 
 fn bots(app: &mut App, _: &str) -> Result<()> {

@@ -57,8 +57,23 @@ fn main() -> Result<()> {
 }
 
 fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
+    let mut captured = true;
     while !app.should_quit {
         app.tick();
+        if app.mouse_capture != captured {
+            captured = app.mouse_capture;
+            if captured {
+                execute!(std::io::stdout(), EnableMouseCapture)?;
+            } else {
+                execute!(std::io::stdout(), DisableMouseCapture)?;
+            }
+        }
+        if let Some(t) = app.pending_clipboard.take() {
+            use std::io::Write;
+            let mut out = std::io::stdout();
+            let _ = out.write_all(osc52(&t).as_bytes());
+            let _ = out.flush();
+        }
         term.draw(|f| ui::draw(f, app))?;
         if !event::poll(app::UI_TICK)? {
             continue;
@@ -83,6 +98,10 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                         KeyCode::End => p.last(),
                         _ => {}
                     }
+                    continue;
+                }
+                if k.code == KeyCode::F(6) {
+                    app.toggle_mouse_capture();
                     continue;
                 }
                 if k.code == KeyCode::F(2) {
@@ -238,6 +257,28 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     Ok(())
 }
 
+/// OSC 52 "set clipboard" sequence for `text` (base64). Terminals without support ignore it.
+fn osc52(text: &str) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let b = text.as_bytes();
+    let mut s = String::with_capacity(b.len() * 4 / 3 + 12);
+    s.push_str("\x1b]52;c;");
+    for c in b.chunks(3) {
+        let n = (c[0] as u32) << 16
+            | (*c.get(1).unwrap_or(&0) as u32) << 8
+            | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= c.len() {
+                s.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                s.push('=');
+            }
+        }
+    }
+    s.push('\x07');
+    s
+}
+
 /// xterm modifyOtherKeys level 1 on / reset. Level 1 only re-encodes keys with no
 /// standard sequence (like Shift-Enter), so Ctrl-C / Ctrl-J are untouched. This lets
 /// tmux (`extended-keys on`, `extended-keys-format csi-u`) forward Shift-Enter as
@@ -280,6 +321,13 @@ fn is_newline_key(k: &event::KeyEvent) -> bool {
 mod key_tests {
     use super::*;
     use ratatui::crossterm::event::KeyEvent;
+    #[test]
+    fn osc52_base64() {
+        assert_eq!(osc52("hi"), "\x1b]52;c;aGk=\x07");
+        assert_eq!(osc52("abc"), "\x1b]52;c;YWJj\x07");
+        assert_eq!(osc52("a"), "\x1b]52;c;YQ==\x07");
+    }
+
     #[test]
     fn shift_or_alt_enter_is_newline_plain_enter_submits() {
         assert!(is_newline_key(&KeyEvent::new(

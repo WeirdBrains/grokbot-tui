@@ -451,6 +451,10 @@ pub struct App {
     tx: mpsc::UnboundedSender<Event>,
     rx: mpsc::UnboundedReceiver<Event>,
     pub should_quit: bool,
+    /// Whether the TUI captures the mouse. Off lets the terminal select/copy natively.
+    pub mouse_capture: bool,
+    /// Text the main loop should put on the clipboard (OSC 52), then clear.
+    pub pending_clipboard: Option<String>,
 }
 
 pub fn host_of(url: &str) -> &str {
@@ -560,6 +564,8 @@ impl App {
             tx,
             rx,
             should_quit: false,
+            mouse_capture: true,
+            pending_clipboard: None,
         })
     }
 
@@ -1823,6 +1829,41 @@ impl App {
         crate::input::down(&self.input, &mut self.input_cursor)
     }
 
+    /// Turn mouse capture on/off (F6, `/mouse`). The main loop applies it to the terminal.
+    pub fn set_mouse_capture(&mut self, on: bool) {
+        self.mouse_capture = on;
+        self.info(if on {
+            "Mouse capture ON: clicks/wheel go to grokbot-tui. F6 or /mouse off to select text."
+                .into()
+        } else {
+            "Mouse capture OFF: drag to select and copy with your terminal (in tmux: copy-mode). \
+             Clicking bots and wheel scrolling are off until F6 or /mouse on."
+                .into()
+        });
+    }
+
+    pub fn toggle_mouse_capture(&mut self) {
+        self.set_mouse_capture(!self.mouse_capture);
+    }
+
+    /// `/copy`: put the last bot message (or last message) on the clipboard via OSC 52.
+    pub fn copy_last_message(&mut self) -> std::result::Result<(), String> {
+        let feed = self.feed();
+        let e = feed
+            .iter()
+            .rev()
+            .find(|e| e.kind == EntryKind::Bot)
+            .or_else(|| feed.last())
+            .ok_or("No message to copy.")?;
+        let text = e.text.clone();
+        let n = text.chars().count();
+        self.pending_clipboard = Some(text);
+        self.info(format!(
+            "Copied last message ({n} chars) via OSC 52 (needs terminal support; in tmux: set -g set-clipboard on)."
+        ));
+        Ok(())
+    }
+
     pub fn cancel_input_mode(&mut self) {
         let was = self.mode;
         self.mode = InputMode::Normal;
@@ -2379,6 +2420,50 @@ pub mod tests {
         assert!(trunc);
         assert_eq!(t.lines().count(), SHELL_MAX_LINES);
         assert_eq!(cap_output("a\nb"), ("a\nb".into(), false));
+    }
+
+    #[test]
+    fn mouse_toggle_and_copy() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        assert!(app.mouse_capture);
+        app.toggle_mouse_capture();
+        assert!(!app.mouse_capture);
+        type_line(&mut app, "/mouse on");
+        assert!(app.mouse_capture);
+        type_line(&mut app, "/mouse off");
+        assert!(!app.mouse_capture);
+        type_line(&mut app, "/mouse");
+        assert!(app.mouse_capture, "bare /mouse toggles");
+        type_line(&mut app, "/mouse sideways");
+        assert!(texts(&app).join("\n").contains("Usage: /mouse"));
+
+        mock_login(&mut app, "tok");
+        type_line(&mut app, "/copy");
+        assert!(app.pending_clipboard.is_none());
+        assert!(texts(&app).join("\n").contains("No message to copy"));
+        let bot = app.active_bot().unwrap().id.clone();
+        app.store
+            .merge_remote(
+                &bot,
+                &[
+                    crate::api::Message {
+                        role: crate::api::Role::Bot,
+                        text: "answer one".into(),
+                        remote_id: Some("b1".into()),
+                    },
+                    crate::api::Message {
+                        role: crate::api::Role::User,
+                        text: "q".into(),
+                        remote_id: Some("u1".into()),
+                    },
+                ],
+                true,
+            )
+            .unwrap();
+        app.refresh_feed_from_db();
+        type_line(&mut app, "/copy");
+        assert_eq!(app.pending_clipboard.as_deref(), Some("answer one"));
     }
 
     #[test]

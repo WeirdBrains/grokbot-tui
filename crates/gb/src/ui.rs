@@ -56,6 +56,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             app.account().alias
         )),
     ];
+    spans.push(if app.mouse_capture {
+        Span::styled("   mouse: on (F6)", Style::default().fg(Color::DarkGray))
+    } else {
+        Span::styled(
+            "   mouse: OFF — select text freely (F6)",
+            Style::default().fg(Color::Black).bg(Color::Yellow),
+        )
+    });
     if app.mock {
         spans.push(Span::styled(
             "   [MOCK]",

@@ -172,6 +172,7 @@ Anywhere
   F1, or ? on an empty input   Open this help
   F2                           Pick a bot (list popup; same as /bot)
   F3                           Pick an account (same as /account use)
+  F6                           Mouse capture on/off (same as /mouse)
   Ctrl-C / Ctrl-D              Quit
   Tab                          Switch focus between input and sidebar
   PgUp / PgDn, mouse wheel     Scroll the chat
@@ -198,6 +199,18 @@ Sidebar focused
 
 Mouse
   Click a bot to open it. Click the @account header to pick an account.
+  The top bar shows 'mouse: on/OFF'.
+
+Selecting and copying text
+  grokbot-tui captures the mouse, so plain drag doesn't select. Options:
+  • Hold Shift while dragging: most terminals (GNOME Console/Terminal, Konsole,
+    kitty, Alacritty, WezTerm, xterm) select natively even with capture on.
+    In tmux, Shift-drag works too; or turn capture off and use copy-mode.
+  • F6 or /mouse off: release the mouse, then select/copy with the terminal as usual.
+    While off, clicking bots, the pick-list mouse and wheel scrolling don't work
+    (keyboard still does). F6 or /mouse on to get them back.
+  • /copy: copy the last bot message to the system clipboard via OSC 52 (needs
+    terminal support; tmux needs `set -g set-clipboard on`).
 
 In a pick list (F2, F3, /bot, /account use)
   ↑ ↓ / j k, PgUp PgDn, Home End  Move      Enter  Pick      Esc / q  Cancel
