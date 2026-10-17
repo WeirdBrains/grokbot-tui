@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-17
+
+### Changed
+
+- **Shorter environment variable names** (the 1.2.0 names repeated "GROKBOT"):
+
+  | 1.2.0 | 1.2.1 |
+  |---|---|
+  | `GROKBOT_TUI_GROKBOT_TOKEN` | `GROKBOT_TUI_TOKEN` |
+  | `GROKBOT_TUI_GROKBOT_GATEWAY_URL` | `GROKBOT_TUI_GATEWAY_URL` |
+  | `GROKBOT_TUI_GROKBOT_GATEWAY_HEADERS` | `GROKBOT_TUI_GATEWAY_HEADERS` |
+  | `GROKBOT_TUI_GROKBOT_APP_DIR` | `GROKBOT_TUI_APP_DIR` |
+
+  1.2.0 was never published, so the long forms are not read. The pre-1.2 `GB_*` names
+  still work as fallbacks (`GB_GROKBOT_TOKEN` → `GROKBOT_TUI_TOKEN`, and so on), and
+  `GROKBOT_TUI_APP_DIR` / `GROKBOT_TUI_ALLOW_LOCAL_GATEWAY` are still forwarded to the
+  library's `GROKBOT_APP_DIR` / `GROKBOT_ALLOW_LOCAL_GATEWAY`.
+- **Repository URLs** now point at <https://github.com/WeirdBrains/grokbot-tui> (was
+  `github.com/m3talsmith/gb`): `Cargo.toml` homepage/repository, the AUR PKGBUILD and
+  winget templates (download, license and release-notes links), the Debian copyright
+  file, the MSI help link and the README.
+
 ## [1.2.0] - 2026-10-17
 
 ### Changed
@@ -193,3 +215,9 @@ First release.
 - **Endless HTTP 417 errors.** The gateway answers an expired session with 417; it is now
   handled like 401, re-reading or re-exchanging the credential.
 - A build break caused by quotes inside the delivery help text.
+
+[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/WeirdBrains/grokbot-tui/releases/tag/v1.0.0

@@ -157,8 +157,8 @@ Getting a gateway URL + token
   /login cursor and /login desktop do for you) and are not shown in the desktop app.
 
 Non-interactive use (startup account only, never saved)
-  GROKBOT_TUI_GROKBOT_TOKEN=<token> GROKBOT_TUI_GROKBOT_GATEWAY_URL=<url> grokbot-tui
-  Optional GROKBOT_TUI_GROKBOT_GATEWAY_HEADERS='{\"x-anyrun-network-token\":\"…\"}'
+  GROKBOT_TUI_TOKEN=<token> GROKBOT_TUI_GATEWAY_URL=<url> grokbot-tui
+  Optional GROKBOT_TUI_GATEWAY_HEADERS='{\"x-anyrun-network-token\":\"…\"}'
 
 Allowed hosts: https on cursor.sh, cursor.com, *.cursor.sh, *.cursor.com, *.cursorvm.com.
 Loopback only with GROKBOT_ALLOW_LOCAL_GATEWAY=1. URLs with user:pass@ are rejected.",
@@ -235,7 +235,7 @@ grokbot-tui keeps several accounts fully separate: logins, bots, chats, memory a
   /account remove <alias>   Delete (confirm in a pick list; Cancel is the default)
 
 Start in an account: grokbot-tui --account work  or  GROKBOT_TUI_ACCOUNT=work grokbot-tui
-GROKBOT_TUI_GROKBOT_TOKEN only applies to the account selected at startup.
+GROKBOT_TUI_TOKEN only applies to the account selected at startup.
 Several desktop Cursor accounts? Add one grokbot-tui account each, then /login desktop <number>.",
         related: &["login", "login-desktop", "prefs", "env"],
     },
@@ -268,11 +268,11 @@ Environment variables override the cursor.* / sand.* prefs (see /help env).",
         title: "Environment variables",
         body: "\
 Login (startup account only, never saved)
-  GROKBOT_TUI_GROKBOT_TOKEN
+  GROKBOT_TUI_TOKEN
       Gateway token override.
-  GROKBOT_TUI_GROKBOT_GATEWAY_URL
+  GROKBOT_TUI_GATEWAY_URL
       Gateway URL for that token (else the stored URL).
-  GROKBOT_TUI_GROKBOT_GATEWAY_HEADERS
+  GROKBOT_TUI_GATEWAY_HEADERS
       JSON object of extra gateway headers.
 
 EnsureSandBox (Cursor token exchange)
@@ -291,7 +291,7 @@ Other
       Starting account alias (same as --account).
   GROKBOT_TUI_ALLOW_LOCAL_GATEWAY=1
       Allow http(s) loopback gateways (development).
-  GROKBOT_TUI_GROKBOT_APP_DIR
+  GROKBOT_TUI_APP_DIR
       Grok Bot install dir for version detection.
   The library's own names GROKBOT_ALLOW_LOCAL_GATEWAY and GROKBOT_APP_DIR work too.
 

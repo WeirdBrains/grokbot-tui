@@ -9,7 +9,7 @@ Commands:
   - grokbot-tui
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/m3talsmith/gb/releases/download/@TAG@/grokbot-tui-x86_64-pc-windows-msvc.msi
+    InstallerUrl: https://github.com/WeirdBrains/grokbot-tui/releases/download/@TAG@/grokbot-tui-x86_64-pc-windows-msvc.msi
     InstallerSha256: @SHA256_WINDOWS_MSI@
 ManifestType: installer
 ManifestVersion: 1.6.0

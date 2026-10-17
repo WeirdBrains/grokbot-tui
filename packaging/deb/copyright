@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: grokbot-tui
 Upstream-Contact: Michael Christenson II <m3talsmith@gmail.com>
-Source: https://github.com/m3talsmith/gb
+Source: https://github.com/WeirdBrains/grokbot-tui
 
 Files: *
 Copyright: 2026 Michael Christenson II

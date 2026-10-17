@@ -6,12 +6,12 @@ pkgver=@VERSION@
 pkgrel=1
 pkgdesc="Terminal UI for Grok Bot"
 arch=('x86_64' 'aarch64')
-url="https://github.com/m3talsmith/gb"
+url="https://github.com/WeirdBrains/grokbot-tui"
 license=('@LICENSE@')
 depends=('glibc' 'gcc-libs')
 makedepends=('cargo')
 conflicts=('grokbot-tui-bin')
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/m3talsmith/gb/releases/download/@TAG@/source.tar.gz")
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/WeirdBrains/grokbot-tui/releases/download/@TAG@/source.tar.gz")
 sha256sums=('@SHA256_SOURCE@')
 _srcdir="@SOURCE_DIR@"
 

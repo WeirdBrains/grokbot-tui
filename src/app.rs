@@ -81,7 +81,7 @@ pub enum LoginSource {
     Interactive,
     /// The account's stored credential.
     Stored,
-    /// `GROKBOT_TUI_GROKBOT_TOKEN` (never saved).
+    /// `GROKBOT_TUI_TOKEN` (never saved).
     Env,
 }
 
@@ -1176,7 +1176,7 @@ impl App {
         self.connect();
     }
 
-    /// Log in with `GROKBOT_TUI_GROKBOT_TOKEN` (startup account only) or the stored credential.
+    /// Log in with `GROKBOT_TUI_TOKEN` (startup account only) or the stored credential.
     pub fn connect(&mut self) {
         let stored = self.store.load_login().ok().flatten();
         if self.store.is_startup_account()

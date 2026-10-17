@@ -2,11 +2,11 @@
 use std::collections::BTreeMap;
 
 /// Gateway token override for the account selected at startup.
-pub const TOKEN_ENV: &str = "GROKBOT_TUI_GROKBOT_TOKEN";
+pub const TOKEN_ENV: &str = "GROKBOT_TUI_TOKEN";
 /// Optional gateway URL to pair with [`TOKEN_ENV`].
-pub const GATEWAY_URL_ENV: &str = "GROKBOT_TUI_GROKBOT_GATEWAY_URL";
+pub const GATEWAY_URL_ENV: &str = "GROKBOT_TUI_GATEWAY_URL";
 /// Optional JSON object of extra gateway headers to pair with [`TOKEN_ENV`].
-pub const GATEWAY_HEADERS_ENV: &str = "GROKBOT_TUI_GROKBOT_GATEWAY_HEADERS";
+pub const GATEWAY_HEADERS_ENV: &str = "GROKBOT_TUI_GATEWAY_HEADERS";
 /// Override the Cursor backend used for EnsureSandBox (must still be *.cursor.sh / *.cursor.com).
 pub const CURSOR_API_ENV: &str = "GROKBOT_TUI_CURSOR_API_BASE_URL";
 /// Override `x-cursor-client-version` for EnsureSandBox (highest priority).

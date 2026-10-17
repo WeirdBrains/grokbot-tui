@@ -217,7 +217,7 @@ pub struct Store {
     pub dir: PathBuf,
     conn: Connection,
     account: Account,
-    /// Account `GROKBOT_TUI_GROKBOT_TOKEN` applies to (the one selected at startup).
+    /// Account `GROKBOT_TUI_TOKEN` applies to (the one selected at startup).
     env_account: Option<i64>,
 }
 
@@ -487,7 +487,7 @@ impl Store {
 
     // ---- credentials (active account)
 
-    /// True when the active account is the one selected at startup (where `GROKBOT_TUI_GROKBOT_TOKEN` applies).
+    /// True when the active account is the one selected at startup (where `GROKBOT_TUI_TOKEN` applies).
     pub fn is_startup_account(&self) -> bool {
         self.env_account == Some(self.account.id)
     }

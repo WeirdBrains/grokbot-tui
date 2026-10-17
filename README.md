@@ -11,7 +11,7 @@ Grok Bot gateway call, the Cursor EnsureSandBox exchange, and the credential hos
 
 ## Install
 
-Prebuilt packages are attached to each [GitHub Release](https://github.com/m3talsmith/gb/releases)
+Prebuilt packages are attached to each [GitHub Release](https://github.com/WeirdBrains/grokbot-tui/releases)
 (see [PACKAGING.md](PACKAGING.md) for how releases are made and what is published where):
 
 - **Shell installer (macOS/Linux):** the `grokbot-tui-installer.sh` command shown in the release notes
@@ -140,18 +140,18 @@ Redirects are never followed, requests time out after 30 s, responses are capped
 
 | Variable | Meaning |
 |---|---|
-| `GROKBOT_TUI_GROKBOT_TOKEN` | **Gateway token** override; never saved. After `/account use` switches away, that account's stored login is used |
-| `GROKBOT_TUI_GROKBOT_GATEWAY_URL` | Gateway URL for the token above (else the account's stored gateway URL) |
-| `GROKBOT_TUI_GROKBOT_GATEWAY_HEADERS` | Optional JSON object of extra gateway headers |
+| `GROKBOT_TUI_TOKEN` | **Gateway token** override; never saved. After `/account use` switches away, that account's stored login is used |
+| `GROKBOT_TUI_GATEWAY_URL` | Gateway URL for the token above (else the account's stored gateway URL) |
+| `GROKBOT_TUI_GATEWAY_HEADERS` | Optional JSON object of extra gateway headers |
 | `GROKBOT_TUI_CURSOR_API_BASE_URL` | Override the EnsureSandBox backend (still must be `*.cursor.sh` / `*.cursor.com`) |
 | `GROKBOT_TUI_CURSOR_CLIENT_VERSION` | Override `x-cursor-client-version` (else pref `cursor.client_version`, else detect installed Grok Bot, else `0.70.2`) |
 | `GROKBOT_TUI_CURSOR_CLIENT_TYPE` | Override `x-cursor-client-type` (default `sand`) |
 | `GROKBOT_TUI_SAND_BOX_NAMESPACE` | Override `x-sand-box-namespace` (default `prod`) |
 | `GROKBOT_TUI_ALLOW_LOCAL_GATEWAY` | `1` to permit loopback gateways (development) |
-| `GROKBOT_TUI_GROKBOT_APP_DIR` | Grok Bot desktop app install directory, for client version detection |
+| `GROKBOT_TUI_APP_DIR` | Grok Bot desktop app install directory, for client version detection |
 | `GROKBOT_TUI_ACCOUNT` | Starting account alias |
 
-`GROKBOT_TUI_ALLOW_LOCAL_GATEWAY` and `GROKBOT_TUI_GROKBOT_APP_DIR` are forwarded at startup to
+`GROKBOT_TUI_ALLOW_LOCAL_GATEWAY` and `GROKBOT_TUI_APP_DIR` are forwarded at startup to
 `GROKBOT_ALLOW_LOCAL_GATEWAY` and `GROKBOT_APP_DIR`, the names the `grokbot_api` library reads (setting the
 library names directly also works).
 

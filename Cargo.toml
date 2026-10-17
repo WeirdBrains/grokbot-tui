@@ -1,12 +1,12 @@
 [package]
 name = "grokbot-tui"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 rust-version = "1.89"
 license = "BSD-3-Clause"
 authors = ["Michael Christenson II <m3talsmith@gmail.com>"]
-homepage = "https://github.com/m3talsmith/gb"
-repository = "https://github.com/m3talsmith/gb"
+homepage = "https://github.com/WeirdBrains/grokbot-tui"
+repository = "https://github.com/WeirdBrains/grokbot-tui"
 description = "Terminal UI for Grok Bot"
 readme = "README.md"
 keywords = ["grok", "tui", "chat", "terminal"]

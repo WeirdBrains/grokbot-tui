@@ -39,12 +39,9 @@ struct Cli {
 /// First the pre-1.2 `GB_*` names fall back onto their `GROKBOT_TUI_*` replacements, then
 /// the two variables grokbot_api reads itself are forwarded to the library's names.
 const LEGACY_ENV: [(&str, &str); 12] = [
-    ("GB_GROKBOT_TOKEN", "GROKBOT_TUI_GROKBOT_TOKEN"),
-    ("GB_GROKBOT_GATEWAY_URL", "GROKBOT_TUI_GROKBOT_GATEWAY_URL"),
-    (
-        "GB_GROKBOT_GATEWAY_HEADERS",
-        "GROKBOT_TUI_GROKBOT_GATEWAY_HEADERS",
-    ),
+    ("GB_GROKBOT_TOKEN", "GROKBOT_TUI_TOKEN"),
+    ("GB_GROKBOT_GATEWAY_URL", "GROKBOT_TUI_GATEWAY_URL"),
+    ("GB_GROKBOT_GATEWAY_HEADERS", "GROKBOT_TUI_GATEWAY_HEADERS"),
     ("GB_CURSOR_API_BASE_URL", "GROKBOT_TUI_CURSOR_API_BASE_URL"),
     (
         "GB_CURSOR_CLIENT_VERSION",
@@ -54,13 +51,13 @@ const LEGACY_ENV: [(&str, &str); 12] = [
     ("GB_SAND_BOX_NAMESPACE", "GROKBOT_TUI_SAND_BOX_NAMESPACE"),
     ("GB_ACCOUNT", "GROKBOT_TUI_ACCOUNT"),
     ("GB_ALLOW_LOCAL_GATEWAY", "GROKBOT_TUI_ALLOW_LOCAL_GATEWAY"),
-    ("GB_GROKBOT_APP_DIR", "GROKBOT_TUI_GROKBOT_APP_DIR"),
+    ("GB_GROKBOT_APP_DIR", "GROKBOT_TUI_APP_DIR"),
     // Read by grokbot_api 1.1 under its own names.
     (
         "GROKBOT_TUI_ALLOW_LOCAL_GATEWAY",
         "GROKBOT_ALLOW_LOCAL_GATEWAY",
     ),
-    ("GROKBOT_TUI_GROKBOT_APP_DIR", "GROKBOT_APP_DIR"),
+    ("GROKBOT_TUI_APP_DIR", "GROKBOT_APP_DIR"),
 ];
 
 /// The `(new name, value)` pairs to set so older names keep working. Each rename copies a
@@ -423,17 +420,25 @@ mod legacy_env_tests {
         assert_eq!(
             updates(&[("GB_GROKBOT_TOKEN", "t"), ("GB_ACCOUNT", "work")]),
             vec![
-                ("GROKBOT_TUI_GROKBOT_TOKEN", "t".to_string()),
+                ("GROKBOT_TUI_TOKEN", "t".to_string()),
                 ("GROKBOT_TUI_ACCOUNT", "work".to_string()),
             ]
         );
-        // Every GB_ name has a GROKBOT_TUI_ replacement.
+        // Every GB_ name has a GROKBOT_TUI_ replacement; a redundant GROKBOT_ is dropped
+        // (GB_GROKBOT_TOKEN -> GROKBOT_TUI_TOKEN).
         for (old, new) in super::LEGACY_ENV
             .iter()
             .filter(|(o, _)| o.starts_with("GB_"))
         {
-            assert_eq!(new.strip_prefix("GROKBOT_TUI_"), old.strip_prefix("GB_"));
+            let rest = old.strip_prefix("GB_").unwrap();
+            let rest = rest.strip_prefix("GROKBOT_").unwrap_or(rest);
+            assert_eq!(new.strip_prefix("GROKBOT_TUI_"), Some(rest), "{old}");
         }
+        assert!(
+            !super::LEGACY_ENV
+                .iter()
+                .any(|(o, n)| o.contains("TUI_GROKBOT") || n.contains("TUI_GROKBOT"))
+        );
     }
 
     #[test]
@@ -458,14 +463,14 @@ mod legacy_env_tests {
         assert_eq!(
             updates(&[
                 ("GROKBOT_TUI_ALLOW_LOCAL_GATEWAY", "1"),
-                ("GROKBOT_TUI_GROKBOT_APP_DIR", "/opt/app")
+                ("GROKBOT_TUI_APP_DIR", "/opt/app")
             ]),
             lib
         );
         // Old GB_ names chain through the GROKBOT_TUI_ names to the library's.
         let mut chained = vec![
             ("GROKBOT_TUI_ALLOW_LOCAL_GATEWAY", "1".to_string()),
-            ("GROKBOT_TUI_GROKBOT_APP_DIR", "/opt/app".to_string()),
+            ("GROKBOT_TUI_APP_DIR", "/opt/app".to_string()),
         ];
         chained.extend(lib);
         assert_eq!(
@@ -487,7 +492,7 @@ mod legacy_env_tests {
         assert_eq!(
             updates(&[
                 ("GB_GROKBOT_APP_DIR", "/old"),
-                ("GROKBOT_TUI_GROKBOT_APP_DIR", "/new")
+                ("GROKBOT_TUI_APP_DIR", "/new")
             ]),
             vec![("GROKBOT_APP_DIR", "/new".to_string())]
         );
