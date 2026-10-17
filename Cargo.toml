@@ -34,6 +34,8 @@ license-file = ["packaging/deb/copyright", "0"]
 assets = [
     ["target/release/grokbot-tui", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/grokbot-tui/README.md", "644"],
+    # Shipped themes, copied into ~/.grokbot-tui/themes on first run.
+    ["themes/default.toml", "usr/share/grokbot-tui/themes/default.toml", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -43,6 +45,7 @@ assets = [
     { source = "target/release/grokbot-tui", dest = "/usr/bin/grokbot-tui", mode = "755" },
     { source = "README.md", dest = "/usr/share/doc/grokbot-tui/README.md", mode = "644", doc = true },
     { source = "LICENSE", dest = "/usr/share/licenses/grokbot-tui/LICENSE", mode = "644", doc = true },
+    { source = "themes/default.toml", dest = "/usr/share/grokbot-tui/themes/default.toml", mode = "644" },
 ]
 
 [[bin]]
@@ -64,6 +67,7 @@ anyhow = "1"
 unicode-width = "0.2"
 rusqlite = { version = "0.37", features = ["bundled"] }
 tui-big-text = "0.8"
+toml = "0.9"
 
 [target."cfg(unix)".dependencies]
 # Terminal background query (OSC 11) for the "system" theme mode.

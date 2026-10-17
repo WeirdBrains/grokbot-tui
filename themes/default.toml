@@ -1,0 +1,119 @@
+# grokbot-tui theme. Edit it in the app (Shift-F5) or by hand; see `/help theme-files`.
+# Colors: 0-255, "#rrggbb", "#rgb", an ANSI name (cyan, darkgray, …) or "reset"
+# (terminal default). Styles: fg / bg / border (boxes only) as a color or "@palette
+# color", plus bold / italic / underline / reverse / dim = true.
+schema = 1
+name = "Default"
+description = "The original grokbot-tui look: cyan accents on a dark gray screen, deep blue on near-white."
+
+[dark.colors]
+text = "252"
+background = "234"
+accent = "cyan"
+subtle = "gray"
+muted = "darkgray"
+header = "237"
+warn = "yellow"
+danger = "red"
+ok = "green"
+on_accent = "black"
+modal_text = "white"
+modal_background = "black"
+logo_dark = "232"
+logo_light = "255"
+
+[dark.styles]
+base = { fg = "@text", bg = "@background" }
+brand = { fg = "@on_accent", bg = "@accent", bold = true }
+top_bar = { fg = "@text", bg = "@header" }
+title = { fg = "@accent" }
+header_label = { fg = "@subtle" }
+account_switch = { fg = "@warn", bold = true, underline = true }
+theme_switch = { fg = "@accent", bold = true, underline = true }
+mode_active = { fg = "@on_accent", bg = "@accent", bold = true }
+mode_inactive = { fg = "@subtle" }
+key_hint = { fg = "@muted" }
+mouse_on = { fg = "@subtle" }
+mouse_off = { fg = "@on_accent", bg = "@warn" }
+mock_tag = { fg = "@warn" }
+selected = { fg = "@on_accent", bg = "@accent", bold = true }
+cursor_row = { reverse = true }
+panel_focused = { border = "@accent" }
+panel_unfocused = { border = "@subtle" }
+chat_panel = {}
+muted = { fg = "@muted" }
+entry_system = { fg = "@subtle" }
+entry_error = { fg = "@danger" }
+entry_user = { fg = "@ok" }
+entry_bot = { fg = "@accent" }
+entry_label_system = { fg = "@subtle", bold = true }
+entry_label_error = { fg = "@danger", bold = true }
+entry_label_user = { fg = "@ok", bold = true }
+entry_label_bot = { fg = "@accent", bold = true }
+modal_text = { fg = "@modal_text", bg = "@modal_background" }
+help_frame = { border = "@warn" }
+help_title = { fg = "@warn", bold = true }
+shell_frame_running = { border = "@warn" }
+shell_frame_failed = { border = "@danger" }
+shell_frame_ok = { border = "@ok" }
+shell_title_running = { fg = "@warn", bold = true }
+shell_title_failed = { fg = "@danger", bold = true }
+shell_title_ok = { fg = "@ok", bold = true }
+link_selected = { fg = "@on_accent", bg = "@accent" }
+link_unselected = { fg = "@accent", underline = true }
+
+[light.colors]
+text = "235"
+background = "255"
+accent = "25"
+subtle = "242"
+muted = "245"
+header = "253"
+warn = "130"
+danger = "160"
+ok = "28"
+on_accent = "white"
+modal_text = "235"
+modal_background = "254"
+logo_dark = "232"
+logo_light = "255"
+
+[light.styles]
+base = { fg = "@text", bg = "@background" }
+brand = { fg = "@on_accent", bg = "@accent", bold = true }
+top_bar = { fg = "@text", bg = "@header" }
+title = { fg = "@accent" }
+header_label = { fg = "@subtle" }
+account_switch = { fg = "@warn", bold = true, underline = true }
+theme_switch = { fg = "@accent", bold = true, underline = true }
+mode_active = { fg = "@on_accent", bg = "@accent", bold = true }
+mode_inactive = { fg = "@subtle" }
+key_hint = { fg = "@muted" }
+mouse_on = { fg = "@subtle" }
+mouse_off = { fg = "@on_accent", bg = "@warn" }
+mock_tag = { fg = "@warn" }
+selected = { fg = "@on_accent", bg = "@accent", bold = true }
+cursor_row = { reverse = true }
+panel_focused = { border = "@accent" }
+panel_unfocused = { border = "@subtle" }
+chat_panel = {}
+muted = { fg = "@muted" }
+entry_system = { fg = "@subtle" }
+entry_error = { fg = "@danger" }
+entry_user = { fg = "@ok" }
+entry_bot = { fg = "@accent" }
+entry_label_system = { fg = "@subtle", bold = true }
+entry_label_error = { fg = "@danger", bold = true }
+entry_label_user = { fg = "@ok", bold = true }
+entry_label_bot = { fg = "@accent", bold = true }
+modal_text = { fg = "@modal_text", bg = "@modal_background" }
+help_frame = { border = "@warn" }
+help_title = { fg = "@warn", bold = true }
+shell_frame_running = { border = "@warn" }
+shell_frame_failed = { border = "@danger" }
+shell_frame_ok = { border = "@ok" }
+shell_title_running = { fg = "@warn", bold = true }
+shell_title_failed = { fg = "@danger", bold = true }
+shell_title_ok = { fg = "@ok", bold = true }
+link_selected = { fg = "@on_accent", bg = "@accent" }
+link_unselected = { fg = "@accent", underline = true }

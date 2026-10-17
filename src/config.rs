@@ -41,6 +41,9 @@ pub const PREF_SANDBOX_NAMESPACE: &str = "sand.box_namespace";
 /// Pref key for the appearance: `dark`, `light` or `system` (global).
 pub const PREF_THEME_MODE: &str = "ui.theme_mode";
 
+/// Pref key for the selected theme: a file name in `<data dir>/themes/` without `.toml` (global).
+pub const PREF_THEME: &str = "ui.theme";
+
 /// Pref key for the big header title's glyphs: `auto`, `quadrant` or `half` (global).
 pub const PREF_TITLE_GLYPHS: &str = "ui.title_glyphs";
 
@@ -50,6 +53,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     "ui.sidebar_width",
     PREF_THEME_MODE,
     PREF_TITLE_GLYPHS,
+    PREF_THEME,
 ];
 
 /// Which block glyphs draw the big header title (pref `ui.title_glyphs`).
@@ -118,6 +122,8 @@ pub struct Config {
     pub theme_mode: crate::theme::Mode,
     /// Glyphs for the big header title.
     pub title_glyphs: TitleGlyphs,
+    /// Selected theme id (`<data dir>/themes/<id>.toml`).
+    pub theme: String,
 }
 
 impl Default for Config {
@@ -132,6 +138,7 @@ impl Default for Config {
             sandbox_namespace: None,
             theme_mode: crate::theme::Mode::System,
             title_glyphs: TitleGlyphs::Auto,
+            theme: crate::themes::DEFAULT_ID.to_string(),
         }
     }
 }
@@ -149,6 +156,7 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_SANDBOX_NAMESPACE, String::new()),
         (PREF_THEME_MODE, c.theme_mode.as_str().to_string()),
         (PREF_TITLE_GLYPHS, c.title_glyphs.as_str().to_string()),
+        (PREF_THEME, c.theme.clone()),
     ]
 }
 
@@ -174,6 +182,10 @@ impl Config {
             title_glyphs: o(PREF_TITLE_GLYPHS)
                 .and_then(|v| TitleGlyphs::parse(&v))
                 .unwrap_or(d.title_glyphs),
+            theme: o(PREF_THEME)
+                .map(|v| v.trim().to_string())
+                .filter(|v| crate::themes::valid_id(v))
+                .unwrap_or(d.theme),
         }
     }
 }
@@ -202,6 +214,16 @@ mod tests {
             crate::theme::Mode::System
         );
         assert!(is_global(PREF_THEME_MODE));
+        assert_eq!(c.theme, "default");
+        assert!(is_global(PREF_THEME));
+        m.insert(PREF_THEME.into(), "solar-2".into());
+        assert_eq!(Config::from_prefs(&m).theme, "solar-2");
+        m.insert(PREF_THEME.into(), "../etc/passwd".into());
+        assert_eq!(
+            Config::from_prefs(&m).theme,
+            "default",
+            "invalid names are ignored"
+        );
     }
 }
 

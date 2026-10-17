@@ -28,7 +28,7 @@ Plain text is sent to the active bot. Lines starting with / are commands.
 
 Help topics (Enter on a link below opens it):
   login · login desktop · login cursor · login gateway
-  keys · theme · accounts · prefs · env · sync · delivery · troubleshooting
+  keys · theme · theme-files · accounts · prefs · env · sync · delivery · troubleshooting
 
 Search: /help <keyword> (e.g. /help keyring), or press / in this window.
 
@@ -172,7 +172,9 @@ Anywhere
   F1, or ? on an empty input   Open this help
   F2                           Pick a bot (list popup; same as /bot)
   F3                           Pick an account (same as /account use)
-  F4                           Theme: dark → light → system (same as /theme)
+  F4                           Theme mode: dark → light → system (same as /theme)
+  F5                           Pick a theme (same as /theme use)
+  Shift-F5                     Theme editor (same as /theme edit; some terminals send F17)
   F6                           Mouse capture on/off (same as /mouse)
   Ctrl-C / Ctrl-D              Quit
   Tab                          Switch focus between input and sidebar
@@ -200,7 +202,7 @@ Sidebar focused
 
 Mouse
   Click a bot to open it. Click '@account ▾' in the header to pick an account.
-  Click dark / light / system in the header to switch the theme.
+  Click '‹theme› ▾' in the header to pick a theme, dark / light / system to switch mode.
   The header shows 'mouse: on/OFF'.
 
 Selecting and copying text
@@ -214,14 +216,16 @@ Selecting and copying text
   • /copy: copy the last bot message to the system clipboard via OSC 52 (needs
     terminal support; tmux needs `set -g set-clipboard on`).
 
-In a pick list (F2, F3, /bot, /account use)
+In a pick list (F2, F3, F5, /bot, /account use)
   ↑ ↓ / j k, PgUp PgDn, Home End  Move      Enter  Pick      Esc / q  Cancel
   Mouse: hover highlights, click picks, click outside cancels, wheel moves
 
 In this help window
   ↑ ↓ / j k, PgUp PgDn  Scroll      Tab / ← →  Select a related link
   Enter  Open link      Backspace  Back      Esc / q  Close
-  /      Search all help by keyword (type, Enter to run, Esc to cancel)",
+  /      Search all help by keyword (type, Enter to run, Esc to cancel)
+
+In the theme editor (Shift-F5): see /help theme",
         related: &["overview", "theme", "accounts"],
     },
     Topic {
@@ -236,13 +240,99 @@ Account switcher
   '@alias ▾' — click it or press F3 to pick an account (same as /account use).
 
 Theme switcher
-  dark · light · system — click one, press F4 to cycle, or /theme [dark|light|system].
-  system follows the terminal background: grokbot-tui asks the terminal at startup
-  (OSC 11), else reads $COLORFGBG, else uses dark. The header shows what system
-  resolved to, e.g. 'system (→ light)'. Restart after changing the terminal's colors.
+  '‹default› ▾' — the theme in use. Click it or press F5 to pick another theme
+  (or /theme use <name>). The list ends with 'Edit themes…'. A theme that can't be
+  loaded shows as '‹name: missing›' or '‹name: broken›' (see below).
 
-The choice is saved (global pref ui.theme_mode) and used for every account.",
-        related: &["keys", "prefs", "accounts"],
+Mode: dark · light · system
+  Every theme has a dark and a light variant. Click one, press F4 to cycle, or
+  /theme [dark|light|system]. system follows the terminal background: grokbot-tui
+  asks the terminal at startup (OSC 11), else reads $COLORFGBG, else uses dark. The
+  header shows what system resolved to, e.g. 'system (→ light)'. Restart after
+  changing the terminal's colors.
+
+Both choices are global prefs (ui.theme, ui.theme_mode), used for every account.
+
+Commands
+  /theme use <name>     Switch theme (also /theme <name>; no name: pick list)
+  /theme list           List theme files (* = in use)
+  /theme edit [name]    Open the editor (default: the theme in use)
+  /theme init [name]    Write a minimal starter theme (never overwrites)
+  /theme delete <name>  Delete a theme file (asks first)
+  /theme reload         Re-read theme files after editing them by hand
+
+Theme editor (Shift-F5)
+  Left: every palette color and every part of the screen. Right: a live preview of
+  the app in the edited theme, before you save.
+  ↑ ↓ / j k, PgUp PgDn, Home End  Select      Tab  Flip dark / light variant
+  Enter / e   Edit: a color takes hex (#ff8800), 0-255 or a name (cyan); a part
+              opens its fields (fg, bg, border for boxes, bold italic underline
+              reverse dim): ← → choose, Enter edit/toggle, Space toggle, Backspace clear
+  p           Pick from the 256-color palette (arrows, Enter or click)
+  r / R       Revert this item / everything since the last save
+  s, Ctrl-S   Save (applied right away if it's the theme in use)
+  d / n       Duplicate this theme / new starter theme (asks for a name)
+  x, Delete   Delete this theme (asks first)
+  t           Edit another theme      Esc / q  Close (asks if there are unsaved changes)
+  Parts' colors can point at palette colors (@accent), so a palette change restyles
+  every part that uses it. A low-contrast warning appears when text and its
+  background are hard to tell apart (WCAG ratio below 3:1).
+
+Theme files: see /help theme-files.",
+        related: &["theme-files", "keys", "prefs", "accounts"],
+    },
+    Topic {
+        id: "theme-files",
+        title: "Theme files",
+        body: "\
+Every theme, including default, is a TOML file in ~/.grokbot-tui/themes/<name>.toml
+(or <data dir>/themes with --data-dir). Nothing is built into
+the program. Names: lowercase letters, digits, - and _ (up to 32).
+
+Where default.toml comes from
+  The packages install shipped themes to a share directory (deb/rpm/AUR:
+  /usr/share/grokbot-tui/themes, Homebrew: <prefix>/share/grokbot-tui/themes,
+  Windows MSI: next to the program; release archives: the themes/ folder). At
+  startup, if your themes folder is empty, they are copied into it. Your files are
+  never overwritten. Installed with the shell or PowerShell script? Download
+  https://github.com/WeirdBrains/grokbot-tui/raw/main/themes/default.toml into
+  your themes folder, or run /theme init.
+
+When a theme can't be used
+  If the selected file is missing or broken (invalid TOML, newer schema, over 64 KiB),
+  grokbot-tui uses your terminal's own colors and says why. Highlights still show
+  (reverse video). Fix the file and /theme reload, pick another theme (F5), or
+  /theme init for a starter. A broken file is never overwritten without asking.
+
+/theme init writes a minimal starter: every part mapped to a palette role (title →
+@accent, errors → @danger, …) but every color set to your terminal's default.
+Set the colors in the editor to make it yours.
+
+Format
+  schema = 1
+  name = \"Default\"
+  description = \"…\"
+
+  [dark.colors]             # the palette: 14 named colors
+  text = 252                # 0-255, \"#rrggbb\", \"#rgb\", a name (cyan, darkgray…), \"reset\"
+  accent = \"cyan\"
+  …
+  [dark.styles]             # parts of the screen
+  brand = { fg = \"@on_accent\", bg = \"@accent\", bold = true }
+  panel_focused = { fg = \"@text\", border = \"@accent\" }
+  …
+  [light.colors] / [light.styles]   the same for the light variant
+
+  Style fields: fg, bg, border (boxes only), bold, italic, underline, reverse, dim.
+  Colors: a literal or @palette-name. Missing colors use the terminal default,
+  missing parts use the starter rule, a missing variant copies the other one;
+  each is reported once as a warning. Layout (borders, padding) isn't themeable.
+
+Palette colors
+  text background accent subtle muted header warn danger ok on_accent
+  modal_text modal_background logo_dark logo_light
+  The editor shows what each one is used for.",
+        related: &["theme", "prefs"],
     },
     Topic {
         id: "accounts",
@@ -280,6 +370,8 @@ Per-account keys
 
 Global keys
   ui.sidebar_width       Sidebar width, 10–80. Default: 24.
+  ui.theme               Theme name (a file in <data dir>/themes). Default: default.
+                         Also F5, /theme use, or clicking the header (see /help theme).
   ui.theme_mode          dark, light or system (follow the terminal). Default: system.
                          Also F4, /theme, or clicking the header (see /help theme).
   ui.title_glyphs        Big header title glyphs: auto, quadrant or half. Default: auto
@@ -516,9 +608,16 @@ fn command_extra(
             &["accounts"],
         ),
         "theme" => (
-            "Switch the appearance. Bare /theme cycles dark → light → system (also F4 or a header click). system follows the terminal background, else dark. Saved in the global pref ui.theme_mode.",
-            &["/theme", "/theme light", "/theme system"],
-            &["theme", "keys", "prefs"],
+            "Switch, list and edit themes, or the dark/light mode. Bare /theme cycles dark → light → system (also F4); system follows the terminal background, else dark. /theme use <name> (or F5) picks a theme file, /theme edit (or Shift-F5) opens the editor, /theme list lists them, /theme init [name] writes a minimal starter, /theme delete <name> deletes one (asks first), /theme reload re-reads the files. Saved in the global prefs ui.theme and ui.theme_mode.",
+            &[
+                "/theme",
+                "/theme light",
+                "/theme use default",
+                "/theme edit",
+                "/theme init mine",
+                "/theme list",
+            ],
+            &["theme", "theme-files", "keys", "prefs"],
         ),
         "quit" => ("Exit grokbot-tui.", &["/quit"], &["keys"]),
         _ => ("", &[], &["overview"]),
@@ -796,6 +895,13 @@ mod tests {
     fn normalize_and_lookup() {
         let r = registry();
         assert_eq!(page(&r, "login desktop").unwrap().id, "login-desktop");
+        assert_eq!(page(&r, "theme files").unwrap().id, "theme-files");
+        assert!(
+            page(&r, "theme-files")
+                .unwrap()
+                .body
+                .contains("/usr/share/grokbot-tui/themes")
+        );
         assert_eq!(page(&r, "/bot").unwrap().id, "cmd-bot");
         assert_eq!(page(&r, "").unwrap().id, "overview");
         assert!(page(&r, "nope").is_none());

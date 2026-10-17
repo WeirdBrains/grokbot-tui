@@ -10,6 +10,8 @@ mod input;
 mod picker;
 mod storage;
 mod theme;
+mod theme_editor;
+mod themes;
 mod ui;
 
 use anyhow::Result;
@@ -100,6 +102,8 @@ fn main() -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     let mut app = App::new(store, rt.handle().clone(), cli.mock)?;
     app.init();
+    // Copy the packaged themes in if the user has none, then load the selected theme.
+    app.init_themes();
     if let Some(n) = notice {
         app.info(n);
     }
@@ -161,8 +165,23 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     }
                     continue;
                 }
+                if app.editor.is_some() {
+                    app.editor_key(k);
+                    continue;
+                }
                 if k.code == KeyCode::F(6) {
                     app.toggle_mouse_capture();
+                    continue;
+                }
+                // Shift-F5 (most terminals send F5 + Shift; some send F17): theme editor.
+                if (k.code == KeyCode::F(5) && k.modifiers.contains(KeyModifiers::SHIFT))
+                    || k.code == KeyCode::F(17)
+                {
+                    app.open_theme_editor(None);
+                    continue;
+                }
+                if k.code == KeyCode::F(5) {
+                    app.open_theme_picker();
                     continue;
                 }
                 if k.code == KeyCode::F(2) {
@@ -288,6 +307,7 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     _ => {}
                 }
             }
+            Event::Paste(_) if app.editor.is_some() => {}
             Event::Paste(s) => app.input_insert(s.trim_end_matches(['\r', '\n'])),
             Event::Mouse(m) if app.picker.is_some() => {
                 let p = app.picker.as_mut().unwrap();
@@ -303,6 +323,12 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     _ => {}
                 }
             }
+            Event::Mouse(m) if app.editor.is_some() => match m.kind {
+                MouseEventKind::Down(MouseButton::Left) => app.editor_click(m.column, m.row),
+                MouseEventKind::ScrollUp => app.editor_scroll(-1),
+                MouseEventKind::ScrollDown => app.editor_scroll(1),
+                _ => {}
+            },
             Event::Mouse(m) => match m.kind {
                 MouseEventKind::ScrollUp if app.shell.is_some() => app.shell_scroll(-3),
                 MouseEventKind::ScrollDown if app.shell.is_some() => app.shell_scroll(3),

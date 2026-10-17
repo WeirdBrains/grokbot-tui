@@ -101,6 +101,7 @@ fn draw_logo(buf: &mut Buffer, area: Rect) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Target {
     Account,
+    ThemeSwitch,
     Mode(Mode),
 }
 
@@ -140,6 +141,7 @@ fn render_segs(f: &mut Frame, app: &mut App, area: Rect, segs: Vec<Seg>) {
             let r = Rect::new(x, area.y, visible, 1);
             match t {
                 Target::Account => app.account_area = r,
+                Target::ThemeSwitch => app.theme_switch_area = r,
                 Target::Mode(m) => app.theme_areas.push((r, m)),
             }
         }
@@ -163,11 +165,22 @@ fn account_segs(app: &App, compact: bool) -> Vec<Seg> {
     ]
 }
 
-/// "theme  dark  light  system  F4 (→ dark)" (no label or "→" note when compact)
+/// "theme  ‹default› ▾  dark  light  system  F4 (→ dark)" (no label or "→" note when compact)
 fn theme_segs(app: &App, compact: bool) -> Vec<Seg> {
     let current = app.config.theme_mode;
     let label = if compact { "" } else { "theme " };
-    let mut v = vec![seg(label, theme::header_label())];
+    let name = match app.theme_problem {
+        Some(p) => format!("{}: {p}", app.config.theme),
+        None => app.config.theme.clone(),
+    };
+    let mut v = vec![
+        seg(label, theme::header_label()),
+        hit(
+            format!(" ‹{name}› ▾ "),
+            theme::theme_switch(),
+            Target::ThemeSwitch,
+        ),
+    ];
     for m in Mode::ALL {
         v.push(hit(
             format!(" {} ", m.as_str()),
@@ -210,6 +223,7 @@ fn mouse_seg(app: &App) -> Seg {
 /// The header: tall (logo, big title, four info rows) or one compact row.
 fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
     app.account_area = Rect::default();
+    app.theme_switch_area = Rect::default();
     app.theme_areas.clear();
     f.render_widget(Block::new().style(theme::top_bar()), area);
     let (user, bot) = login_and_bot(app);
@@ -296,7 +310,30 @@ fn input_shown(app: &App) -> (String, usize) {
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
+    theme::set_theme(app.theme.clone());
     theme::set_variant(app.theme_variant());
+    if app.editor.is_some() {
+        crate::theme_editor::draw(f, app);
+        if app.picker.is_some() {
+            draw_picker(f, app);
+        }
+        return;
+    }
+    let cursor = draw_main(f, app);
+    if app.picker.is_some() {
+        draw_picker(f, app);
+    } else if app.shell.is_some() {
+        draw_shell(f, app);
+    } else if app.help.is_some() {
+        draw_help(f, app);
+    } else if let Some(c) = cursor {
+        f.set_cursor_position(c);
+    }
+}
+
+/// The main screen (header, sidebar, chat, input) with the active theme, without modals.
+/// Returns where the input cursor goes. Also drawn off-screen as the theme editor preview.
+pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     f.render_widget(Block::new().style(theme::base()), f.area());
     // Input box: char-wrapped to its width, grows to 10 rows, then scrolls.
     let (shown, cur) = input_shown(app);
@@ -444,18 +481,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         ),
         bottom,
     );
-    if app.picker.is_some() {
-        draw_picker(f, app);
-    } else if app.shell.is_some() {
-        draw_shell(f, app);
-    } else if app.help.is_some() {
-        draw_help(f, app);
-    } else if app.focus == Focus::Input {
+    (app.focus == Focus::Input).then(|| {
         let (row, col) = il.cursor;
         let x = bottom.x + 3 + col as u16;
         let y = bottom.y + 1 + (row - scroll) as u16;
-        f.set_cursor_position(Position::new(x.min(bottom.right().saturating_sub(2)), y));
-    }
+        Position::new(x.min(bottom.right().saturating_sub(2)), y)
+    })
 }
 
 /// Guidance shown when the body has nothing in it yet.
@@ -834,7 +865,7 @@ mod tests {
         assert!(!title.chars().any(|c| ('▖'..='▟').contains(&c)), "{header}");
         assert!(r[0].contains("account  @default ▾  F3"), "{header}");
         assert!(
-            r[1].contains("theme  dark  light  system  F4 (→ dark)"),
+            r[1].contains("theme  ‹default› ▾  dark  light  system  F4 (→ dark)"),
             "{header}"
         );
         assert!(

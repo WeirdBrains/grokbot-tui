@@ -451,6 +451,17 @@ pub struct App {
     pub theme_areas: Vec<(Rect, crate::theme::Mode)>,
     /// Terminal background detected at startup, used by the "system" theme mode.
     pub detected_variant: Option<crate::theme::Variant>,
+    /// The theme in use: loaded from `<data dir>/themes/<ui.theme>.toml`, or plain terminal
+    /// colors when that file is missing or broken (see `theme_problem`).
+    pub theme: Arc<crate::theme::Theme>,
+    /// Why the selected theme couldn't be loaded ("missing" / "broken"), if it couldn't.
+    pub theme_problem: Option<&'static str>,
+    /// Shared dirs the packaged themes are copied from when the user has none.
+    pub theme_sources: Vec<std::path::PathBuf>,
+    /// The `‹theme› ▾` switcher in the header (click opens the theme picker).
+    pub theme_switch_area: Rect,
+    /// The full-screen theme editor (Shift-F5), when open.
+    pub editor: Option<crate::theme_editor::ThemeEditor>,
     pub pending_remove: Option<String>,
     pub login_url_draft: Option<String>,
     /// Bots with a sent prompt whose reply hasn't shown up yet.
@@ -570,6 +581,11 @@ impl App {
             account_area: Rect::default(),
             theme_areas: Vec::new(),
             detected_variant: None,
+            theme: Arc::new(crate::theme::Theme::unstyled(crate::themes::DEFAULT_ID)),
+            theme_problem: None,
+            theme_sources: crate::themes::shared_dirs(),
+            theme_switch_area: Rect::default(),
+            editor: None,
             pending_remove: None,
             login_url_draft: None,
             awaiting: HashMap::new(),
@@ -1163,7 +1179,11 @@ impl App {
     }
 
     pub fn reload_config(&mut self) -> Result<()> {
+        let old_theme = self.config.theme.clone();
         self.config = self.store.load_config()?;
+        if self.config.theme != old_theme {
+            self.load_theme();
+        }
         Ok(())
     }
 
@@ -2061,6 +2081,10 @@ impl App {
 
     pub fn click(&mut self, col: u16, row: u16) {
         let at = ratatui::layout::Position::new(col, row);
+        if self.theme_switch_area.contains(at) {
+            self.open_theme_picker();
+            return;
+        }
         if let Some(&(_, mode)) = self.theme_areas.iter().find(|(r, _)| r.contains(at)) {
             self.set_theme_mode(mode);
             return;
@@ -2114,6 +2138,10 @@ pub mod tests {
         let d = tempfile::tempdir().unwrap();
         let store = Store::open(d.path().join("gb"), None).unwrap();
         let mut app = App::new(store, rt.handle().clone(), true).unwrap();
+        // Themes come from the repo's themes/ dir (copied into the temp data dir), never
+        // from the real ~/.grokbot-tui or system dirs.
+        app.theme_sources = vec![repo_themes()];
+        app.init_themes();
         // Never touch the real desktop app from tests.
         app.desktop_lister = Arc::new(|| {
             Err(gw::Error::Desktop {
@@ -2122,6 +2150,11 @@ pub mod tests {
             })
         });
         (app, d)
+    }
+
+    /// The repo's shipped themes (themes/default.toml).
+    pub fn repo_themes() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("themes")
     }
 
     pub fn type_line(app: &mut App, s: &str) {

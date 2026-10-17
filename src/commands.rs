@@ -67,8 +67,8 @@ pub fn registry() -> Registry {
             Command {
                 name: "theme",
                 aliases: &["mode"],
-                usage: "/theme [dark|light|system]",
-                help: "Switch the appearance; bare /theme cycles dark → light → system (also F4)",
+                usage: "/theme [dark|light|system] | use|edit|delete <name> | list | init [name] | reload",
+                help: "Themes and dark/light/system: bare /theme cycles the mode (F4); use/list/edit pick and edit theme files (F5, Shift-F5)",
                 run: theme,
             },
             Command {
@@ -265,13 +265,33 @@ fn whoami(app: &mut App, _: &str) -> Result<()> {
     Ok(())
 }
 
+const THEME_USAGE: &str = "Usage: /theme [dark|light|system] · /theme use|edit|delete <name> · /theme list · /theme init [name] · /theme reload";
+
 fn theme(app: &mut App, args: &str) -> Result<()> {
-    match args.trim() {
-        "" => app.cycle_theme_mode(),
-        a => match crate::theme::Mode::parse(a) {
+    let mut it = args.split_whitespace();
+    let (sub, rest) = (it.next().unwrap_or(""), it.next());
+    match (sub, rest) {
+        ("", _) => app.cycle_theme_mode(),
+        ("use", Some(id)) => {
+            app.set_theme(id);
+        }
+        ("use", None) => app.open_theme_picker(),
+        ("list" | "ls", _) => {
+            let t = app.theme_list_text();
+            app.info(t);
+        }
+        ("edit", id) => app.open_theme_editor(id),
+        ("init", name) => app.theme_init(name),
+        ("reload", _) => app.reload_themes(),
+        ("delete" | "rm", Some(id)) => app.confirm_delete_theme(id),
+        (a, None) => match crate::theme::Mode::parse(a) {
             Some(m) => app.set_theme_mode(m),
-            None => bail!("Usage: /theme [dark|light|system]"),
+            None if crate::themes::path(&app.themes_dir(), a).exists() => {
+                app.set_theme(a);
+            }
+            None => bail!(THEME_USAGE),
         },
+        _ => bail!(THEME_USAGE),
     }
     Ok(())
 }
