@@ -6,6 +6,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-17
+
+### Changed
+
+- **The Cargo package is renamed from `gb` to `grokbot-tui`**, matching the binary. The
+  crate now lives in `crates/grokbot-tui`. Build with `cargo build -p grokbot-tui` and
+  install from source with `cargo install --path ./crates/grokbot-tui` (the old
+  `crates/gb` path no longer exists).
+- **Release artifacts are renamed** from `gb-<target>.*` to `grokbot-tui-<target>.*`
+  (e.g. `grokbot-tui-x86_64-unknown-linux-gnu.tar.xz`, `grokbot-tui-installer.sh`,
+  `grokbot-tui-x86_64-pc-windows-msvc.msi`). The AUR, winget and Linux-package templates
+  and workflows use the new names. The `.deb`/`.rpm` names and the MSI upgrade GUID are
+  unchanged.
+- **Environment variables now start with `GROKBOT_TUI_` instead of `GB_`.** The old names
+  still work as fallbacks: at startup each `GB_*` value is copied to its `GROKBOT_TUI_*`
+  name when that name isn't set, so the new name wins when both are set.
+
+  | Old | New |
+  |---|---|
+  | `GB_GROKBOT_TOKEN` | `GROKBOT_TUI_GROKBOT_TOKEN` |
+  | `GB_GROKBOT_GATEWAY_URL` | `GROKBOT_TUI_GROKBOT_GATEWAY_URL` |
+  | `GB_GROKBOT_GATEWAY_HEADERS` | `GROKBOT_TUI_GROKBOT_GATEWAY_HEADERS` |
+  | `GB_CURSOR_API_BASE_URL` | `GROKBOT_TUI_CURSOR_API_BASE_URL` |
+  | `GB_CURSOR_CLIENT_VERSION` | `GROKBOT_TUI_CURSOR_CLIENT_VERSION` |
+  | `GB_CURSOR_CLIENT_TYPE` | `GROKBOT_TUI_CURSOR_CLIENT_TYPE` |
+  | `GB_SAND_BOX_NAMESPACE` | `GROKBOT_TUI_SAND_BOX_NAMESPACE` |
+  | `GB_ACCOUNT` | `GROKBOT_TUI_ACCOUNT` |
+  | `GB_ALLOW_LOCAL_GATEWAY` | `GROKBOT_TUI_ALLOW_LOCAL_GATEWAY` |
+  | `GB_GROKBOT_APP_DIR` | `GROKBOT_TUI_GROKBOT_APP_DIR` |
+
+  `GROKBOT_TUI_ALLOW_LOCAL_GATEWAY` and `GROKBOT_TUI_GROKBOT_APP_DIR` (or their `GB_`
+  names) are still forwarded to `GROKBOT_ALLOW_LOCAL_GATEWAY` and `GROKBOT_APP_DIR`, the
+  names `grokbot_api` reads; a library name that is already set wins.
+- **The default data directory is now `~/.grokbot-tui`** (was `~/.gb`). `context.db`
+  stays inside it, with the directory `0700` and the file `0600`. On startup, unless
+  `--data-dir` is given:
+  - if `~/.grokbot-tui` doesn't exist and `~/.gb` does, `~/.gb` is renamed to
+    `~/.grokbot-tui`;
+  - if the rename fails (e.g. across filesystems), the folder is copied and every file
+    verified, `~/.gb` is left in place, and a notice is shown; if the copy also fails,
+    grokbot-tui keeps using `~/.gb` and says so;
+  - if both exist, `~/.grokbot-tui` is used and a one-time notice says `~/.gb` was
+    ignored.
+
+  User data is never deleted; remove `~/.gb` yourself once you no longer need it.
+  `--data-dir` still overrides everything.
+- Help text and docs call the app `grokbot-tui` and list the new names.
+
 ## [1.1.0] - 2026-10-17
 
 ### Changed
