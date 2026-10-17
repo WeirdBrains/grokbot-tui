@@ -122,18 +122,25 @@ To also install the license file with the MSI, follow the "license sidecar" comm
 
 ## Manual steps that need your accounts or secrets
 
-None of these are automated. A release succeeds without them; they only make the
-packages installable from each ecosystem's usual place.
+Apart from the Homebrew push (automatic once set up), none of these are automated. A
+release succeeds without them; they only make the packages installable from each
+ecosystem's usual place.
 
-1. **Homebrew tap** (GitHub account).
-   - Create the public repo `WeirdBrains/homebrew-tap` (the `tap` setting).
-   - Manual: each release, copy `grokbot-tui.rb` from the release into `Formula/` in the
-     tap.
-   - Automatic (optional):
-     1. Add `"homebrew"` to `publish-jobs` in `dist-workspace.toml` and run `dist generate`.
-     2. Create a fine-grained token with *Contents: read/write* on `WeirdBrains/homebrew-tap` only.
-     3. Save it as the repo secret `HOMEBREW_TAP_TOKEN`.
-   - Users then run `brew install WeirdBrains/tap/grokbot-tui`.
+1. **Homebrew tap** (one-time setup; publishing is then automatic).
+   - Every release pushes `Formula/grokbot-tui.rb` to `WeirdBrains/homebrew-tap`
+     (`"homebrew"` in `publish-jobs`, job `publish-homebrew-formula` in `release.yml`).
+     It works once both of these exist:
+     1. the public repo `WeirdBrains/homebrew-tap` (the `tap` setting), with a default
+        branch (e.g. an initial README commit);
+     2. the repo secret `HOMEBREW_TAP_TOKEN` in `WeirdBrains/grokbot-tui`: a fine-grained
+        token with *Contents: read/write* on `WeirdBrains/homebrew-tap` only.
+   - Releases started by auto-release (`workflow_dispatch`) read the secret directly; no
+     extra wiring is needed.
+   - Until both exist, the `publish-homebrew-formula` job fails after the GitHub Release
+     has already been created (all artifacts, including `grokbot-tui.rb`, are attached),
+     so the release itself is fine; `announce` is skipped. To publish a missed version
+     later, copy `grokbot-tui.rb` from that release into `Formula/` in the tap.
+   - Users run `brew install WeirdBrains/tap/grokbot-tui`.
    - Getting into homebrew-core is a separate, stricter review.
 2. **AUR** (AUR account with an SSH key).
    - For each of `grokbot-tui-bin` (prebuilt) and `grokbot-tui` (source build), take
