@@ -579,6 +579,7 @@ impl Store {
                 description: r.get(2)?,
                 hidden: r.get(3)?,
                 is_group: r.get(4)?,
+                team: false,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -1239,6 +1240,7 @@ mod tests {
                 description: String::new(),
                 hidden: true,
                 is_group: false,
+                team: false,
             }])
             .unwrap();
             s.append_message("a", &msg(Role::User, "hi")).unwrap();

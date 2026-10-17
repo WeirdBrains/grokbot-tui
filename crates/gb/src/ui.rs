@@ -103,7 +103,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             } else if app.focus == Focus::Sidebar && i == app.sidebar_cursor {
                 s = s.add_modifier(Modifier::REVERSED);
             }
-            ListItem::new(format!(" {}", b.name)).style(s)
+            let tag = if b.team { " ·team" } else { "" };
+            ListItem::new(format!(" {}{tag}", b.name)).style(s)
         })
         .collect();
     let side_border = if app.focus == Focus::Sidebar {

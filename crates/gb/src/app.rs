@@ -846,6 +846,9 @@ impl App {
                                     if b.is_group {
                                         flags.push("group");
                                     }
+                                    if b.team {
+                                        flags.push("team");
+                                    }
                                     if b.hidden {
                                         flags.push("hidden");
                                     }

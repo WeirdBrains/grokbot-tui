@@ -8,13 +8,15 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Bot {
     pub id: String,
     pub name: String,
     pub description: String,
     pub hidden: bool,
     pub is_group: bool,
+    /// A team bot shared with you (owned by someone else). Not in the gateway's listAgents.
+    pub team: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,7 +62,30 @@ pub fn bot_from_agent(a: &gw::Agent) -> Bot {
         description: gw::sanitize_text(&a.description),
         hidden: a.hidden_from_sidebar.unwrap_or(false),
         is_group: a.is_group,
+        team: false,
     }
+}
+
+/// Add shared team bots (from the backend team list) that the gateway list lacks.
+pub fn merge_team_bots(mut bots: Vec<Bot>, team: &[gw::TeamAgent]) -> Vec<Bot> {
+    for t in team {
+        if t.viewer_is_owner || bots.iter().any(|b| b.id == t.agent_id) {
+            continue;
+        }
+        let mut description = gw::sanitize_text(&t.description);
+        if let Some(o) = &t.owner_display_name {
+            description = format!("team bot · owner {} · {description}", gw::sanitize_text(o));
+        }
+        bots.push(Bot {
+            id: t.agent_id.clone(),
+            name: gw::sanitize_text(&t.name),
+            description,
+            hidden: false,
+            is_group: t.is_room,
+            team: true,
+        });
+    }
+    bots
 }
 
 pub fn messages_from_entries(entries: &[gw::Entry]) -> Vec<Message> {
@@ -89,14 +114,20 @@ impl ApiClient for GatewayApi {
     async fn acceptance(&self, bot_id: &str, nonce: &str) -> gw::Result<gw::AcceptanceStatus> {
         self.0.prompt_acceptance_status(bot_id, nonce).await
     }
+    /// Gateway `listAgents` (your box) plus, when a Cursor token is available, team bots
+    /// from the backend's `ListGrokBotTeamAgents`. A team-list failure keeps your bots.
     async fn list_bots(&self) -> gw::Result<Vec<Bot>> {
-        Ok(self
+        let own: Vec<Bot> = self
             .0
             .list_agents()
             .await?
             .iter()
             .map(bot_from_agent)
-            .collect())
+            .collect();
+        match self.0.list_team_agents().await {
+            Ok(Some(team)) => Ok(merge_team_bots(own, &team)),
+            _ => Ok(own),
+        }
     }
     async fn create_bot(&self, name: &str) -> gw::Result<Bot> {
         let input = gw::CreateAgent {
@@ -201,6 +232,7 @@ impl MockClient {
             description: d.into(),
             hidden: h,
             is_group: false,
+            team: false,
         })
         .collect()
     }
@@ -257,6 +289,7 @@ impl ApiClient for MockClient {
             description: String::new(),
             hidden: false,
             is_group: false,
+            team: false,
         };
         self.extra.lock().unwrap().push(b.clone());
         Ok(b)
@@ -364,6 +397,33 @@ impl ApiClient for MockClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn team_bots_merged_once_and_marked() {
+        let own = vec![Bot {
+            id: "r".into(),
+            name: "Rocky".into(),
+            ..Default::default()
+        }];
+        let team = gw::TeamAgent::list(&json!({"entries": [
+            {"agent": {"agentId": "r", "name": "Rocky", "viewerIsOwner": true}},
+            {"agent": {"agentId": "c", "name": "Chomp", "viewerIsOwner": false,
+                       "visibility": "GROK_BOT_AGENT_VISIBILITY_TEAM", "viewerSessionId": "s1",
+                       "ownerDisplayName": "Ana"}},
+            {"agent": {"name": "no id"}}
+        ]}));
+        assert_eq!(team.len(), 2);
+        assert!(team[1].team_visible && !team[1].viewer_is_owner);
+        assert_eq!(team[1].viewer_session_id.as_deref(), Some("s1"));
+        let all = merge_team_bots(own, &team);
+        assert_eq!(all.len(), 2, "own bot not duplicated");
+        assert!(!all[0].team);
+        assert_eq!(
+            (all[1].id.as_str(), all[1].name.as_str(), all[1].team),
+            ("c", "Chomp", true)
+        );
+        assert!(all[1].description.contains("owner Ana"));
+    }
     use serde_json::json;
 
     #[tokio::test]
