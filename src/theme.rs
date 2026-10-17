@@ -178,7 +178,9 @@ pub fn top_bar() -> Style {
 
 /// The big "Grok Bot" title in the tall header.
 pub fn title() -> Style {
-    Style::new().foreground(pal().accent).bold(true)
+    // Not bold: some terminals draw bold block glyphs from a different font, which breaks
+    // the pixel art.
+    Style::new().foreground(pal().accent)
 }
 
 /// Labels in the header ("account", "theme", "login:").
@@ -231,7 +233,7 @@ pub fn mock_tag() -> Style {
 /// The two colors of the Grok Bot logo (its dark squircle and white ball). They are the
 /// logo's own colors, the same in both variants.
 pub fn logo_colors() -> (Color, Color) {
-    (Color::Indexed(236), Color::Indexed(254))
+    (Color::Indexed(232), Color::Indexed(255))
 }
 
 // ---------------------------------------------------------------- sidebar

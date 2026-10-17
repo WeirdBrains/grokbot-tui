@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.3.2] - 2026-10-17
+
+### Fixed
+
+- **Header title looked broken in macOS Terminal.** The big "Grok Bot" title now uses
+  half-height pixels (only `▀ ▄ █`) instead of quadrant glyphs, which some terminal fonts
+  draw with gaps and odd shapes. It is also no longer bold, since bold block glyphs can come
+  from a different font. The title is 8 columns per letter now, so it shows when the
+  terminal is at least 128 columns wide; narrower tall headers keep the logo and info rows.
+- **Header logo looked like a blob.** It is now traced at 8 × 8 square pixels (it was
+  stretched to 12 × 8) and its dark parts are near-black, so they stand out from the header
+  background.
+
 ## [1.3.1] - 2026-10-17
 
 ### Fixed

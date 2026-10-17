@@ -18,6 +18,11 @@ pub const TALL_HEADER_ROWS: u16 = 4;
 pub const TALL_MIN_WIDTH: u16 = 80;
 /// … and this many rows, so the chat keeps enough room; otherwise the header is compact.
 pub const TALL_MIN_HEIGHT: u16 = 24;
+/// Columns one big-title glyph takes.
+const TITLE_GLYPH_WIDTH: u16 = 8;
+/// The big title is drawn only when the header is at least this wide (logo, title, gaps and
+/// room for the info rows); narrower tall headers show the logo and info rows only.
+pub const TITLE_MIN_WIDTH: u16 = 128;
 
 /// The header's size for a terminal of `area`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,25 +51,21 @@ pub fn header_kind(area: Rect) -> HeaderKind {
     }
 }
 
-/// The header title, drawn large with tui-big-text (4 columns × 4 rows per glyph).
+/// The header title, drawn large with tui-big-text in half-height pixels (8 columns × 4 rows
+/// per glyph). Half-height uses only `▀ ▄ █`, which every terminal font draws cleanly; the
+/// quadrant glyphs used before (`▖ ▗ ▘ ▝ …`) came out gappy and misshapen in macOS Terminal.
 pub const TITLE: &str = "Grok Bot";
 
-/// The Grok Bot logo (the desktop app's icon: a white ball with two slanted eyes on a dark
-/// squircle) as 12 × 8 pixels, drawn with half blocks as 12 columns × 4 rows.
-/// `d` = dark, `W` = white, space = transparent. Generated from the app's
-/// `resources/icon.png` (512 px): box-resampled to 12 × 8, luminance threshold 140.
+/// The Grok Bot logo (the desktop app's icon: a white ball with a slanted stroke on a dark
+/// squircle) as 8 × 8 square pixels, drawn with half blocks as 8 columns × 4 rows.
+/// `d` = dark, `W` = white, space = transparent. Traced from the app's `resources/icon.png`
+/// (Lanczos-resampled to 8 × 8, luminance threshold 150), then cleaned up by hand. Square
+/// pixels keep the icon round; the old 12 × 8 version stretched it into a blob.
 const LOGO: [&str; 8] = [
-    " dddddddddd ",
-    "ddddWWWddddd",
-    "dWWWWWWWWWdd",
-    "WWWWWdWWddWd",
-    "WWWWWddWWWWW",
-    "WWWWWWdWWWWW",
-    "WWWWWWWWWWWW",
-    " WWWWWWWWWW ",
+    " dddddd ", "dddddddd", "dWWWWWdd", "WWWdWWdd", "WWWWdWWW", "WWWWWdWW", "WWWWWWWW", " WWWWWW ",
 ];
 /// Columns the logo takes.
-pub const LOGO_WIDTH: u16 = 12;
+pub const LOGO_WIDTH: u16 = 8;
 
 /// Draw [`LOGO`] at the top-left of `area` (clipped), leaving transparent pixels alone.
 fn draw_logo(buf: &mut Buffer, area: Rect) {
@@ -233,7 +234,11 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
             render_segs(f, app, area, segs);
         }
         HeaderKind::Tall => {
-            let title_w = TITLE.chars().count() as u16 * 4;
+            let title_w = if area.width >= TITLE_MIN_WIDTH {
+                TITLE.chars().count() as u16 * TITLE_GLYPH_WIDTH
+            } else {
+                0
+            };
             let [_, logo, _, title, _, info] = Layout::horizontal([
                 Constraint::Length(1),
                 Constraint::Length(LOGO_WIDTH),
@@ -246,7 +251,7 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
             draw_logo(f.buffer_mut(), logo);
             f.render_widget(
                 BigText::builder()
-                    .pixel_size(PixelSize::Quadrant)
+                    .pixel_size(PixelSize::HalfHeight)
                     .style(theme::title())
                     .lines(vec![Line::from(TITLE)])
                     .build(),
@@ -760,30 +765,47 @@ mod tests {
     }
 
     #[test]
+    fn narrow_tall_header_drops_the_big_title_but_keeps_logo_and_info() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        crate::app::tests::mock_login(&mut app, "t");
+        let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let r = screen_rows(&term);
+        let header = r[..4].join("\n");
+        let between: String = r[..4]
+            .iter()
+            .flat_map(|row| row.chars().skip(9).take(4))
+            .collect();
+        assert!(between.trim().is_empty(), "{header}");
+        assert!(r[0].contains("account  @default ▾  F3"), "{header}");
+        assert!(r[3].contains("mouse: on (F6)"), "{header}");
+    }
+
+    #[test]
     fn tall_header_has_logo_title_and_switchers() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = crate::app::tests::test_app(&rt);
         crate::app::tests::mock_login(&mut app, "t");
-        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        let mut term = Terminal::new(TestBackend::new(140, 30)).unwrap();
         term.draw(|f| draw(f, &mut app)).unwrap();
         let r = screen_rows(&term);
         let header = r[..4].join("\n");
-        // Logo: half blocks in columns 1..13 on all four rows.
+        // Logo: half blocks in columns 1..9 on all four rows.
         for row in &r[..4] {
-            let logo: String = row.chars().skip(1).take(12).collect();
+            let logo: String = row.chars().skip(1).take(8).collect();
             assert!(logo.contains('▀') || logo.contains('▄'), "{header}");
         }
-        // Big title: quadrant glyphs between the logo and the info column.
-        let title: String = r[1].chars().skip(15).take(32).collect();
+        // Big title: only half-height blocks (no quadrant glyphs) between logo and info.
+        let title: String = r[..4]
+            .iter()
+            .flat_map(|row| row.chars().skip(11).take(64))
+            .collect();
         assert!(
-            title.chars().any(|c| ('▖'..='▟').contains(&c)
-                || c == '█'
-                || c == '▀'
-                || c == '▄'
-                || c == '▌'
-                || c == '▐'),
+            title.chars().any(|c| matches!(c, '█' | '▀' | '▄')),
             "{header}"
         );
+        assert!(!title.chars().any(|c| ('▖'..='▟').contains(&c)), "{header}");
         assert!(r[0].contains("account  @default ▾  F3"), "{header}");
         assert!(
             r[1].contains("theme  dark  light  system  F4 (→ dark)"),
