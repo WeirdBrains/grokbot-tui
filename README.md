@@ -1,11 +1,9 @@
 # grokbot-tui — Grok Bot TUI
 
-A terminal UI for Grok Bot, written in Rust (2024 edition) with ratatui + crossterm. It's a Cargo workspace:
-
-| Crate | What |
-|---|---|
-| [`crates/grokbot_api`](crates/grokbot_api) | Library: async client for every known Grok Bot gateway call, the Cursor EnsureSandBox exchange, and the credential host allowlist |
-| [`crates/gb`](crates/gb) | The `grokbot-tui` binary (TUI). All networking goes through `grokbot_api` |
+A terminal UI for Grok Bot, written in Rust (2024 edition, Rust 1.89 or newer) with ratatui + crossterm.
+The `grokbot-tui` binary lives in [`crates/gb`](crates/gb). All networking goes through the
+[`grokbot_api`](https://crates.io/crates/grokbot_api) crate from crates.io: an async client for every known
+Grok Bot gateway call, the Cursor EnsureSandBox exchange, and the credential host allowlist.
 
 > ⚠️ **Unofficial and undocumented.** The Grok Bot gateway is a private API with no public spec.
 > Its protocol was reverse-engineered from [grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli)
@@ -135,7 +133,7 @@ All methods are per account and stored in SQLite (see below).
 - gateway: `https` on `cursor.sh`, `cursor.com`, `*.cursor.sh`, `*.cursor.com`, `*.cursorvm.com`;
 - EnsureSandBox backend (gets the Cursor token): `https` on `*.cursor.sh` / `*.cursor.com` only, never `*.cursorvm.com`.
 
-Loopback gateways (`localhost`, `127.0.0.1`, `::1`) are allowed only with `GB_ALLOW_LOCAL_GATEWAY=1`. URLs containing userinfo are always rejected.
+Loopback gateways (`localhost`, `127.0.0.1`, `::1`) are allowed only with `GROKBOT_ALLOW_LOCAL_GATEWAY=1`. URLs containing userinfo are always rejected.
 Redirects are never followed, requests time out after 30 s, responses are capped at 2 MiB, and tokens are redacted from error messages.
 
 **Environment** (each applies only to the account selected at startup: `--account` / `GB_ACCOUNT` / last active):
@@ -149,8 +147,13 @@ Redirects are never followed, requests time out after 30 s, responses are capped
 | `GB_CURSOR_CLIENT_VERSION` | Override `x-cursor-client-version` (else pref `cursor.client_version`, else detect installed Grok Bot, else `0.70.2`) |
 | `GB_CURSOR_CLIENT_TYPE` | Override `x-cursor-client-type` (default `sand`) |
 | `GB_SAND_BOX_NAMESPACE` | Override `x-sand-box-namespace` (default `prod`) |
-| `GB_ALLOW_LOCAL_GATEWAY` | `1` to permit loopback gateways (development) |
+| `GROKBOT_ALLOW_LOCAL_GATEWAY` | `1` to permit loopback gateways (development) |
+| `GROKBOT_APP_DIR` | Grok Bot desktop app install directory, for client version detection |
 | `GB_ACCOUNT` | Starting account alias |
+
+`GROKBOT_ALLOW_LOCAL_GATEWAY` and `GROKBOT_APP_DIR` are read by the `grokbot_api` library. Their old
+names, `GB_ALLOW_LOCAL_GATEWAY` and `GB_GROKBOT_APP_DIR`, still work: at startup grokbot-tui copies an old
+name's value to the new name when the new one isn't set.
 
 ## Chat sync
 
@@ -203,7 +206,8 @@ The earlier one-time import from `~/.grokbot-tui` was removed, since everything 
 
 ## grokbot_api
 
-See [`crates/grokbot_api/README.md`](crates/grokbot_api/README.md). It covers every gateway method grok-bot-cli uses: listAgents, sendPrompt,
+The gateway client is published separately as [`grokbot_api`](https://crates.io/crates/grokbot_api)
+([source](https://github.com/WeirdBrains/grokbot_api), [docs](https://docs.rs/grokbot_api)). It covers every gateway method grok-bot-cli uses: listAgents, sendPrompt,
 getAgentTranscriptTail, getAgentThread, createAgent, updateAgent, deleteAgent, setAgentNotifyOnUpdates,
 setAgentHiddenFromSidebar, createGroup, setGroupMembers, getAgentWorkflows, importAgentWorkflowText,
 deleteAgentWorkflow, resolveLocalToolPermission and resolveAutoReviewApproval. It also covers EnsureSandBox and the URL policy.

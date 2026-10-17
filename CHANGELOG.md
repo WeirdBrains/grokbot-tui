@@ -9,6 +9,23 @@ No version has been tagged yet; everything below ships in the first release
 
 ## [Unreleased]
 
+### Changed
+
+- **`grokbot_api` now comes from crates.io.** gb depends on
+  [`grokbot_api` 1.1](https://crates.io/crates/grokbot_api) (with the `desktop-session`
+  feature). The in-repo `crates/grokbot_api` copy was removed; the library now lives at
+  [WeirdBrains/grokbot_api](https://github.com/WeirdBrains/grokbot_api). Building gb now
+  requires Rust 1.89 or newer.
+- **Renamed environment variables** (read by the library):
+  - `GB_ALLOW_LOCAL_GATEWAY` → `GROKBOT_ALLOW_LOCAL_GATEWAY`
+  - `GB_GROKBOT_APP_DIR` → `GROKBOT_APP_DIR`
+
+  The old names still work: at startup gb copies an old name's value to the new name when
+  the new one isn't set.
+- When `/login desktop` finds several saved sessions or Cursor accounts, gb now adds its own
+  instructions (`/login desktop <name|number>`, `/account add <alias>`) to the library's
+  error message, which no longer names them.
+
 ### Added
 
 - **Terminal UI.** A ratatui app with a sidebar of bots, a chat body, an input bar and
