@@ -39,9 +39,9 @@ In mock mode any token logs in except `bad`. Sending `reject` simulates a 4xx an
 ## Layout
 
 ```
- ▄▀▀▀▀▀▀▀▀▀▀▄  ▗▛▜▖        ▜▌      ▜▛▜▖     ▟     account  @default ▾  F3            header
- ▀▀▀▀▀▀▀▀▀▀▀▀  █   ▜▟▜▖▟▀▙ ▐▌▟▘    ▐▙▟▘▟▀▙ ▝█▀    theme  dark  light  system  F4     (logo, title,
- ▀▀▀▀▀▀▀▀▀▀▀▀  ▜▖▜▌▐▌▝▘█ █ ▐▛▙     ▐▌▐▌█ █  █▗    login cursor · box.cursorvm.com     switchers)
+ ▄▀▀▀▀▀▀▀▀▀▀▄  ▗▛▜▖        ▜▌      ▜▛▜▖     ▟     account  @default ▾  F3                       header
+ ▀▀▀▀▀▀▀▀▀▀▀▀  █   ▜▟▜▖▟▀▙ ▐▌▟▘    ▐▙▟▘▟▀▙ ▝█▀    theme  ‹default› ▾  dark  light  system  F4   (logo, title,
+ ▀▀▀▀▀▀▀▀▀▀▀▀  ▜▖▜▌▐▌▝▘█ █ ▐▛▙     ▐▌▐▌█ █  █▗    login cursor · box.cursorvm.com               switchers)
  ▀▀▀▀▀▀▀▀▀▀▀▀   ▀▀▘▀▀  ▝▀▘ ▀▘▝▘    ▀▀▀ ▝▀▘  ▝▘    mouse: on (F6)
 ┌ Bots ──────┐┌ Chat: Helper · Helper is replying ⠹ ──────────────────┐
 │ Helper     ││ you: hi                                               │  body: command output
@@ -55,7 +55,9 @@ In mock mode any token logs in except `bad`. Sending `reject` simulates a 4xx an
 - **Header:** the Grok Bot logo and title, then the account switcher (`@alias ▾`: click it or press
   `F3` to pick an account), the theme switcher, the login (method and gateway host), the active bot and
   the mouse state. Terminals smaller than 80 × 24 get a one-row header with the same switchers.
-- **Theme:** `dark`, `light` or `system`. Click one in the header, press `F4` to cycle, or run
+- **Theme:** `‹default› ▾` is the theme in use. Click it or press `F5` to pick another one; the list
+  ends with *Edit themes…* (also `Shift-F5`). See [Themes](#themes).
+- **Mode:** `dark`, `light` or `system` picks the theme's variant. Click one in the header, press `F4` to cycle, or run
   `/theme [dark|light|system]`. `system` follows the terminal background (OSC 11 query at startup,
   else `$COLORFGBG`, else dark). Saved in the global pref `ui.theme_mode` (default `system`).
 - **Sidebar:** the account's bots (agents flagged hidden-from-sidebar are left out unless `show_hidden_bots` is on). Click one to switch to its chat.
@@ -64,7 +66,57 @@ In mock mode any token logs in except `bad`. Sending `reject` simulates a 4xx an
 
 Keys: `Enter` submit · `Tab` toggle focus input/sidebar · `↑/↓` (or `j/k`) + `Enter` in sidebar to pick a bot ·
 `↑/↓`, `PgUp/PgDn`, mouse wheel scroll body · `Esc` cancel a prompt · `Ctrl-C`/`Ctrl-D` quit ·
-`F1` help · `F2` pick a bot · `F3` pick an account · `F4` cycle theme · `F6` mouse capture on/off.
+`F1` help · `F2` pick a bot · `F3` pick an account · `F4` cycle dark/light/system · `F5` pick a theme ·
+`Shift-F5` theme editor · `F6` mouse capture on/off.
+
+### Themes
+
+Every theme, including `default`, is a TOML file in `~/.grokbot-tui/themes/<name>.toml` (it follows
+`--data-dir`). Nothing is built into the binary. Each file has a `[dark]` and a `[light]` variant:
+a palette of 14 named colors and a style for each part of the screen.
+
+```toml
+schema = 1
+name = "Default"
+description = "The original grokbot-tui look"
+
+[dark.colors]
+text = 252                 # 0-255, "#rrggbb", "#rgb", a color name, or "reset" (terminal default)
+background = 234
+accent = "cyan"
+# … subtle, muted, header, warn, danger, ok, on_accent, modal_text, modal_background,
+#   logo_dark, logo_light
+
+[dark.styles]              # fg, bg, border (boxes only), bold, italic, underline, reverse, dim
+brand = { fg = "@on_accent", bg = "@accent", bold = true }   # "@name" = a palette color
+panel_focused = { fg = "@text", border = "@accent" }
+# …
+
+[light.colors]
+# …
+```
+
+- **Where `default.toml` comes from:** the repo's [`themes/default.toml`](themes/default.toml) is
+  installed by the packages (deb, rpm, AUR: `/usr/share/grokbot-tui/themes`; Homebrew:
+  `share/grokbot-tui/themes`; MSI: `share\grokbot-tui\themes` next to `bin`; release archives:
+  `themes/`). At startup, if your themes folder has no themes, they are copied into it. Your files
+  are never overwritten. With the shell/PowerShell installers or `cargo install`, download
+  `default.toml` into the themes folder, or run `/theme init`.
+- **Missing or broken theme:** grokbot-tui uses your terminal's own colors (highlights stay visible
+  via reverse video), shows a notice saying why, and marks the header `‹name: missing›` /
+  `‹name: broken›`. A broken file is never overwritten without asking. Partial files are fine:
+  missing colors use the terminal default, missing parts use the starter rule, a missing variant
+  copies the other, and each problem is listed once.
+- **`/theme init [name]`** writes a minimal starter: every part is mapped to a palette role (title →
+  `@accent`, errors → `@danger`, …) but every color is the terminal default. Set the colors in the
+  editor.
+- **Editor (`Shift-F5` or `/theme edit [name]`):** the palette and every part on the left, a live
+  preview of the app on the right (drawn by the real UI code with your unsaved changes). `Tab` flips
+  dark/light, `Enter`/`e` edits (hex, 0-255, a name or `@palette`), `p` opens the 256-color palette,
+  `r`/`R` revert the item/everything, `s` saves (applied immediately if it's the theme in use),
+  `d` duplicates, `n` creates a starter theme, `x` deletes (asks first), `t` opens another theme,
+  `Esc` closes (asks about unsaved changes). Text/background pairs below a 3:1 WCAG contrast ratio
+  get a warning. Mouse clicks work on the list, tabs, fields and palette.
 
 ### Responsiveness
 
@@ -94,7 +146,12 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 100 entries):
 | `/account rename <old> <new>` | Rename an account |
 | `/account remove <alias>` | Delete an account and all its data; you confirm by typing the alias (the active account can't be removed) |
 | `/prefs` (`/pref`) | List preferences; `/prefs get <key>`, `/prefs set <key> <value>` |
-| `/theme [dark\|light\|system]` (`/mode`) | Switch the theme; bare `/theme` cycles (also `F4` or a header click) |
+| `/theme [dark\|light\|system]` (`/mode`) | Switch dark/light mode; bare `/theme` cycles (also `F4` or a header click) |
+| `/theme use [name]` | Switch theme (also `/theme <name>`); no name: pick list (also `F5`) |
+| `/theme list` · `/theme reload` | List theme files (`*` = in use) · re-read them after editing by hand |
+| `/theme edit [name]` | Open the theme editor (also `Shift-F5`) |
+| `/theme init [name]` | Write a minimal starter theme (never overwrites) |
+| `/theme delete <name>` | Delete a theme file (confirm in a pick list) |
 | `/memory` (`/mem`) | The active bot's local memory notes; `/memory add <key> <value>`, `/memory clear [key]` |
 | `/quit` (`/q`, `/exit`) | Exit |
 
@@ -224,7 +281,7 @@ The old placeholder-API tokens are **dropped** because they never pointed at a r
 v3→v4 allows method `desktop` and adds `credentials.desktop_entry`, keeping existing logins.
 The earlier one-time import from `~/.grokbot-tui` was removed, since everything it imported is now dead.
 
-**Preferences:** account-scoped `default_bot`, `active_bot` (automatic), `show_hidden_bots` (`false`); global `ui.sidebar_width` (`24`), `ui.theme_mode` (`dark`/`light`/`system`, default `system`), `active_account`.
+**Preferences:** account-scoped `default_bot`, `active_bot` (automatic), `show_hidden_bots` (`false`); global `ui.sidebar_width` (`24`), `ui.theme` (`default`), `ui.theme_mode` (`dark`/`light`/`system`, default `system`), `active_account`.
 
 ## grokbot_api
 
