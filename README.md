@@ -30,7 +30,7 @@ cargo run -p grokbot-tui -- --mock         # offline: fake bots, delayed echo re
 cargo run -p grokbot-tui                   # real gateway
 cargo install --path ./crates/grokbot-tui  # installs the `grokbot-tui` binary
 grokbot-tui --data-dir /tmp/gbtest         # different data directory (holds context.db)
-grokbot-tui --account work                 # start in an account (or GB_ACCOUNT=work)
+grokbot-tui --account work                 # start in an account (or GROKBOT_TUI_ACCOUNT=work)
 ```
 
 In mock mode any token logs in except `bad`. Sending `reject` simulates a 4xx and `unknown` simulates a 5xx after the prompt has landed.
@@ -136,24 +136,28 @@ All methods are per account and stored in SQLite (see below).
 Loopback gateways (`localhost`, `127.0.0.1`, `::1`) are allowed only with `GROKBOT_ALLOW_LOCAL_GATEWAY=1`. URLs containing userinfo are always rejected.
 Redirects are never followed, requests time out after 30 s, responses are capped at 2 MiB, and tokens are redacted from error messages.
 
-**Environment** (each applies only to the account selected at startup: `--account` / `GB_ACCOUNT` / last active):
+**Environment** (each applies only to the account selected at startup: `--account` / `GROKBOT_TUI_ACCOUNT` / last active):
 
 | Variable | Meaning |
 |---|---|
-| `GB_GROKBOT_TOKEN` | **Gateway token** override; never saved. After `/account use` switches away, that account's stored login is used |
-| `GB_GROKBOT_GATEWAY_URL` | Gateway URL for the token above (else the account's stored gateway URL) |
-| `GB_GROKBOT_GATEWAY_HEADERS` | Optional JSON object of extra gateway headers |
-| `GB_CURSOR_API_BASE_URL` | Override the EnsureSandBox backend (still must be `*.cursor.sh` / `*.cursor.com`) |
-| `GB_CURSOR_CLIENT_VERSION` | Override `x-cursor-client-version` (else pref `cursor.client_version`, else detect installed Grok Bot, else `0.70.2`) |
-| `GB_CURSOR_CLIENT_TYPE` | Override `x-cursor-client-type` (default `sand`) |
-| `GB_SAND_BOX_NAMESPACE` | Override `x-sand-box-namespace` (default `prod`) |
-| `GROKBOT_ALLOW_LOCAL_GATEWAY` | `1` to permit loopback gateways (development) |
-| `GROKBOT_APP_DIR` | Grok Bot desktop app install directory, for client version detection |
-| `GB_ACCOUNT` | Starting account alias |
+| `GROKBOT_TUI_GROKBOT_TOKEN` | **Gateway token** override; never saved. After `/account use` switches away, that account's stored login is used |
+| `GROKBOT_TUI_GROKBOT_GATEWAY_URL` | Gateway URL for the token above (else the account's stored gateway URL) |
+| `GROKBOT_TUI_GROKBOT_GATEWAY_HEADERS` | Optional JSON object of extra gateway headers |
+| `GROKBOT_TUI_CURSOR_API_BASE_URL` | Override the EnsureSandBox backend (still must be `*.cursor.sh` / `*.cursor.com`) |
+| `GROKBOT_TUI_CURSOR_CLIENT_VERSION` | Override `x-cursor-client-version` (else pref `cursor.client_version`, else detect installed Grok Bot, else `0.70.2`) |
+| `GROKBOT_TUI_CURSOR_CLIENT_TYPE` | Override `x-cursor-client-type` (default `sand`) |
+| `GROKBOT_TUI_SAND_BOX_NAMESPACE` | Override `x-sand-box-namespace` (default `prod`) |
+| `GROKBOT_TUI_ALLOW_LOCAL_GATEWAY` | `1` to permit loopback gateways (development) |
+| `GROKBOT_TUI_GROKBOT_APP_DIR` | Grok Bot desktop app install directory, for client version detection |
+| `GROKBOT_TUI_ACCOUNT` | Starting account alias |
 
-`GROKBOT_ALLOW_LOCAL_GATEWAY` and `GROKBOT_APP_DIR` are read by the `grokbot_api` library. Their old
-names, `GB_ALLOW_LOCAL_GATEWAY` and `GB_GROKBOT_APP_DIR`, still work: at startup grokbot-tui copies an old
-name's value to the new name when the new one isn't set.
+`GROKBOT_TUI_ALLOW_LOCAL_GATEWAY` and `GROKBOT_TUI_GROKBOT_APP_DIR` are forwarded at startup to
+`GROKBOT_ALLOW_LOCAL_GATEWAY` and `GROKBOT_APP_DIR`, the names the `grokbot_api` library reads (setting the
+library names directly also works).
+
+**Older names.** Before 1.2.0 these variables started with `GB_` (e.g. `GB_GROKBOT_TOKEN`,
+`GB_ACCOUNT`). Every `GB_*` name still works as a fallback: at startup grokbot-tui copies its value to the
+matching `GROKBOT_TUI_*` name when that one isn't set, so the new name wins when both are set.
 
 ## Chat sync
 
@@ -179,13 +183,22 @@ Terminal control sequences are stripped before display. Whether an entry is your
 Several **strictly separate accounts** (e.g. `personal` plus work accounts). Each has its own alias, login
 (gateway URL, token, headers, method, Cursor token), bot list, chat transcripts, per-bot memory, and account preferences.
 
-- Start-up account: `--account <alias>`, then `GB_ACCOUNT`, then the last active account, then `default`.
+- Start-up account: `--account <alias>`, then `GROKBOT_TUI_ACCOUNT`, then the last active account, then `default`.
 - Switch with `/account use <alias>` or click the `@alias` header.
 - Removing an account deletes all of its rows (FK `ON DELETE CASCADE`).
 
 ## Storage
 
-SQLite at `~/.gb/context.db` (directory `0700`, file `0600`), via `rusqlite` with bundled SQLite. Schema version is tracked in `PRAGMA user_version`.
+SQLite at `~/.grokbot-tui/context.db` (directory `0700`, file `0600`; override with `--data-dir`), via `rusqlite` with bundled SQLite. Schema version is tracked in `PRAGMA user_version`.
+
+**Moving from `~/.gb`.** Before 1.2.0 the data lived in `~/.gb`. On startup (unless `--data-dir` is given):
+
+- If `~/.grokbot-tui` doesn't exist and `~/.gb` does, `~/.gb` is renamed to `~/.grokbot-tui`.
+- If that rename fails (e.g. the two are on different filesystems), the folder is copied, every file is
+  verified, and `~/.gb` is left in place with a notice. If even the copy fails, grokbot-tui keeps using `~/.gb`.
+- If both exist, `~/.grokbot-tui` is used and a one-time notice says `~/.gb` was ignored.
+
+User data is never deleted; remove `~/.gb` yourself once you no longer need it.
 
 | Table | Key | Columns |
 |---|---|---|
@@ -235,7 +248,7 @@ page and lists matches with a snippet; pick one with Tab/←→ and Enter. A bar
 
 ## Chat feed and the database
 
-SQLite (`~/.gb/context.db`) is the single source of truth for the chat feed. The body
+SQLite (`~/.grokbot-tui/context.db`) is the single source of truth for the chat feed. The body
 is always rebuilt from `store.messages(bot)`: polled messages and bot replies are merged
 into the DB first, and your own message is written as a pending row and the feed is
 rebuilt immediately (so it still appears instantly). Notices — command echoes, info,

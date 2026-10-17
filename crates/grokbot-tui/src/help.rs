@@ -47,7 +47,7 @@ Commands: /help <command> shows usage, examples and related topics.
         id: "login",
         title: "Logging in",
         body: "\
-Each gb account logs in once; the login is stored in ~/.gb/context.db for that account only.
+Each grokbot-tui account logs in once; the login is stored in ~/.grokbot-tui/context.db for that account only.
 
 Which method?
   ★ /login desktop  RECOMMENDED. Uses the Grok Bot desktop app's saved session.
@@ -107,7 +107,7 @@ Errors
   AMBIGUOUS_ENTRIES    Several sessions → /login desktop <number>.
   NO_SUCH_ENTRY        That number/name doesn't exist → run /login desktop to list.
   DECRYPT_FAILED       Wrong keychain password or corrupt data → sign out/in in the app.
-  'version no longer supported' → update the app, or set GB_CURSOR_CLIENT_VERSION.",
+  'version no longer supported' → update the app, or set GROKBOT_TUI_CURSOR_CLIENT_VERSION.",
         related: &[
             "login",
             "login-cursor",
@@ -133,10 +133,10 @@ Getting a Cursor access token
   A Cursor dashboard API key does NOT work here.
 
 Headers sent: x-cursor-client-type (sand), x-cursor-client-version (detected app version),
-x-sand-box-namespace (prod). Override with GB_CURSOR_CLIENT_* / prefs (see /help env).
+x-sand-box-namespace (prod). Override with GROKBOT_TUI_CURSOR_CLIENT_* / prefs (see /help env).
 
 Errors
-  401 'version no longer supported' → update the desktop app or set GB_CURSOR_CLIENT_VERSION.
+  401 'version no longer supported' → update the desktop app or set GROKBOT_TUI_CURSOR_CLIENT_VERSION.
   417 (empty body) → the gateway session expired; grokbot-tui re-authenticates like a 401
     (desktop re-read / Cursor re-exchange). If it persists, run /login desktop.
   'no gatewayUrl/gatewayToken' → the token was rejected or is not an access token.",
@@ -157,8 +157,8 @@ Getting a gateway URL + token
   /login cursor and /login desktop do for you) and are not shown in the desktop app.
 
 Non-interactive use (startup account only, never saved)
-  GB_GROKBOT_TOKEN=<token> GB_GROKBOT_GATEWAY_URL=<url> grokbot-tui
-  Optional GB_GROKBOT_GATEWAY_HEADERS='{\"x-anyrun-network-token\":\"…\"}'
+  GROKBOT_TUI_GROKBOT_TOKEN=<token> GROKBOT_TUI_GROKBOT_GATEWAY_URL=<url> grokbot-tui
+  Optional GROKBOT_TUI_GROKBOT_GATEWAY_HEADERS='{\"x-anyrun-network-token\":\"…\"}'
 
 Allowed hosts: https on cursor.sh, cursor.com, *.cursor.sh, *.cursor.com, *.cursorvm.com.
 Loopback only with GROKBOT_ALLOW_LOCAL_GATEWAY=1. URLs with user:pass@ are rejected.",
@@ -234,8 +234,8 @@ grokbot-tui keeps several accounts fully separate: logins, bots, chats, memory a
   /account rename <a> <b>   Rename
   /account remove <alias>   Delete (confirm in a pick list; Cancel is the default)
 
-Start in an account: grokbot-tui --account work  or  GB_ACCOUNT=work grokbot-tui
-GB_GROKBOT_TOKEN only applies to the account selected at startup.
+Start in an account: grokbot-tui --account work  or  GROKBOT_TUI_ACCOUNT=work grokbot-tui
+GROKBOT_TUI_GROKBOT_TOKEN only applies to the account selected at startup.
 Several desktop Cursor accounts? Add one grokbot-tui account each, then /login desktop <number>.",
         related: &["login", "login-desktop", "prefs", "env"],
     },
@@ -268,26 +268,39 @@ Environment variables override the cursor.* / sand.* prefs (see /help env).",
         title: "Environment variables",
         body: "\
 Login (startup account only, never saved)
-  GB_GROKBOT_TOKEN            Gateway token override.
-  GB_GROKBOT_GATEWAY_URL      Gateway URL for that token (else the stored URL).
-  GB_GROKBOT_GATEWAY_HEADERS  JSON object of extra gateway headers.
+  GROKBOT_TUI_GROKBOT_TOKEN
+      Gateway token override.
+  GROKBOT_TUI_GROKBOT_GATEWAY_URL
+      Gateway URL for that token (else the stored URL).
+  GROKBOT_TUI_GROKBOT_GATEWAY_HEADERS
+      JSON object of extra gateway headers.
 
 EnsureSandBox (Cursor token exchange)
-  GB_CURSOR_API_BASE_URL      Backend base (must be *.cursor.sh / *.cursor.com).
-  GB_CURSOR_CLIENT_VERSION    x-cursor-client-version. Priority:
-                              env > pref cursor.client_version > detected app > 0.70.2
-  GB_CURSOR_CLIENT_TYPE       x-cursor-client-type (default sand).
-  GB_SAND_BOX_NAMESPACE       x-sand-box-namespace (default prod).
+  GROKBOT_TUI_CURSOR_API_BASE_URL
+      Backend base (must be *.cursor.sh / *.cursor.com).
+  GROKBOT_TUI_CURSOR_CLIENT_VERSION
+      x-cursor-client-version. Priority:
+      env > pref cursor.client_version > detected app > 0.70.2
+  GROKBOT_TUI_CURSOR_CLIENT_TYPE
+      x-cursor-client-type (default sand).
+  GROKBOT_TUI_SAND_BOX_NAMESPACE
+      x-sand-box-namespace (default prod).
 
 Other
-  GB_ACCOUNT                  Starting account alias (same as --account).
-  GROKBOT_ALLOW_LOCAL_GATEWAY=1
-                              Allow http(s) loopback gateways (development).
-  GROKBOT_APP_DIR             Grok Bot install dir for version detection.
-  The old names GB_ALLOW_LOCAL_GATEWAY and GB_GROKBOT_APP_DIR still work.
+  GROKBOT_TUI_ACCOUNT
+      Starting account alias (same as --account).
+  GROKBOT_TUI_ALLOW_LOCAL_GATEWAY=1
+      Allow http(s) loopback gateways (development).
+  GROKBOT_TUI_GROKBOT_APP_DIR
+      Grok Bot install dir for version detection.
+  The library's own names GROKBOT_ALLOW_LOCAL_GATEWAY and GROKBOT_APP_DIR work too.
 
-Data lives in ~/.gb/context.db (override with --data-dir). /whoami shows the
-client version in use and where it came from.",
+Older names: every GB_* variable (e.g. GB_GROKBOT_TOKEN) still works when its
+GROKBOT_TUI_* name is not set; the new name wins when both are set.
+
+Data lives in ~/.grokbot-tui/context.db (override with --data-dir). On first start,
+an old ~/.gb folder is moved there. /whoami shows the client version in use
+and where it came from.",
         related: &["prefs", "login-cursor", "login-gateway", "troubleshooting"],
     },
     Topic {
@@ -298,7 +311,7 @@ Bots come from the gateway's listAgents. Messages come from getAgentTranscriptTa
 (there is no separate chat list).
 
   • Opening a bot (or /history) pages the whole transcript (up to 1000 entries),
-    merges it into ~/.gb/context.db and redraws the chat from there — so messages
+    merges it into ~/.grokbot-tui/context.db and redraws the chat from there — so messages
     from the desktop app appear too.
   • While a bot is open grokbot-tui polls for new messages every ~1 s, backing off to 15 s
     when idle, and every 1 s right after you send.
@@ -338,7 +351,7 @@ Every message you send shows as pending until the transcript confirms it.
   gateway login: /login gateway with a new token.
 
 'This version of Grok Bot is no longer supported'
-  Update the desktop app, or set GB_CURSOR_CLIENT_VERSION / pref cursor.client_version.
+  Update the desktop app, or set GROKBOT_TUI_CURSOR_CLIENT_VERSION / pref cursor.client_version.
   /whoami shows the version in use.
 
 Desktop errors (APP_NOT_FOUND, NOT_SIGNED_IN, SECRET_TOOL_MISSING, KEYCHAIN_LOCKED, …)
@@ -470,7 +483,7 @@ fn command_extra(
             &["prefs", "env"],
         ),
         "memory" => (
-            "Local notes per bot (stored only in ~/.gb, never sent).",
+            "Local notes per bot (stored only in ~/.grokbot-tui, never sent).",
             &["/memory", "/memory add lang rust", "/memory clear lang"],
             &["accounts"],
         ),
@@ -683,7 +696,7 @@ pub fn hint_for_error(msg: &str) -> Option<&'static str> {
     let rules: &[(&str, &str)] = &[
         (
             "no longer supported",
-            "Update the Grok Bot app or set GB_CURSOR_CLIENT_VERSION. See /help troubleshooting.",
+            "Update the Grok Bot app or set GROKBOT_TUI_CURSOR_CLIENT_VERSION. See /help troubleshooting.",
         ),
         (
             "app data was not found",
@@ -773,7 +786,7 @@ mod tests {
                 "EnsureSandBox failed: 401 This version of Grok Bot is no longer supported"
             )
             .unwrap()
-            .contains("GB_CURSOR_CLIENT_VERSION")
+            .contains("GROKBOT_TUI_CURSOR_CLIENT_VERSION")
         );
         assert!(
             hint_for_error("Could not run secret-tool")
@@ -788,7 +801,7 @@ mod tests {
         let r = registry();
         let ids = |q: &str| search(&r, q).into_iter().map(|h| h.id).collect::<Vec<_>>();
         assert!(ids("keyring").contains(&"login-desktop".to_string()));
-        assert!(ids("GB_CURSOR_CLIENT_VERSION").contains(&"env".to_string()));
+        assert!(ids("GROKBOT_TUI_CURSOR_CLIENT_VERSION").contains(&"env".to_string()));
         assert!(ids("examples rename").contains(&"cmd-account".to_string()));
         assert_eq!(ids("prefs")[0], "prefs", "title match ranks first");
         assert!(ids("secret-tool libsecret").iter().all(|i| i != "keys"));

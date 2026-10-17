@@ -2,19 +2,19 @@
 use std::collections::BTreeMap;
 
 /// Gateway token override for the account selected at startup.
-pub const TOKEN_ENV: &str = "GB_GROKBOT_TOKEN";
+pub const TOKEN_ENV: &str = "GROKBOT_TUI_GROKBOT_TOKEN";
 /// Optional gateway URL to pair with [`TOKEN_ENV`].
-pub const GATEWAY_URL_ENV: &str = "GB_GROKBOT_GATEWAY_URL";
+pub const GATEWAY_URL_ENV: &str = "GROKBOT_TUI_GROKBOT_GATEWAY_URL";
 /// Optional JSON object of extra gateway headers to pair with [`TOKEN_ENV`].
-pub const GATEWAY_HEADERS_ENV: &str = "GB_GROKBOT_GATEWAY_HEADERS";
+pub const GATEWAY_HEADERS_ENV: &str = "GROKBOT_TUI_GROKBOT_GATEWAY_HEADERS";
 /// Override the Cursor backend used for EnsureSandBox (must still be *.cursor.sh / *.cursor.com).
-pub const CURSOR_API_ENV: &str = "GB_CURSOR_API_BASE_URL";
+pub const CURSOR_API_ENV: &str = "GROKBOT_TUI_CURSOR_API_BASE_URL";
 /// Override `x-cursor-client-version` for EnsureSandBox (highest priority).
-pub const CLIENT_VERSION_ENV: &str = "GB_CURSOR_CLIENT_VERSION";
+pub const CLIENT_VERSION_ENV: &str = "GROKBOT_TUI_CURSOR_CLIENT_VERSION";
 /// Override `x-cursor-client-type` for EnsureSandBox.
-pub const CLIENT_TYPE_ENV: &str = "GB_CURSOR_CLIENT_TYPE";
+pub const CLIENT_TYPE_ENV: &str = "GROKBOT_TUI_CURSOR_CLIENT_TYPE";
 /// Override `x-sand-box-namespace` for EnsureSandBox.
-pub const SANDBOX_NAMESPACE_ENV: &str = "GB_SAND_BOX_NAMESPACE";
+pub const SANDBOX_NAMESPACE_ENV: &str = "GROKBOT_TUI_SAND_BOX_NAMESPACE";
 pub const DEFAULT_ACCOUNT: &str = "default";
 
 /// Pref key for `x-cursor-client-version` (account-scoped).

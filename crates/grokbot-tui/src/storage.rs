@@ -217,15 +217,17 @@ pub struct Store {
     pub dir: PathBuf,
     conn: Connection,
     account: Account,
-    /// Account `GB_GROKBOT_TOKEN` applies to (the one selected at startup).
+    /// Account `GROKBOT_TUI_GROKBOT_TOKEN` applies to (the one selected at startup).
     env_account: Option<i64>,
 }
 
 impl Store {
-    pub fn default_dir() -> Result<PathBuf> {
-        Ok(dirs::home_dir()
-            .context("cannot determine home directory")?
-            .join(".gb"))
+    /// Default data directory (`~/.grokbot-tui`), moving a pre-1.2 `~/.gb` there first.
+    /// Returns the directory and an optional notice for the user.
+    pub fn default_dir() -> Result<(PathBuf, Option<String>)> {
+        let home = dirs::home_dir().context("cannot determine home directory")?;
+        let r = crate::datadir::resolve(&home);
+        Ok((r.dir, r.notice))
     }
 
     /// Open `<dir>/context.db`, migrate, and bind to `account` (alias), else the
@@ -485,7 +487,7 @@ impl Store {
 
     // ---- credentials (active account)
 
-    /// True when the active account is the one selected at startup (where `GB_GROKBOT_TOKEN` applies).
+    /// True when the active account is the one selected at startup (where `GROKBOT_TUI_GROKBOT_TOKEN` applies).
     pub fn is_startup_account(&self) -> bool {
         self.env_account == Some(self.account.id)
     }

@@ -81,7 +81,7 @@ pub enum LoginSource {
     Interactive,
     /// The account's stored credential.
     Stored,
-    /// `GB_GROKBOT_TOKEN` (never saved).
+    /// `GROKBOT_TUI_GROKBOT_TOKEN` (never saved).
     Env,
 }
 
@@ -183,7 +183,7 @@ pub fn apply_client_identity(
     let source;
     if let Some(v) = env(CLIENT_VERSION_ENV) {
         opts.client_version = v;
-        source = "env GB_CURSOR_CLIENT_VERSION";
+        source = "env GROKBOT_TUI_CURSOR_CLIENT_VERSION";
     } else if let Some(v) = config.client_version.clone() {
         opts.client_version = v;
         source = "pref cursor.client_version";
@@ -1176,7 +1176,7 @@ impl App {
         self.connect();
     }
 
-    /// Log in with `GB_GROKBOT_TOKEN` (startup account only) or the stored credential.
+    /// Log in with `GROKBOT_TUI_GROKBOT_TOKEN` (startup account only) or the stored credential.
     pub fn connect(&mut self) {
         let stored = self.store.load_login().ok().flatten();
         if self.store.is_startup_account()

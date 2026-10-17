@@ -3,6 +3,7 @@ mod api;
 mod app;
 mod commands;
 mod config;
+mod datadir;
 mod help;
 mod input;
 mod picker;
@@ -27,28 +28,60 @@ struct Cli {
     #[arg(long)]
     mock: bool,
     /// Account alias to start in (default: last active account).
-    #[arg(long, env = "GB_ACCOUNT", value_name = "ALIAS")]
+    #[arg(long, env = "GROKBOT_TUI_ACCOUNT", value_name = "ALIAS")]
     account: Option<String>,
-    /// Data directory holding context.db (default ~/.gb).
+    /// Data directory holding context.db (default ~/.grokbot-tui; a pre-1.2 ~/.gb is moved there).
     #[arg(long, value_name = "DIR")]
     data_dir: Option<std::path::PathBuf>,
 }
 
-/// Environment variables that grokbot_api 1.1 renamed: `(old name, new library name)`.
-/// The old names keep working: [`legacy_env_updates`] copies them at startup.
-const LEGACY_ENV: [(&str, &str); 2] = [
-    ("GB_ALLOW_LOCAL_GATEWAY", "GROKBOT_ALLOW_LOCAL_GATEWAY"),
-    ("GB_GROKBOT_APP_DIR", "GROKBOT_APP_DIR"),
+/// Environment variable renames applied at startup, in order: `(old name, new name)`.
+/// First the pre-1.2 `GB_*` names fall back onto their `GROKBOT_TUI_*` replacements, then
+/// the two variables grokbot_api reads itself are forwarded to the library's names.
+const LEGACY_ENV: [(&str, &str); 12] = [
+    ("GB_GROKBOT_TOKEN", "GROKBOT_TUI_GROKBOT_TOKEN"),
+    ("GB_GROKBOT_GATEWAY_URL", "GROKBOT_TUI_GROKBOT_GATEWAY_URL"),
+    (
+        "GB_GROKBOT_GATEWAY_HEADERS",
+        "GROKBOT_TUI_GROKBOT_GATEWAY_HEADERS",
+    ),
+    ("GB_CURSOR_API_BASE_URL", "GROKBOT_TUI_CURSOR_API_BASE_URL"),
+    (
+        "GB_CURSOR_CLIENT_VERSION",
+        "GROKBOT_TUI_CURSOR_CLIENT_VERSION",
+    ),
+    ("GB_CURSOR_CLIENT_TYPE", "GROKBOT_TUI_CURSOR_CLIENT_TYPE"),
+    ("GB_SAND_BOX_NAMESPACE", "GROKBOT_TUI_SAND_BOX_NAMESPACE"),
+    ("GB_ACCOUNT", "GROKBOT_TUI_ACCOUNT"),
+    ("GB_ALLOW_LOCAL_GATEWAY", "GROKBOT_TUI_ALLOW_LOCAL_GATEWAY"),
+    ("GB_GROKBOT_APP_DIR", "GROKBOT_TUI_GROKBOT_APP_DIR"),
+    // Read by grokbot_api 1.1 under its own names.
+    (
+        "GROKBOT_TUI_ALLOW_LOCAL_GATEWAY",
+        "GROKBOT_ALLOW_LOCAL_GATEWAY",
+    ),
+    ("GROKBOT_TUI_GROKBOT_APP_DIR", "GROKBOT_APP_DIR"),
 ];
 
-/// The `(new name, value)` pairs to set so legacy `GB_` names keep working: an old name
-/// with a non-empty value is copied only when the new name is not set at all.
+/// The `(new name, value)` pairs to set so older names keep working. Each rename copies a
+/// non-empty old value only when the new name is not set at all, so a new name always
+/// wins; later renames see the values set by earlier ones (`GB_X` → `GROKBOT_TUI_X` → library).
 fn legacy_env_updates(get: impl Fn(&str) -> Option<String>) -> Vec<(&'static str, String)> {
-    LEGACY_ENV
-        .iter()
-        .filter(|(_, new)| get(new).is_none())
-        .filter_map(|(old, new)| get(old).filter(|v| !v.is_empty()).map(|v| (*new, v)))
-        .collect()
+    let mut set: Vec<(&'static str, String)> = Vec::new();
+    for (old, new) in LEGACY_ENV {
+        let lookup = |k: &str| {
+            set.iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| v.clone())
+                .or_else(|| get(k))
+        };
+        if lookup(new).is_none()
+            && let Some(v) = lookup(old).filter(|v| !v.is_empty())
+        {
+            set.push((new, v));
+        }
+    }
+    set
 }
 
 fn main() -> Result<()> {
@@ -57,16 +90,21 @@ fn main() -> Result<()> {
         unsafe { std::env::set_var(name, value) };
     }
     let cli = Cli::parse();
-    let store = Store::open(
-        match cli.data_dir {
-            Some(d) => d,
-            None => Store::default_dir()?,
-        },
-        cli.account.as_deref(),
-    )?;
+    // --data-dir overrides everything, including the ~/.gb migration.
+    let (dir, notice) = match cli.data_dir {
+        Some(d) => (d, None),
+        None => Store::default_dir()?,
+    };
+    if let Some(n) = &notice {
+        eprintln!("grokbot-tui: {n}");
+    }
+    let store = Store::open(dir, cli.account.as_deref())?;
     let rt = tokio::runtime::Runtime::new()?;
     let mut app = App::new(store, rt.handle().clone(), cli.mock)?;
     app.init();
+    if let Some(n) = notice {
+        app.info(n);
+    }
 
     let mut term = ratatui::init();
     execute!(std::io::stdout(), EnableMouseCapture)?;
@@ -381,26 +419,82 @@ mod legacy_env_tests {
     }
 
     #[test]
-    fn legacy_gb_env_names_are_copied_to_the_new_names() {
+    fn gb_names_fall_back_onto_grokbot_tui_names() {
         assert_eq!(
-            updates(&[
-                ("GB_ALLOW_LOCAL_GATEWAY", "1"),
-                ("GB_GROKBOT_APP_DIR", "/opt/gb")
-            ]),
+            updates(&[("GB_GROKBOT_TOKEN", "t"), ("GB_ACCOUNT", "work")]),
             vec![
-                ("GROKBOT_ALLOW_LOCAL_GATEWAY", "1".to_string()),
-                ("GROKBOT_APP_DIR", "/opt/gb".to_string()),
+                ("GROKBOT_TUI_GROKBOT_TOKEN", "t".to_string()),
+                ("GROKBOT_TUI_ACCOUNT", "work".to_string()),
             ]
         );
-        // The new name wins when it is set (even to an empty value).
+        // Every GB_ name has a GROKBOT_TUI_ replacement.
+        for (old, new) in super::LEGACY_ENV
+            .iter()
+            .filter(|(o, _)| o.starts_with("GB_"))
+        {
+            assert_eq!(new.strip_prefix("GROKBOT_TUI_"), old.strip_prefix("GB_"));
+        }
+    }
+
+    #[test]
+    fn the_new_name_wins_when_both_are_set() {
         assert!(
             updates(&[
-                ("GB_ALLOW_LOCAL_GATEWAY", "1"),
-                ("GROKBOT_ALLOW_LOCAL_GATEWAY", "")
+                ("GB_CURSOR_CLIENT_VERSION", "1.0"),
+                ("GROKBOT_TUI_CURSOR_CLIENT_VERSION", "2.0")
             ])
             .is_empty()
         );
-        // Empty or missing old values are ignored.
+        // Even an empty new value wins.
+        assert!(updates(&[("GB_ACCOUNT", "work"), ("GROKBOT_TUI_ACCOUNT", "")]).is_empty());
+    }
+
+    #[test]
+    fn library_names_are_fed_from_new_or_old_names() {
+        let lib = vec![
+            ("GROKBOT_ALLOW_LOCAL_GATEWAY", "1".to_string()),
+            ("GROKBOT_APP_DIR", "/opt/app".to_string()),
+        ];
+        assert_eq!(
+            updates(&[
+                ("GROKBOT_TUI_ALLOW_LOCAL_GATEWAY", "1"),
+                ("GROKBOT_TUI_GROKBOT_APP_DIR", "/opt/app")
+            ]),
+            lib
+        );
+        // Old GB_ names chain through the GROKBOT_TUI_ names to the library's.
+        let mut chained = vec![
+            ("GROKBOT_TUI_ALLOW_LOCAL_GATEWAY", "1".to_string()),
+            ("GROKBOT_TUI_GROKBOT_APP_DIR", "/opt/app".to_string()),
+        ];
+        chained.extend(lib);
+        assert_eq!(
+            updates(&[
+                ("GB_ALLOW_LOCAL_GATEWAY", "1"),
+                ("GB_GROKBOT_APP_DIR", "/opt/app")
+            ]),
+            chained
+        );
+        // A library name that is already set wins over both.
+        assert_eq!(
+            updates(&[
+                ("GROKBOT_TUI_ALLOW_LOCAL_GATEWAY", "1"),
+                ("GROKBOT_ALLOW_LOCAL_GATEWAY", "")
+            ]),
+            vec![]
+        );
+        // The new GROKBOT_TUI_ name beats the old GB_ one on the way to the library.
+        assert_eq!(
+            updates(&[
+                ("GB_GROKBOT_APP_DIR", "/old"),
+                ("GROKBOT_TUI_GROKBOT_APP_DIR", "/new")
+            ]),
+            vec![("GROKBOT_APP_DIR", "/new".to_string())]
+        );
+    }
+
+    #[test]
+    fn empty_or_missing_old_values_are_ignored() {
         assert!(updates(&[("GB_GROKBOT_APP_DIR", "")]).is_empty());
         assert!(updates(&[]).is_empty());
     }
