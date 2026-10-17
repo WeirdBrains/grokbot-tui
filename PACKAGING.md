@@ -71,15 +71,28 @@ To preview locally: `dist plan --tag v0.1.0` (install cargo-dist 0.33.0).
 
 | Value | Where | Placeholder |
 |---|---|---|
-| License (SPDX) | `Cargo.toml` `[workspace.package] license`; add a `LICENSE` file | `LicenseRef-TBD` |
 | Maintainer name/email | `Cargo.toml` `authors`, `[package.metadata.deb] maintainer`, `packaging/identity.env` | from git history |
 | Homebrew tap repo | `dist-workspace.toml` `tap` | `m3talsmith/homebrew-tap` |
 | macOS bundle identifier | `dist-workspace.toml` `[dist.mac-pkg-config] identifier` | `io.github.m3talsmith.grokbot-tui` |
 | winget PackageIdentifier / Publisher | `packaging/identity.env` | `m3talsmith.grokbot-tui` / `Michael Christenson II` |
 
-Once a license is chosen, you can also ship the license file in the MSI (see the comments
-in `wix/main.wxs` and set `license` in `[package.metadata.wix]`) and add it to the
-`.deb` / `.rpm` assets.
+## License metadata
+
+The project is licensed under BSD-3-Clause (`LICENSE` at the repo root). Each format
+takes the license from `[workspace.package] license` in `Cargo.toml`:
+
+| Format | License field | License text shipped |
+|---|---|---|
+| Archives (`.tar.xz` / `.zip`) | n/a | `LICENSE` (cargo-dist includes it automatically) |
+| Homebrew formula | `license "BSD-3-Clause"` | in the archive |
+| `.deb` | `debian/copyright`: `License: BSD-3-Clause` | full text in `/usr/share/doc/grokbot-tui/copyright` |
+| `.rpm` | `License: BSD-3-Clause` | `/usr/share/licenses/grokbot-tui/LICENSE` |
+| AUR PKGBUILDs | `license=('BSD-3-Clause')` (SPDX, as Arch now requires) | `/usr/share/licenses/<pkgname>/LICENSE` |
+| winget | `License: BSD-3-Clause`, `LicenseUrl`, `Copyright` | link to `LICENSE` at the release tag |
+| `.msi` / `.pkg` | none | not included in the installer (the binary only) |
+
+To also install the license file with the MSI, follow the "license sidecar" comments in
+`crates/gb/wix/main.wxs` (untested; needs a Windows build to verify).
 
 ## Manual steps that need your accounts or secrets
 

@@ -67,6 +67,9 @@ No version has been tagged yet; everything below ships in the first release
     an unsigned macOS `.pkg`, and `.deb`/`.rpm` packages.
   - AUR PKGBUILDs and winget manifests are rendered from the release's real checksums.
   - See `PACKAGING.md`.
+- **License.** The project is licensed under BSD-3-Clause (`LICENSE` at the repo root).
+  The license metadata is set in Cargo and every package format, and the license
+  text ships in the archives, `.deb`, `.rpm` and AUR packages.
 
 ### Changed
 

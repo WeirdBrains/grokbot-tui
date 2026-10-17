@@ -5,9 +5,7 @@ members = ["crates/grokbot_api", "crates/gb"]
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
-# TODO(confirm): no LICENSE file exists yet. "LicenseRef-TBD" is a placeholder in valid
-# SPDX syntax so packaging tools accept it; replace with the real SPDX id (e.g. "MIT").
-license = "LicenseRef-TBD"
+license = "BSD-3-Clause"
 # TODO(confirm): maintainer taken from git history.
 authors = ["Michael Christenson II <m3talsmith@gmail.com>"]
 homepage = "https://github.com/m3talsmith/gb"

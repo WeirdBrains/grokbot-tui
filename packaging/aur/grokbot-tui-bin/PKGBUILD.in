@@ -20,4 +20,5 @@ package() {
   local dir="gb-${CARCH}-unknown-linux-gnu"
   install -Dm755 "${dir}/grokbot-tui" "${pkgdir}/usr/bin/grokbot-tui"
   install -Dm644 "${dir}/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+  install -Dm644 "${dir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }

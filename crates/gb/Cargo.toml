@@ -29,6 +29,8 @@ extended-description = """\
 A terminal user interface for Grok Bot: chat with your bots, switch accounts, \
 and keep a local SQLite history. Unofficial; uses the Grok Bot gateway API."""
 depends = "$auto"
+# DEP-5 copyright file (full BSD-3-Clause text) -> /usr/share/doc/grokbot-tui/copyright.
+license-file = ["../../packaging/deb/copyright", "0"]
 assets = [
     ["target/release/grokbot-tui", "usr/bin/", "755"],
     ["../../README.md", "usr/share/doc/grokbot-tui/README.md", "644"],
@@ -40,6 +42,7 @@ summary = "Terminal UI for Grok Bot"
 assets = [
     { source = "target/release/grokbot-tui", dest = "/usr/bin/grokbot-tui", mode = "755" },
     { source = "../../README.md", dest = "/usr/share/doc/grokbot-tui/README.md", mode = "644", doc = true },
+    { source = "../../LICENSE", dest = "/usr/share/licenses/grokbot-tui/LICENSE", mode = "644", doc = true },
 ]
 
 [[bin]]

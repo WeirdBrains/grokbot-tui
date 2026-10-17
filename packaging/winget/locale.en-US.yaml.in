@@ -8,6 +8,8 @@ PublisherSupportUrl: https://github.com/m3talsmith/gb/issues
 PackageName: grokbot-tui
 PackageUrl: https://github.com/m3talsmith/gb
 License: @LICENSE@
+LicenseUrl: https://github.com/m3talsmith/gb/blob/@TAG@/LICENSE
+Copyright: Copyright (c) 2026 Michael Christenson II
 ShortDescription: Terminal UI for Grok Bot
 Description: A terminal user interface for Grok Bot. Chat with your bots, switch accounts, and keep a local history. Unofficial; uses the Grok Bot gateway API.
 Moniker: grokbot-tui

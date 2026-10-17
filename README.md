@@ -237,3 +237,7 @@ into the DB first, and your own message is written as a pending row and the feed
 rebuilt immediately (so it still appears instantly). Notices — command echoes, info,
 errors, delivery warnings — are transient: they are kept in memory per bot, shown in a
 separate "notices (not saved)" section below the chat, and never written to the DB.
+
+## License
+
+BSD 3-Clause. See [LICENSE](LICENSE).
