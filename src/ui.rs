@@ -3,6 +3,7 @@
 //! All colors, borders and padding come from [`crate::theme`] (ratatui-lipgloss styles);
 //! this module only lays things out.
 use crate::app::{App, EntryKind, Focus, InputMode};
+use crate::config::TitleGlyphs;
 use crate::theme::{self, Mode};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
@@ -18,11 +19,10 @@ pub const TALL_HEADER_ROWS: u16 = 4;
 pub const TALL_MIN_WIDTH: u16 = 80;
 /// … and this many rows, so the chat keeps enough room; otherwise the header is compact.
 pub const TALL_MIN_HEIGHT: u16 = 24;
-/// Columns one big-title glyph takes.
-const TITLE_GLYPH_WIDTH: u16 = 8;
-/// The big title is drawn only when the header is at least this wide (logo, title, gaps and
-/// room for the info rows); narrower tall headers show the logo and info rows only.
-pub const TITLE_MIN_WIDTH: u16 = 128;
+/// With half-height glyphs (8 columns per letter) the big title is drawn only when the header
+/// is at least this wide (logo, title, gaps and room for the info rows); narrower tall
+/// headers show the logo and info rows only. Quadrant titles (4 columns) always fit.
+pub const HALF_TITLE_MIN_WIDTH: u16 = 128;
 
 /// The header's size for a terminal of `area`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,9 +51,9 @@ pub fn header_kind(area: Rect) -> HeaderKind {
     }
 }
 
-/// The header title, drawn large with tui-big-text in half-height pixels (8 columns × 4 rows
-/// per glyph). Half-height uses only `▀ ▄ █`, which every terminal font draws cleanly; the
-/// quadrant glyphs used before (`▖ ▗ ▘ ▝ …`) came out gappy and misshapen in macOS Terminal.
+/// The header title, drawn large with tui-big-text: quadrant pixels (4 columns × 4 rows per
+/// letter) by default, or half-height pixels (8 × 4, only `▀ ▄ █`) where quadrant glyphs come
+/// out gappy and misshapen, such as macOS Terminal. See [`crate::config::TitleGlyphs`].
 pub const TITLE: &str = "Grok Bot";
 
 /// The Grok Bot logo (the desktop app's icon: a white ball with a slanted stroke on a dark
@@ -234,8 +234,14 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
             render_segs(f, app, area, segs);
         }
         HeaderKind::Tall => {
-            let title_w = if area.width >= TITLE_MIN_WIDTH {
-                TITLE.chars().count() as u16 * TITLE_GLYPH_WIDTH
+            let half = app.config.title_glyphs.resolve() == TitleGlyphs::Half;
+            let (glyph_w, pixel_size) = if half {
+                (8, PixelSize::HalfHeight)
+            } else {
+                (4, PixelSize::Quadrant)
+            };
+            let title_w = if !half || area.width >= HALF_TITLE_MIN_WIDTH {
+                TITLE.chars().count() as u16 * glyph_w
             } else {
                 0
             };
@@ -251,7 +257,7 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
             draw_logo(f.buffer_mut(), logo);
             f.render_widget(
                 BigText::builder()
-                    .pixel_size(PixelSize::HalfHeight)
+                    .pixel_size(pixel_size)
                     .style(theme::title())
                     .lines(vec![Line::from(TITLE)])
                     .build(),
@@ -765,10 +771,29 @@ mod tests {
     }
 
     #[test]
+    fn quadrant_title_fits_an_80_column_header() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        crate::app::tests::mock_login(&mut app, "t");
+        app.config.title_glyphs = TitleGlyphs::Quadrant;
+        let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let r = screen_rows(&term);
+        let header = r[..4].join("\n");
+        let title: String = r[..4]
+            .iter()
+            .flat_map(|row| row.chars().skip(11).take(32))
+            .collect();
+        assert!(title.chars().any(|c| ('▖'..='▟').contains(&c)), "{header}");
+        assert!(r[0].contains("account  @default ▾  F3"), "{header}");
+    }
+
+    #[test]
     fn narrow_tall_header_drops_the_big_title_but_keeps_logo_and_info() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = crate::app::tests::test_app(&rt);
         crate::app::tests::mock_login(&mut app, "t");
+        app.config.title_glyphs = TitleGlyphs::Half;
         let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
         term.draw(|f| draw(f, &mut app)).unwrap();
         let r = screen_rows(&term);
@@ -787,6 +812,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = crate::app::tests::test_app(&rt);
         crate::app::tests::mock_login(&mut app, "t");
+        app.config.title_glyphs = TitleGlyphs::Half;
         let mut term = Terminal::new(TestBackend::new(140, 30)).unwrap();
         term.draw(|f| draw(f, &mut app)).unwrap();
         let r = screen_rows(&term);

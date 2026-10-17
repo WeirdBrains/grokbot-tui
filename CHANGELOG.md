@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-17
+
+### Added
+
+- **Title style picked per terminal.** The big header title uses quadrant glyphs (4 columns
+  per letter) again by default, and switches to the 1.3.2 half-height blocks in macOS
+  Terminal (detected from `TERM_PROGRAM=Apple_Terminal`), whose fonts mangle quadrants.
+- **`ui.title_glyphs` pref** (global): `auto` (default), `quadrant` or `half`. Set it with
+  `/prefs set ui.title_glyphs half`, for example over ssh, where the terminal can't be
+  detected and `auto` falls back to quadrants.
+
 ## [1.3.2] - 2026-10-17
 
 ### Fixed

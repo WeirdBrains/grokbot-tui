@@ -41,8 +41,62 @@ pub const PREF_SANDBOX_NAMESPACE: &str = "sand.box_namespace";
 /// Pref key for the appearance: `dark`, `light` or `system` (global).
 pub const PREF_THEME_MODE: &str = "ui.theme_mode";
 
+/// Pref key for the big header title's glyphs: `auto`, `quadrant` or `half` (global).
+pub const PREF_TITLE_GLYPHS: &str = "ui.title_glyphs";
+
 /// Preference keys shared by all accounts. Every other key is account-scoped.
-pub const GLOBAL_KEYS: &[&str] = &["active_account", "ui.sidebar_width", PREF_THEME_MODE];
+pub const GLOBAL_KEYS: &[&str] = &[
+    "active_account",
+    "ui.sidebar_width",
+    PREF_THEME_MODE,
+    PREF_TITLE_GLYPHS,
+];
+
+/// Which block glyphs draw the big header title (pref `ui.title_glyphs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TitleGlyphs {
+    /// Half blocks in macOS Terminal (its fonts mangle quadrant glyphs), quadrants elsewhere.
+    #[default]
+    Auto,
+    /// Quadrant glyphs (`▖ ▗ ▘ ▝ …`): 4 columns per letter.
+    Quadrant,
+    /// Half-height blocks (only `▀ ▄ █`): 8 columns per letter, clean in every font.
+    Half,
+}
+
+impl TitleGlyphs {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Quadrant => "quadrant",
+            Self::Half => "half",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "quadrant" | "quad" | "quarter" => Some(Self::Quadrant),
+            "half" | "half-height" => Some(Self::Half),
+            _ => None,
+        }
+    }
+
+    /// The concrete style: `Auto` checks `$TERM_PROGRAM`.
+    pub fn resolve(self) -> Self {
+        self.resolve_for(std::env::var("TERM_PROGRAM").ok().as_deref())
+    }
+
+    /// [`Self::resolve`] for a given `$TERM_PROGRAM`. Over ssh it is usually unset, so
+    /// `Auto` falls back to quadrants; set the pref to `half` in that case.
+    pub fn resolve_for(self, term_program: Option<&str>) -> Self {
+        match self {
+            Self::Auto if term_program == Some("Apple_Terminal") => Self::Half,
+            Self::Auto => Self::Quadrant,
+            other => other,
+        }
+    }
+}
 
 pub fn is_global(key: &str) -> bool {
     GLOBAL_KEYS.contains(&key)
@@ -62,6 +116,8 @@ pub struct Config {
     pub sandbox_namespace: Option<String>,
     /// Appearance: dark, light or system (follow the terminal background).
     pub theme_mode: crate::theme::Mode,
+    /// Glyphs for the big header title.
+    pub title_glyphs: TitleGlyphs,
 }
 
 impl Default for Config {
@@ -75,6 +131,7 @@ impl Default for Config {
             client_type: None,
             sandbox_namespace: None,
             theme_mode: crate::theme::Mode::System,
+            title_glyphs: TitleGlyphs::Auto,
         }
     }
 }
@@ -91,6 +148,7 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_CLIENT_TYPE, String::new()),
         (PREF_SANDBOX_NAMESPACE, String::new()),
         (PREF_THEME_MODE, c.theme_mode.as_str().to_string()),
+        (PREF_TITLE_GLYPHS, c.title_glyphs.as_str().to_string()),
     ]
 }
 
@@ -113,6 +171,9 @@ impl Config {
             theme_mode: o(PREF_THEME_MODE)
                 .and_then(|v| crate::theme::Mode::parse(&v))
                 .unwrap_or(d.theme_mode),
+            title_glyphs: o(PREF_TITLE_GLYPHS)
+                .and_then(|v| TitleGlyphs::parse(&v))
+                .unwrap_or(d.title_glyphs),
         }
     }
 }
@@ -141,6 +202,39 @@ mod tests {
             crate::theme::Mode::System
         );
         assert!(is_global(PREF_THEME_MODE));
+    }
+}
+
+#[cfg(test)]
+mod title_glyph_tests {
+    use super::*;
+
+    #[test]
+    fn auto_picks_half_only_in_apple_terminal() {
+        let a = TitleGlyphs::Auto;
+        assert_eq!(a.resolve_for(Some("Apple_Terminal")), TitleGlyphs::Half);
+        assert_eq!(a.resolve_for(Some("iTerm.app")), TitleGlyphs::Quadrant);
+        assert_eq!(a.resolve_for(None), TitleGlyphs::Quadrant);
+        assert_eq!(TitleGlyphs::Half.resolve_for(None), TitleGlyphs::Half);
+        assert_eq!(
+            TitleGlyphs::Quadrant.resolve_for(Some("Apple_Terminal")),
+            TitleGlyphs::Quadrant
+        );
+    }
+
+    #[test]
+    fn parses_pref_values() {
+        for g in [TitleGlyphs::Auto, TitleGlyphs::Quadrant, TitleGlyphs::Half] {
+            assert_eq!(TitleGlyphs::parse(g.as_str()), Some(g));
+        }
+        assert_eq!(TitleGlyphs::parse(" Quarter "), Some(TitleGlyphs::Quadrant));
+        assert_eq!(TitleGlyphs::parse("nope"), None);
+        let mut m = BTreeMap::new();
+        m.insert(PREF_TITLE_GLYPHS.to_string(), "half".to_string());
+        assert_eq!(Config::from_prefs(&m).title_glyphs, TitleGlyphs::Half);
+        m.insert(PREF_TITLE_GLYPHS.to_string(), "bogus".to_string());
+        assert_eq!(Config::from_prefs(&m).title_glyphs, TitleGlyphs::Auto);
+        assert!(is_global(PREF_TITLE_GLYPHS));
     }
 }
 

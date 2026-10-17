@@ -282,6 +282,10 @@ Global keys
   ui.sidebar_width       Sidebar width, 10–80. Default: 24.
   ui.theme_mode          dark, light or system (follow the terminal). Default: system.
                          Also F4, /theme, or clicking the header (see /help theme).
+  ui.title_glyphs        Big header title glyphs: auto, quadrant or half. Default: auto
+                         (half in macOS Terminal, whose fonts mangle quadrant glyphs;
+                         quadrant elsewhere). Over ssh the terminal is unknown, so set
+                         half if the title looks broken. Half needs 128+ columns.
   active_account         Account opened at startup (set automatically).
 
 Environment variables override the cursor.* / sand.* prefs (see /help env).",
