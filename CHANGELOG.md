@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-17
+
+### Added
+
+- **Theme files.** Every theme, including `default`, is now a TOML file in
+  `~/.grokbot-tui/themes/<name>.toml` (it follows `--data-dir`), with a dark and a light
+  variant: 14 named palette colors plus a style (fg, bg, border, bold, italic, underline,
+  reverse, dim) for each of 38 parts of the screen. Styles can point at palette colors
+  (`"@accent"`). Nothing is built into the binary.
+- **Shipped `themes/default.toml`**, the exact 1.4.0 look (including the logo colors and the
+  non-bold title). The deb, rpm and AUR packages install it to `/usr/share/grokbot-tui/themes`,
+  the release archives carry it in `themes/` (Homebrew installs it under
+  `share/grokbot-tui/themes`), and the MSI puts it in `share\grokbot-tui\themes` next to `bin`.
+  On startup, when your themes folder has no themes, the shipped ones are copied into it. Your
+  files are never overwritten.
+- **Theme switcher in the header** (`‹default› ▾`) and **F5**: a pick list of your themes, ending
+  with *Edit themes…*. The choice is saved in the new global pref `ui.theme` (default `default`).
+- **Theme editor** (**Shift-F5**, `/theme edit [name]`): the palette and every part on the left, a
+  live preview of the app on the right, drawn by the real UI code with the unsaved edits. Tab flips
+  the dark/light variant. Colors can be typed (hex, 0-255, names) or picked from a 256-color
+  palette. Includes a WCAG contrast warning, per-item and whole-theme revert, save (applied right
+  away to the theme in use), duplicate, new, and delete (asks first). It also asks before closing
+  with unsaved changes, before replacing a broken file, and before overwriting a file that changed
+  on disk. Works with the mouse too.
+- **`/theme` subcommands:** `use [name]` (or `/theme <name>`), `list`, `edit [name]`,
+  `init [name]` (writes a minimal starter, never overwrites), `delete <name>` (asks first) and
+  `reload`. `/theme dark|light|system`, bare `/theme` and F4 still switch the mode.
+- Help topics `theme` (rewritten) and `theme-files`. The keys and prefs pages and `/help theme` are updated.
+
+### Changed
+
+- When the selected theme is missing or broken, grokbot-tui uses the terminal's own colors
+  (highlights stay visible via reverse video). A notice explains why and how to fix it, and the
+  header shows `‹name: missing›` / `‹name: broken›`. Partial theme files load, with warnings:
+  missing colors use the terminal default, missing parts use the starter rule, and a missing
+  variant copies the other.
+
 ## [1.4.0] - 2026-10-17
 
 ### Added
@@ -309,7 +346,11 @@ First release.
   handled like 401, re-reading or re-exchanging the credential.
 - A build break caused by quotes inside the delivery help text.
 
-[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.3.2...v1.4.0
+[1.3.2]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.3.1...v1.3.2
+[1.3.1]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.4...v1.3.0
 [1.2.4]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.2...v1.2.3
