@@ -7,6 +7,7 @@ mod help;
 mod input;
 mod picker;
 mod storage;
+mod theme;
 mod ui;
 
 use anyhow::Result;

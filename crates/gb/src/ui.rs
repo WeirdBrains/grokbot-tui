@@ -1,10 +1,13 @@
 //! Rendering: top bar, left sidebar, body, bottom input bar.
+//!
+//! All colors, borders and padding come from [`crate::theme`] (ratatui-lipgloss styles);
+//! this module only lays things out.
 use crate::app::{App, EntryKind, Focus, InputMode};
+use crate::theme;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap};
+use ratatui::widgets::{Clear, List, ListItem, Paragraph, Wrap};
 
 /// Input text as shown (masked for token prompts) and its cursor byte offset.
 fn input_shown(app: &App) -> (String, usize) {
@@ -44,34 +47,22 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     };
     let bot = app.active_bot().map(|b| b.name.as_str()).unwrap_or("none");
     let mut spans = vec![
-        Span::styled(
-            " grokbot-tui ",
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
+        theme::brand().span(" grokbot-tui "),
         Span::raw(format!(
             "  account: {}   login: {user}   bot: {bot}",
             app.account().alias
         )),
     ];
     spans.push(if app.mouse_capture {
-        Span::styled("   mouse: on (F6)", Style::default().fg(Color::DarkGray))
+        theme::mouse_on().span("   mouse: on (F6)")
     } else {
-        Span::styled(
-            "   mouse: OFF — select text freely (F6)",
-            Style::default().fg(Color::Black).bg(Color::Yellow),
-        )
+        theme::mouse_off().span("   mouse: OFF — select text freely (F6)")
     });
     if app.mock {
-        spans.push(Span::styled(
-            "   [MOCK]",
-            Style::default().fg(Color::Yellow),
-        ));
+        spans.push(theme::mock_tag().span("   [MOCK]"));
     }
     f.render_widget(
-        Paragraph::new(Line::from(spans)).style(Style::default().bg(Color::DarkGray)),
+        Paragraph::new(Line::from(spans)).style(theme::top_bar()),
         top,
     );
 
@@ -81,11 +72,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let n_accounts = app.store.accounts().map(|a| a.len()).unwrap_or(1);
     let hint = if n_accounts > 1 { " ⇄" } else { "" };
     f.render_widget(
-        Paragraph::new(format!(" @{}{hint}", app.account().alias)).style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Paragraph::new(format!(" @{}{hint}", app.account().alias)).style(theme::account_header()),
         acct,
     );
     app.sidebar_area = side;
@@ -94,40 +81,27 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         .iter()
         .enumerate()
         .map(|(i, b)| {
-            let mut s = Style::default();
-            if Some(i) == app.active {
-                s = s
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD);
-            } else if app.focus == Focus::Sidebar && i == app.sidebar_cursor {
-                s = s.add_modifier(Modifier::REVERSED);
-            }
             let tag = if b.team { " ·team" } else { "" };
-            ListItem::new(format!(" {}{tag}", b.name)).style(s)
+            let item = ListItem::new(format!(" {}{tag}", b.name));
+            if Some(i) == app.active {
+                item.style(theme::selected())
+            } else if app.focus == Focus::Sidebar && i == app.sidebar_cursor {
+                item.style(theme::cursor_row())
+            } else {
+                item
+            }
         })
         .collect();
-    let side_border = if app.focus == Focus::Sidebar {
-        Color::Cyan
-    } else {
-        Color::Gray
-    };
     f.render_widget(
-        List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Bots ")
-                .border_style(Style::default().fg(side_border)),
-        ),
+        List::new(items)
+            .block(theme::block(&theme::panel(app.focus == Focus::Sidebar)).title(" Bots ")),
         side,
     );
 
     // Body
     let bot_name = app.active_bot().map(|b| b.name.clone());
-    // Inner padding between the border and the content (left/right 2, top 1).
-    let chat_block = Block::default()
-        .borders(Borders::ALL)
-        .padding(Padding::new(2, 2, 1, 0));
+    // Inner padding between the border and the content (left/right 2, top 1): see the theme.
+    let chat_block = theme::block(&theme::chat_panel());
     let inner = chat_block.inner(body);
     let inner_w = inner.width.max(1) as usize;
     let inner_h = inner.height;
@@ -150,10 +124,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if !app.notices().is_empty() {
         if !lines.is_empty() {
             lines.push(Line::default());
-            lines.push(Line::styled(
-                "── notices (not saved) ──",
-                Style::default().fg(Color::DarkGray),
-            ));
+            lines.push(theme::muted().line("── notices (not saved) ──"));
         }
         lines.extend(
             app.notices()
@@ -164,7 +135,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if lines.is_empty() {
         lines = empty_state(app)
             .into_iter()
-            .map(|t| Line::styled(t, Style::default().fg(Color::DarkGray)))
+            .map(|t| theme::muted().line(t))
             .collect();
     }
     // Exact wrapped height (word wrap can need more rows than width/cols), so
@@ -220,18 +191,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else {
         String::new()
     };
-    let border = if app.focus == Focus::Input {
-        Color::Cyan
-    } else {
-        Color::Gray
-    };
     f.render_widget(
         Paragraph::new(input_lines).block(
-            Block::default()
-                .borders(Borders::ALL)
+            theme::block(&theme::panel(app.focus == Focus::Input))
                 .title(title)
-                .title_bottom(Line::from(more).right_aligned())
-                .border_style(Style::default().fg(border)),
+                .title_bottom(Line::from(more).right_aligned()),
         ),
         bottom,
     );
@@ -284,7 +248,7 @@ fn centered(area: Rect, pct_w: u16, pct_h: u16) -> Rect {
     )
 }
 
-/// The selection modal: same look as the help popup (black panel, yellow border).
+/// The selection modal: same look as the help popup (see `theme::help_frame`).
 fn draw_picker(f: &mut Frame, app: &mut App) {
     let Some(p) = &mut app.picker else { return };
     let screen = f.area();
@@ -304,21 +268,14 @@ fn draw_picker(f: &mut Frame, app: &mut App) {
         w,
         h,
     );
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
-        .title(Span::styled(
-            format!(" {} ", p.title),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ))
+    let block = theme::block(&theme::help_frame())
+        .title(theme::help_title().span(format!(" {} ", p.title)))
         .title_bottom(" ↑↓ select · Enter/click pick · Esc cancel ");
     let inner = block.inner(area);
     p.popup_area = area;
     p.list_area = inner;
     p.scroll_into_view(inner.height as usize);
-    let base = Style::default().bg(Color::Black).fg(Color::White);
+    let base = theme::modal_text();
     let lines: Vec<Line> = p
         .items
         .iter()
@@ -327,36 +284,20 @@ fn draw_picker(f: &mut Frame, app: &mut App) {
         .take(inner.height as usize)
         .map(|(i, it)| {
             let sel = i == p.cursor;
-            let st = if sel {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                base
-            };
-            let mut spans = vec![Span::styled(
-                format!("{} {}", if sel { "›" } else { " " }, it.label),
-                st,
-            )];
+            let st = if sel { theme::selected() } else { base.clone() };
+            let mut spans = vec![st.span(format!("{} {}", if sel { "›" } else { " " }, it.label))];
             if let Some(d) = &it.detail {
-                spans.push(Span::styled(
-                    format!("  ({d})"),
-                    if sel {
-                        st
-                    } else {
-                        Style::default().fg(Color::DarkGray)
-                    },
-                ));
+                let detail = if sel { st.clone() } else { theme::muted() };
+                spans.push(detail.span(format!("  ({d})")));
             }
-            Line::from(spans).style(st)
+            Line::from(spans).style(&st)
         })
         .collect();
     f.render_widget(Clear, area);
-    f.render_widget(Paragraph::new(lines).style(base).block(block), area);
+    f.render_widget(Paragraph::new(lines).style(&base).block(block), area);
 }
 
-/// The help modal: bordered popup, distinct colours, related links at the bottom.
+/// The `/shell` modal: frame colored by state (running / failed / ok).
 fn draw_shell(f: &mut Frame, app: &mut App) {
     let Some(m) = &mut app.shell else { return };
     let area = centered(f.area(), 85, 85);
@@ -367,34 +308,26 @@ fn draw_shell(f: &mut Frame, app: &mut App) {
         .line_count(inner_w);
     let max = (total as u16).saturating_sub(area.height.saturating_sub(2));
     m.scroll = m.scroll.min(max);
-    let border = if m.running() {
-        Color::Yellow
-    } else if m.failed() {
-        Color::Red
-    } else {
-        Color::Green
-    };
+    let (running, failed) = (m.running(), m.failed());
     let state = if m.running() { " · running…" } else { "" };
     f.render_widget(Clear, area);
     f.render_widget(
         Paragraph::new(body.as_str())
             .wrap(Wrap { trim: false })
             .scroll((m.scroll, 0))
-            .style(Style::default().bg(Color::Black).fg(Color::White))
+            .style(theme::modal_text())
             .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(border))
-                    .title(Span::styled(
-                        format!(" Shell (local){state} "),
-                        Style::default().fg(border).add_modifier(Modifier::BOLD),
-                    ))
+                theme::block(&theme::shell_frame(running, failed))
+                    .title(
+                        theme::shell_title(running, failed).span(format!(" Shell (local){state} ")),
+                    )
                     .title_bottom(" ↑↓ PgUp/PgDn wheel scroll · Esc/q close "),
             ),
         area,
     );
 }
 
+/// The help modal: bordered popup, distinct colours, related links at the bottom.
 fn draw_help(f: &mut Frame, app: &mut App) {
     let Some(m) = &mut app.help else { return };
     let area = centered(f.area(), 80, 85);
@@ -406,7 +339,7 @@ fn draw_help(f: &mut Frame, app: &mut App) {
         .line_count(inner_w as u16);
     let max = (total as u16).saturating_sub(text_area.height.saturating_sub(2));
     m.scroll = m.scroll.min(max);
-    let style = Style::default().bg(Color::Black).fg(Color::White);
+    let style = theme::modal_text();
     f.render_widget(Clear, area);
     let back = if m.back.is_empty() {
         ""
@@ -417,17 +350,10 @@ fn draw_help(f: &mut Frame, app: &mut App) {
         Paragraph::new(m.page.body.as_str())
             .wrap(Wrap { trim: false })
             .scroll((m.scroll, 0))
-            .style(style)
+            .style(&style)
             .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Yellow))
-                    .title(Span::styled(
-                        format!(" Help: {} ", m.page.title),
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    ))
+                theme::block(&theme::help_frame())
+                    .title(theme::help_title().span(format!(" Help: {} ", m.page.title)))
                     .title_bottom(format!(" ↑↓ scroll · Esc close{back} ")),
             ),
         text_area,
@@ -437,28 +363,16 @@ fn draw_help(f: &mut Frame, app: &mut App) {
         if i > 0 {
             spans.push(Span::raw(", "));
         }
-        let st = if i == m.link {
-            Style::default().fg(Color::Black).bg(Color::Cyan)
-        } else {
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::UNDERLINED)
-        };
-        spans.push(Span::styled(crate::help::link_label(id), st));
+        spans.push(theme::link(i == m.link).span(crate::help::link_label(id)));
     }
     f.render_widget(
         Paragraph::new(Line::from(spans))
             .wrap(Wrap { trim: true })
-            .style(style)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Yellow))
-                    .title(match &m.query {
-                        Some(q) => format!(" Search: {q}▏ (Enter run · Esc cancel) "),
-                        None => " Tab/←→ select · Enter open · / search ".into(),
-                    }),
-            ),
+            .style(&style)
+            .block(theme::block(&theme::help_frame()).title(match &m.query {
+                Some(q) => format!(" Search: {q}▏ (Enter run · Esc cancel) "),
+                None => " Tab/←→ select · Enter open · / search ".into(),
+            })),
         links_area,
     );
 }
@@ -535,27 +449,22 @@ fn entry_lines<'a>(
     if let Some(max) = bubble
         && kind == EntryKind::User
     {
-        let style = Style::default().fg(Color::Green);
-        let mut out = vec![
-            Line::from(Span::styled("you", style.add_modifier(Modifier::BOLD)))
-                .alignment(Alignment::Right),
-        ];
+        let (label, style) = (theme::entry_label(kind), theme::entry(kind));
+        let mut out = vec![Line::from(label.span("you")).alignment(Alignment::Right)];
         out.extend(
             bubble_block(text, max)
                 .into_iter()
-                .map(|l| Line::from(Span::styled(l, style)).alignment(Alignment::Right)),
+                .map(|l| Line::from(style.span(l)).alignment(Alignment::Right)),
         );
         return out;
     }
-    let (prefix, style) = match kind {
-        EntryKind::System => ("".to_string(), Style::default().fg(Color::Gray)),
-        EntryKind::Error => ("! ".to_string(), Style::default().fg(Color::Red)),
-        EntryKind::User => ("you: ".to_string(), Style::default().fg(Color::Green)),
-        EntryKind::Bot => (
-            format!("{}: ", bot.unwrap_or("bot")),
-            Style::default().fg(Color::Cyan),
-        ),
+    let prefix = match kind {
+        EntryKind::System => String::new(),
+        EntryKind::Error => "! ".to_string(),
+        EntryKind::User => "you: ".to_string(),
+        EntryKind::Bot => format!("{}: ", bot.unwrap_or("bot")),
     };
+    let (label, style) = (theme::entry_label(kind), theme::entry(kind));
     let pw = unicode_width::UnicodeWidthStr::width(prefix.as_str());
     let body: Vec<String> = match bubble {
         // Prefix + text stay within the bubble; keep at least a third for text.
@@ -570,10 +479,7 @@ fn entry_lines<'a>(
             } else {
                 " ".repeat(pw)
             };
-            Line::from(vec![
-                Span::styled(p, style.add_modifier(Modifier::BOLD)),
-                Span::styled(l, style),
-            ])
+            Line::from(vec![label.span(p), style.span(l)])
         })
         .collect()
 }
