@@ -120,6 +120,26 @@ takes the license from `[package] license` in `Cargo.toml`:
 To also install the license file with the MSI, follow the "license sidecar" comments in
 `wix/main.wxs` (untested; needs a Windows build to verify).
 
+## Shipped theme files
+
+grokbot-tui has no built-in theme: `themes/*.toml` in the repo are installed to a shared
+directory, and on startup they are copied into the user's `<data dir>/themes` when it has no
+themes yet. The app looks in (first match per name wins): `<exe dir>/../share/grokbot-tui/themes`,
+`<exe dir>/themes`, each `$XDG_DATA_DIRS` entry (default `/usr/local/share:/usr/share`) +
+`/grokbot-tui/themes`, then `/usr/share`, `/usr/local/share` and `/opt/homebrew/share`.
+
+| Format | Where the themes go | Configured in |
+|---|---|---|
+| `.deb` / `.rpm` | `/usr/share/grokbot-tui/themes/` | `Cargo.toml` `[package.metadata.deb] assets`, `[package.metadata.generate-rpm] assets` |
+| Archives (`.tar.xz` / `.zip`) | `themes/` next to the binary | `dist-workspace.toml` `include = ["themes/"]` |
+| Homebrew formula | `share/grokbot-tui/themes/` (the formula's `pkgshare.install` of leftover archive files) | follows from `include` |
+| AUR PKGBUILDs | `/usr/share/grokbot-tui/themes/` | `packaging/aur/*/PKGBUILD.in` `package()` |
+| `.msi` | `<install dir>\share\grokbot-tui\themes\` (the exe is in `bin\`) | `wix/main.wxs` component `themes` (untested; needs a Windows build) |
+| `.pkg`, shell / PowerShell installers, `cargo install` | not installed (binary only) | users run `/theme init` or download `themes/default.toml` |
+
+Adding a theme to the repo: put it in `themes/`, then add it to the deb/rpm assets and the MSI
+component (the archive `include`, Homebrew and AUR pick up every `themes/*.toml`).
+
 ## Manual steps that need your accounts or secrets
 
 None of these are automated yet (Homebrew publishing can be switched on, see below). A

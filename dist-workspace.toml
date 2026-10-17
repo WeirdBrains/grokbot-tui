@@ -24,6 +24,9 @@ dispatch-releases = true
 # wix/main.wxs is hand-edited (MSI product/folder named grokbot-tui).
 # Keep dist from overwriting it or failing CI because it differs from its template.
 allow-dirty = ["msi"]
+# Shipped theme files go into every archive (themes/ next to the binary). The Homebrew
+# formula installs them under share/grokbot-tui/themes, the MSI next to the exe.
+include = ["themes/"]
 # Homebrew formula name (same as the Cargo package and the binary).
 formula = "grokbot-tui"
 # Homebrew tap repo (users run `brew install WeirdBrains/tap/grokbot-tui`). The formula
