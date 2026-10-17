@@ -1,7 +1,7 @@
 # grokbot-tui — Grok Bot TUI
 
 A terminal UI for Grok Bot, written in Rust (2024 edition, Rust 1.89 or newer) with ratatui + crossterm.
-The `grokbot-tui` binary lives in [`crates/gb`](crates/gb). All networking goes through the
+The `grokbot-tui` binary lives in [`crates/grokbot-tui`](crates/grokbot-tui). All networking goes through the
 [`grokbot_api`](https://crates.io/crates/grokbot_api) crate from crates.io: an async client for every known
 Grok Bot gateway call, the Cursor EnsureSandBox exchange, and the credential host allowlist.
 
@@ -14,23 +14,23 @@ Grok Bot gateway call, the Cursor EnsureSandBox exchange, and the credential hos
 Prebuilt packages are attached to each [GitHub Release](https://github.com/m3talsmith/gb/releases)
 (see [PACKAGING.md](PACKAGING.md) for how releases are made and what is published where):
 
-- **Shell installer (macOS/Linux):** the `gb-installer.sh` command shown in the release notes
-- **PowerShell (Windows):** the `gb-installer.ps1` command shown in the release notes
-- **Windows:** `gb-x86_64-pc-windows-msvc.msi` · **macOS:** `gb-<arch>.pkg` (unsigned)
+- **Shell installer (macOS/Linux):** the `grokbot-tui-installer.sh` command shown in the release notes
+- **PowerShell (Windows):** the `grokbot-tui-installer.ps1` command shown in the release notes
+- **Windows:** `grokbot-tui-x86_64-pc-windows-msvc.msi` · **macOS:** `grokbot-tui-<arch>.pkg` (unsigned)
 - **Debian/Ubuntu:** `sudo apt install ./grokbot-tui_<ver>-1_<arch>.deb`
 - **Fedora:** `sudo dnf install ./grokbot-tui-<ver>-1.<arch>.rpm`
 - **Homebrew, AUR, winget:** once published (see PACKAGING.md), `brew install m3talsmith/tap/grokbot-tui`,
   `yay -S grokbot-tui-bin`, `winget install m3talsmith.grokbot-tui`
-- **From source:** `cargo install --path crates/gb`
+- **From source:** `cargo install --path ./crates/grokbot-tui`
 
 ## Run
 
 ```sh
-cargo run -p gb -- --mock              # offline: fake bots, delayed echo replies
-cargo run -p gb                        # real gateway
-cargo install --path crates/gb         # installs the `grokbot-tui` binary
-grokbot-tui --data-dir /tmp/gbtest     # different data directory (holds context.db)
-grokbot-tui --account work             # start in an account (or GB_ACCOUNT=work)
+cargo run -p grokbot-tui -- --mock         # offline: fake bots, delayed echo replies
+cargo run -p grokbot-tui                   # real gateway
+cargo install --path ./crates/grokbot-tui  # installs the `grokbot-tui` binary
+grokbot-tui --data-dir /tmp/gbtest         # different data directory (holds context.db)
+grokbot-tui --account work                 # start in an account (or GB_ACCOUNT=work)
 ```
 
 In mock mode any token logs in except `bad`. Sending `reject` simulates a 4xx and `unknown` simulates a 5xx after the prompt has landed.
@@ -90,7 +90,7 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 100 entries):
 | `/memory` (`/mem`) | The active bot's local memory notes; `/memory add <key> <value>`, `/memory clear [key]` |
 | `/quit` (`/q`, `/exit`) | Exit |
 
-Commands live in a registry in `crates/gb/src/commands.rs`.
+Commands live in a registry in `crates/grokbot-tui/src/commands.rs`.
 
 ## Authentication
 

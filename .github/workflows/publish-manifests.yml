@@ -28,7 +28,7 @@ jobs:
         id: plan
         run: |
           tag=$(jq -r '.announcement_tag' <<<"$PLAN")
-          version=$(jq -r '.releases[] | select(.app_name == "gb") | .app_version' <<<"$PLAN")
+          version=$(jq -r '.releases[] | select(.app_name == "grokbot-tui") | .app_version' <<<"$PLAN")
           [[ -n $tag && $tag != null && -n $version && $version != null ]]
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"

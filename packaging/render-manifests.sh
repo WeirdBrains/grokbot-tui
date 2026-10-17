@@ -24,7 +24,7 @@ root=$(cd "$here/.." && pwd)
 source "$here/identity.env"
 
 license=$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" |
-  jq -r '.packages[] | select(.name == "gb") | .license')
+  jq -r '.packages[] | select(.name == "grokbot-tui") | .license')
 [[ -n $license && $license != null ]] || { echo "no license in Cargo.toml" >&2; exit 1; }
 
 sha() {
@@ -35,10 +35,10 @@ sha() {
   printf '%s' "${h,,}"
 }
 
-sha_linux_x86_64=$(sha gb-x86_64-unknown-linux-gnu.tar.xz)
-sha_linux_aarch64=$(sha gb-aarch64-unknown-linux-gnu.tar.xz)
+sha_linux_x86_64=$(sha grokbot-tui-x86_64-unknown-linux-gnu.tar.xz)
+sha_linux_aarch64=$(sha grokbot-tui-aarch64-unknown-linux-gnu.tar.xz)
 sha_source=$(sha source.tar.gz)
-sha_msi=$(sha gb-x86_64-pc-windows-msvc.msi)
+sha_msi=$(sha grokbot-tui-x86_64-pc-windows-msvc.msi)
 
 render() { # template output
   mkdir -p "$(dirname "$2")"

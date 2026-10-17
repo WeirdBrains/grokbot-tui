@@ -52,7 +52,7 @@ Each gb account logs in once; the login is stored in ~/.gb/context.db for that a
 Which method?
   ★ /login desktop  RECOMMENDED. Uses the Grok Bot desktop app's saved session.
                     Requires the app installed and signed in on this computer.
-    /login cursor   Paste a Cursor access token; gb exchanges it for a gateway session.
+    /login cursor   Paste a Cursor access token; grokbot-tui exchanges it for a gateway session.
                     Getting this token by hand is not documented — use /login desktop.
     /login gateway  Paste a gateway URL + gateway token directly.
                     Getting these by hand is not documented — use /login desktop.
@@ -77,27 +77,27 @@ Usage: /login desktop [entry]
 Steps
   1. Install the Grok Bot desktop app and sign in once.
   2. Linux only: install secret-tool (package libsecret-tools) and keep your keyring unlocked.
-  3. Run /login desktop. gb reads the app's saved session, checks it by listing bots,
-     and saves it to the active gb account.
+  3. Run /login desktop. grokbot-tui reads the app's saved session, checks it by listing bots,
+     and saves it to the active grokbot-tui account.
 
-What gb reads (only when you run this command, or on a 401 for a desktop-login account)
+What grokbot-tui reads (only when you run this command, or on a 401 for a desktop-login account)
   App data folder:
     Linux    $XDG_CONFIG_HOME/Grok Bot  or  ~/.config/Grok Bot
     macOS    ~/Library/Application Support/Grok Bot
     Windows  %APPDATA%\\Grok Bot
   1st choice: gateway-descriptor.json (a ready gateway session).
   Fallback:   sand-secrets.json → cursor-accounts → Cursor access token, exchanged via
-              EnsureSandBox like /login cursor. That token is not stored by gb.
+              EnsureSandBox like /login cursor. That token is not stored by grokbot-tui.
   Decryption uses the OS keychain: secret-tool on Linux, the Keychain item
   'Grok Bot Safe Storage' on macOS, DPAPI on Windows. Nothing is printed or logged.
 
 Several saved sessions/accounts
-  gb opens a pick list (e.g. '1) 3f2a9c1e… (active in app)'); choose with ↑↓/Enter or
-  the mouse. Or name it directly: /login desktop <number>.
-  Tip: /account add <alias> first so each desktop account maps to its own gb account.
+  grokbot-tui opens a pick list (e.g. '1) 3f2a9c1e… (active in app)'); choose with
+  ↑↓/Enter or the mouse. Or name it directly: /login desktop <number>.
+  Tip: /account add <alias> first so each desktop account maps to its own grokbot-tui account.
 
 Client version
-  gb detects the installed app version for x-cursor-client-version (see /help env).
+  grokbot-tui detects the installed app version for x-cursor-client-version (see /help env).
 
 Errors
   APP_NOT_FOUND        App data folder missing → install the app / check the path above.
@@ -123,9 +123,9 @@ Errors
 Usage: /login cursor   (then paste the token; input is masked, Esc cancels)
 
 What it does
-  gb sends the token to https://api2.cursor.sh/aiserver.v1.GrokBotService/EnsureSandBox
+  grokbot-tui sends the token to https://api2.cursor.sh/aiserver.v1.GrokBotService/EnsureSandBox
   and gets back a gateway URL, gateway token and routing headers. The Cursor token is
-  stored for this account so gb can re-exchange it when the gateway answers 401.
+  stored for this account so grokbot-tui can re-exchange it when the gateway answers 401.
 
 Getting a Cursor access token
   Not documented — use /login desktop. The desktop app keeps this token encrypted in
@@ -137,7 +137,7 @@ x-sand-box-namespace (prod). Override with GB_CURSOR_CLIENT_* / prefs (see /help
 
 Errors
   401 'version no longer supported' → update the desktop app or set GB_CURSOR_CLIENT_VERSION.
-  417 (empty body) → the gateway session expired; gb re-authenticates like a 401
+  417 (empty body) → the gateway session expired; grokbot-tui re-authenticates like a 401
     (desktop re-read / Cursor re-exchange). If it persists, run /login desktop.
   'no gatewayUrl/gatewayToken' → the token was rejected or is not an access token.",
         related: &["login", "login-desktop", "env", "troubleshooting"],
@@ -150,7 +150,7 @@ Usage: /login gateway [url]   (then paste the gateway token; masked, Esc cancels
 
 What it does
   Uses a gateway session directly: a URL like https://<box>.cursorvm.com plus its token.
-  gb checks the URL against the host allowlist, validates by listing bots, then saves it.
+  grokbot-tui checks the URL against the host allowlist, validates by listing bots, then saves it.
 
 Getting a gateway URL + token
   Not documented — use /login desktop. These are issued by EnsureSandBox (what
@@ -226,7 +226,7 @@ In this help window
         id: "accounts",
         title: "Accounts",
         body: "\
-gb keeps several accounts fully separate: logins, bots, chats, memory and prefs.
+grokbot-tui keeps several accounts fully separate: logins, bots, chats, memory and prefs.
 
   /account                  List accounts (* = active)
   /account add <alias>      Create an account
@@ -236,7 +236,7 @@ gb keeps several accounts fully separate: logins, bots, chats, memory and prefs.
 
 Start in an account: grokbot-tui --account work  or  GB_ACCOUNT=work grokbot-tui
 GB_GROKBOT_TOKEN only applies to the account selected at startup.
-Several desktop Cursor accounts? Add one gb account each, then /login desktop <number>.",
+Several desktop Cursor accounts? Add one grokbot-tui account each, then /login desktop <number>.",
         related: &["login", "login-desktop", "prefs", "env"],
     },
     Topic {
@@ -300,7 +300,7 @@ Bots come from the gateway's listAgents. Messages come from getAgentTranscriptTa
   • Opening a bot (or /history) pages the whole transcript (up to 1000 entries),
     merges it into ~/.gb/context.db and redraws the chat from there — so messages
     from the desktop app appear too.
-  • While a bot is open gb polls for new messages every ~1 s, backing off to 15 s
+  • While a bot is open grokbot-tui polls for new messages every ~1 s, backing off to 15 s
     when idle, and every 1 s right after you send.
   • The chat you see is always rebuilt from that database. Your sent message is saved
     there first (as pending) and shows immediately; notices and errors appear in a
@@ -316,14 +316,15 @@ Every message you send shows as pending until the transcript confirms it.
 
   Accepted  The gateway returned a receipt. The message is confirmed when it appears.
   Rejected  The gateway refused it (4xx, policy). It was NOT delivered; fix and resend.
-  Unknown   5xx, network error, timeout or no receipt. gb then asks the gateway
+  Unknown   5xx, network error, timeout or no receipt. grokbot-tui then asks the gateway
             (promptAcceptanceStatus, by the message's nonce) whether it landed:
               accepted  → nothing to do; it will appear in the chat.
               rejected  → 'Not delivered (rejected by the gateway: <code>)'.
               not found → 'Not delivered … Safe to resend' (it never arrived).
               pending   → asked again a few times.
-            Only if the gateway can't tell does gb show 'Delivery unknown'; then wait
-            for the message to appear (or not) before resending. gb never resends itself.",
+            Only if the gateway can't tell does grokbot-tui show 'Delivery unknown'; then
+            wait for the message to appear (or not) before resending. grokbot-tui never
+            resends itself.",
         related: &["sync", "troubleshooting"],
     },
     Topic {
@@ -331,9 +332,9 @@ Every message you send shows as pending until the transcript confirms it.
         title: "Troubleshooting",
         body: "\
 'Gateway rejected the credential (401)'
-  desktop login: gb re-reads the app session once automatically; if it still fails,
+  desktop login: grokbot-tui re-reads the app session once automatically; if it still fails,
   open the app, make sure you're signed in, then /login desktop.
-  cursor login: gb re-exchanges once; otherwise /login cursor with a fresh token.
+  cursor login: grokbot-tui re-exchanges once; otherwise /login cursor with a fresh token.
   gateway login: /login gateway with a new token.
 
 'This version of Grok Bot is no longer supported'
@@ -347,7 +348,7 @@ Desktop errors (APP_NOT_FOUND, NOT_SIGNED_IN, SECRET_TOOL_MISSING, KEYCHAIN_LOCK
 
 Chat looks out of date — /history reloads the full transcript.
 No bots — create one in the desktop app, then /bots.
-Running gb prints git errors — your shell may alias gb; the binary is grokbot-tui.",
+Running gb prints git errors — gb is often a git alias; the command is grokbot-tui.",
         related: &[
             "login-desktop",
             "login-cursor",

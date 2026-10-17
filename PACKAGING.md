@@ -8,13 +8,13 @@ Releases unless you complete the manual steps below.
 
 | Target | Artifact on the GitHub Release | Built by |
 |---|---|---|
-| Linux x86_64 / aarch64 | `gb-<target>.tar.xz` | cargo-dist (`release.yml`) |
-| macOS x86_64 / arm64 | `gb-<target>.tar.xz` | cargo-dist |
-| Windows x64 | `gb-x86_64-pc-windows-msvc.zip` | cargo-dist |
-| Shell / PowerShell installers | `gb-installer.sh`, `gb-installer.ps1` | cargo-dist |
+| Linux x86_64 / aarch64 | `grokbot-tui-<target>.tar.xz` | cargo-dist (`release.yml`) |
+| macOS x86_64 / arm64 | `grokbot-tui-<target>.tar.xz` | cargo-dist |
+| Windows x64 | `grokbot-tui-x86_64-pc-windows-msvc.zip` | cargo-dist |
+| Shell / PowerShell installers | `grokbot-tui-installer.sh`, `grokbot-tui-installer.ps1` | cargo-dist |
 | Homebrew (macOS + Linux) | `grokbot-tui.rb` formula | cargo-dist |
-| macOS installer | `gb-<target>.pkg` (**unsigned**) | cargo-dist (`pkgbuild`/`productbuild`) |
-| Windows installer | `gb-x86_64-pc-windows-msvc.msi` (**unsigned**, WiX) | cargo-dist |
+| macOS installer | `grokbot-tui-<target>.pkg` (**unsigned**) | cargo-dist (`pkgbuild`/`productbuild`) |
+| Windows installer | `grokbot-tui-x86_64-pc-windows-msvc.msi` (**unsigned**, WiX) | cargo-dist |
 | Debian / Ubuntu | `grokbot-tui_<ver>-1_<arch>.deb` | `build-linux-packages.yml` (cargo-deb) |
 | Fedora / RHEL | `grokbot-tui-<ver>-1.<arch>.rpm` | `build-linux-packages.yml` (cargo-generate-rpm) |
 | Arch / AUR | `PKGBUILD` + `.SRCINFO` for `grokbot-tui-bin` and `grokbot-tui` | `publish-manifests.yml` |
@@ -24,8 +24,8 @@ Releases unless you complete the manual steps below.
 Every artifact has a matching `.sha256` file; `sha256.sum` lists cargo-dist's.
 The AUR and winget files are bundled as `packaging-manifests-<tag>.tar.gz`.
 
-Archive names start with `gb-` because the Cargo package is `gb`; the binary inside
-is `grokbot-tui`. No `.dmg` is built; the `.pkg` is the macOS installer.
+Archive names start with `grokbot-tui-`, the Cargo package name (also the binary's name).
+Releases before 1.2.0 used `gb-` (the old package name). No `.dmg` is built; the `.pkg` is the macOS installer.
 
 ## Cutting a release
 
@@ -58,11 +58,11 @@ To preview locally: `dist plan --tag v0.1.0` (install cargo-dist 0.33.0).
 - cargo-dist config is in `dist-workspace.toml` (plus `[profile.dist]` in `Cargo.toml`).
   After editing it, run `dist generate` to regenerate `release.yml`. Do not hand-edit
   `release.yml`; CI checks that it matches the config.
-- `crates/gb/wix/main.wxs` is hand-edited (product named `grokbot-tui`) and excluded
+- `crates/grokbot-tui/wix/main.wxs` is hand-edited (product named `grokbot-tui`) and excluded
   from that check with `allow-dirty = ["msi"]`. Keep the upgrade GUIDs in
-  `crates/gb/Cargo.toml` unchanged, or Windows upgrades will install side by side.
+  `crates/grokbot-tui/Cargo.toml` unchanged, or Windows upgrades will install side by side.
 - `.deb` / `.rpm` contents: `[package.metadata.deb]` and
-  `[package.metadata.generate-rpm]` in `crates/gb/Cargo.toml`.
+  `[package.metadata.generate-rpm]` in `crates/grokbot-tui/Cargo.toml`.
 - AUR / winget templates: `packaging/aur/*/PKGBUILD.in`, `packaging/winget/*.yaml.in`.
   Identity values are in `packaging/identity.env`. URLs and checksums are filled in
   at release time; never commit real checksums into the templates.
@@ -92,7 +92,7 @@ takes the license from `[workspace.package] license` in `Cargo.toml`:
 | `.msi` / `.pkg` | none | not included in the installer (the binary only) |
 
 To also install the license file with the MSI, follow the "license sidecar" comments in
-`crates/gb/wix/main.wxs` (untested; needs a Windows build to verify).
+`crates/grokbot-tui/wix/main.wxs` (untested; needs a Windows build to verify).
 
 ## Manual steps that need your accounts or secrets
 

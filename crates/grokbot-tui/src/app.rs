@@ -130,7 +130,7 @@ pub fn real_desktop_lister() -> DesktopLister {
 }
 
 /// Text for a desktop-session error. grokbot_api describes `AMBIGUOUS_ENTRIES` without naming
-/// any app's commands, so point the user at gb's own: `/login desktop <name|number>`, and
+/// any app's commands, so point the user at grokbot-tui's own: `/login desktop <name|number>`, and
 /// `/account add` when several desktop Cursor accounts exist.
 fn desktop_error_text(e: &gw::Error) -> String {
     match e {
@@ -142,7 +142,7 @@ fn desktop_error_text(e: &gw::Error) -> String {
                 .trim_end();
             if message.contains("Cursor accounts") {
                 format!(
-                    "{what} Choose one with /login desktop <number> (tip: /account add <alias> first so each gets its own gb account)."
+                    "{what} Choose one with /login desktop <number> (tip: /account add <alias> first so each gets its own grokbot-tui account)."
                 )
             } else {
                 format!("{what} Choose one with /login desktop <name>.")

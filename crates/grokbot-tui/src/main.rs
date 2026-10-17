@@ -34,7 +34,7 @@ struct Cli {
     data_dir: Option<std::path::PathBuf>,
 }
 
-/// Environment variables that grokbot_api 1.1 renamed: `(old gb name, new library name)`.
+/// Environment variables that grokbot_api 1.1 renamed: `(old name, new library name)`.
 /// The old names keep working: [`legacy_env_updates`] copies them at startup.
 const LEGACY_ENV: [(&str, &str); 2] = [
     ("GB_ALLOW_LOCAL_GATEWAY", "GROKBOT_ALLOW_LOCAL_GATEWAY"),

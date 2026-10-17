@@ -35,12 +35,12 @@ jobs:
       - name: Install cargo-deb and cargo-generate-rpm
         run: cargo install --locked cargo-deb cargo-generate-rpm
       - name: Build
-        run: cargo build --release --locked -p gb
+        run: cargo build --release --locked -p grokbot-tui
       - name: Package .deb and .rpm
         run: |
           mkdir -p target/linux-packages
-          cargo deb -p gb --no-build --output target/linux-packages/
-          cargo generate-rpm -p crates/gb --output target/linux-packages/
+          cargo deb -p grokbot-tui --no-build --output target/linux-packages/
+          cargo generate-rpm -p crates/grokbot-tui --output target/linux-packages/
           cd target/linux-packages
           for f in *.deb *.rpm; do sha256sum "$f" > "$f.sha256"; done
           ls -l

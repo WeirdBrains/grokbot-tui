@@ -923,27 +923,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gb"
-version = "1.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "clap",
- "dirs",
- "grokbot_api",
- "ratatui",
- "ratatui-lipgloss",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "unicode-width",
- "uuid",
- "wiremock",
-]
-
-[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -999,6 +978,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2eecf2d5dc9b66b732b97707a0210906b1d30523eb773193ab777c0c84b3e8d5"
 dependencies = [
  "polyval",
+]
+
+[[package]]
+name = "grokbot-tui"
+version = "1.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "dirs",
+ "grokbot_api",
+ "ratatui",
+ "ratatui-lipgloss",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "unicode-width",
+ "uuid",
+ "wiremock",
 ]
 
 [[package]]

@@ -17,10 +17,10 @@ install-path = "CARGO_HOME"
 hosting = "github"
 # Whether to install an updater program
 install-updater = false
-# crates/gb/wix/main.wxs is hand-edited (MSI product/folder named grokbot-tui, not gb).
+# crates/grokbot-tui/wix/main.wxs is hand-edited (MSI product/folder named grokbot-tui).
 # Keep dist from overwriting it or failing CI because it differs from its template.
 allow-dirty = ["msi"]
-# Homebrew formula name (the Cargo package is "gb", the binary "grokbot-tui").
+# Homebrew formula name (same as the Cargo package and the binary).
 formula = "grokbot-tui"
 # TODO(confirm): Homebrew tap repo. The formula is built and attached to every release;
 # it is NOT pushed anywhere unless you add "homebrew" to publish-jobs and a
