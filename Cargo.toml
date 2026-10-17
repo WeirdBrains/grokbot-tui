@@ -5,7 +5,7 @@ members = ["crates/gb"]
 [workspace.package]
 edition = "2024"
 rust-version = "1.89"
-version = "1.0.0"
+version = "1.1.0"
 license = "BSD-3-Clause"
 authors = ["Michael Christenson II <m3talsmith@gmail.com>"]
 homepage = "https://github.com/m3talsmith/gb"

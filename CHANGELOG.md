@@ -4,10 +4,23 @@ All notable changes to grokbot-tui are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-No version has been tagged yet; everything below ships in the first release
-(the workspace version is currently 1.0.0).
-
 ## [Unreleased]
+
+## [1.1.0] - 2026-10-17
+
+### Changed
+
+- **All TUI styling now uses [`ratatui-lipgloss`](https://crates.io/crates/ratatui-lipgloss)
+  1.1.** Colors, borders and padding for the top bar, sidebar, chat body, user bubbles,
+  notices, input bar and the help, picker and `/shell` modals now live in one theme
+  module (`crates/gb/src/theme.rs`); `ui.rs` only handles layout. Output looks the
+  same as before.
+- Upgraded `ratatui` 0.29 → 0.30 and `crossterm` 0.28 → 0.29 (required by
+  `ratatui-lipgloss`).
+
+## [1.0.0] - 2026-10-17
+
+First release.
 
 ### Changed
 
