@@ -537,6 +537,7 @@ impl App {
         let mut opts = ClientOptions {
             policy: Policy::from_env(),
             backend_base,
+            max_response_bytes: crate::config::max_response_bytes(),
             ..Default::default()
         };
         let client_version_source = apply_client_identity(&mut opts, &config, true);

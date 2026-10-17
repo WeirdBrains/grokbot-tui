@@ -156,6 +156,7 @@ Redirects are never followed, requests time out after 30 s, responses are capped
 | `GROKBOT_TUI_CURSOR_CLIENT_TYPE` | Override `x-cursor-client-type` (default `sand`) |
 | `GROKBOT_TUI_SAND_BOX_NAMESPACE` | Override `x-sand-box-namespace` (default `prod`) |
 | `GROKBOT_TUI_ALLOW_LOCAL_GATEWAY` | `1` to permit loopback gateways (development) |
+| `GROKBOT_TUI_MAX_RESPONSE_BYTES` | Cap on one gateway response body in bytes (default 64 MiB) |
 | `GROKBOT_TUI_APP_DIR` | Grok Bot desktop app install directory, for client version detection |
 | `GROKBOT_TUI_ACCOUNT` | Starting account alias |
 

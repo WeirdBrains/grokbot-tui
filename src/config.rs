@@ -9,6 +9,22 @@ pub const GATEWAY_URL_ENV: &str = "GROKBOT_TUI_GATEWAY_URL";
 pub const GATEWAY_HEADERS_ENV: &str = "GROKBOT_TUI_GATEWAY_HEADERS";
 /// Override the Cursor backend used for EnsureSandBox (must still be *.cursor.sh / *.cursor.com).
 pub const CURSOR_API_ENV: &str = "GROKBOT_TUI_CURSOR_API_BASE_URL";
+/// Overrides the cap on a single gateway response body, in bytes.
+pub const MAX_RESPONSE_ENV: &str = "GROKBOT_TUI_MAX_RESPONSE_BYTES";
+/// Default response cap. Accounts with many bots get `listAgents` replies over the
+/// library's 2 MiB default, so the TUI allows much more.
+pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
+
+/// The response cap from `GROKBOT_TUI_MAX_RESPONSE_BYTES`, else the default.
+pub fn max_response_bytes() -> usize {
+    parse_max_response_bytes(std::env::var(MAX_RESPONSE_ENV).ok().as_deref())
+}
+
+pub(crate) fn parse_max_response_bytes(raw: Option<&str>) -> usize {
+    raw.and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_MAX_RESPONSE_BYTES)
+}
 /// Override `x-cursor-client-version` for EnsureSandBox (highest priority).
 pub const CLIENT_VERSION_ENV: &str = "GROKBOT_TUI_CURSOR_CLIENT_VERSION";
 /// Override `x-cursor-client-type` for EnsureSandBox.
@@ -125,5 +141,29 @@ mod tests {
             crate::theme::Mode::System
         );
         assert!(is_global(PREF_THEME_MODE));
+    }
+}
+
+#[cfg(test)]
+mod max_response_tests {
+    use super::*;
+
+    #[test]
+    fn parses_override_and_falls_back() {
+        assert_eq!(parse_max_response_bytes(None), DEFAULT_MAX_RESPONSE_BYTES);
+        assert_eq!(
+            parse_max_response_bytes(Some("")),
+            DEFAULT_MAX_RESPONSE_BYTES
+        );
+        assert_eq!(
+            parse_max_response_bytes(Some("abc")),
+            DEFAULT_MAX_RESPONSE_BYTES
+        );
+        assert_eq!(
+            parse_max_response_bytes(Some("0")),
+            DEFAULT_MAX_RESPONSE_BYTES
+        );
+        assert_eq!(parse_max_response_bytes(Some(" 1048576 ")), 1_048_576);
+        const { assert!(DEFAULT_MAX_RESPONSE_BYTES > grokbot_api::MAX_RESPONSE_BYTES) };
     }
 }

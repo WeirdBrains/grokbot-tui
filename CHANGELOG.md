@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.3.1] - 2026-10-17
+
+### Fixed
+
+- `/login desktop` (and any login) failing with "listAgents: gateway response too large
+  (over 2097152 bytes)" on accounts with many bots. The TUI now accepts gateway replies up
+  to 64 MiB, and `GROKBOT_TUI_MAX_RESPONSE_BYTES` overrides the cap.
+
 ## [1.3.0] - 2026-10-17
 
 ### Added
