@@ -21,7 +21,6 @@ eula = false
 # --- Linux packages (built in CI by .github/workflows/build-linux-packages.yml) ---
 [package.metadata.deb]
 name = "grokbot-tui"
-# TODO(confirm): maintainer (taken from git history).
 maintainer = "Michael Christenson II <m3talsmith@gmail.com>"
 section = "utils"
 priority = "optional"

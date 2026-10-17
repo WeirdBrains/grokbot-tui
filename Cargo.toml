@@ -4,9 +4,8 @@ members = ["crates/grokbot_api", "crates/gb"]
 
 [workspace.package]
 edition = "2024"
-version = "0.1.0"
+version = "1.0.0"
 license = "BSD-3-Clause"
-# TODO(confirm): maintainer taken from git history.
 authors = ["Michael Christenson II <m3talsmith@gmail.com>"]
 homepage = "https://github.com/m3talsmith/gb"
 repository = "https://github.com/m3talsmith/gb"
