@@ -28,12 +28,12 @@ Plain text is sent to the active bot. Lines starting with / are commands.
 
 Help topics (Enter on a link below opens it):
   login · login desktop · login cursor · login gateway
-  keys · accounts · prefs · env · sync · delivery · troubleshooting
+  keys · theme · accounts · prefs · env · sync · delivery · troubleshooting
 
 Search: /help <keyword> (e.g. /help keyring), or press / in this window.
 
 Commands: /help <command> shows usage, examples and related topics.
-  help login logout whoami bots bot history account prefs memory quit",
+  help login logout whoami bots bot history account prefs memory theme quit",
         related: &[
             "login",
             "login-desktop",
@@ -172,6 +172,7 @@ Anywhere
   F1, or ? on an empty input   Open this help
   F2                           Pick a bot (list popup; same as /bot)
   F3                           Pick an account (same as /account use)
+  F4                           Theme: dark → light → system (same as /theme)
   F6                           Mouse capture on/off (same as /mouse)
   Ctrl-C / Ctrl-D              Quit
   Tab                          Switch focus between input and sidebar
@@ -198,8 +199,9 @@ Sidebar focused
   ↑ ↓ / k j  Move      Enter  Open bot
 
 Mouse
-  Click a bot to open it. Click the @account header to pick an account.
-  The top bar shows 'mouse: on/OFF'.
+  Click a bot to open it. Click '@account ▾' in the header to pick an account.
+  Click dark / light / system in the header to switch the theme.
+  The header shows 'mouse: on/OFF'.
 
 Selecting and copying text
   grokbot-tui captures the mouse, so plain drag doesn't select. Options:
@@ -220,7 +222,27 @@ In this help window
   ↑ ↓ / j k, PgUp PgDn  Scroll      Tab / ← →  Select a related link
   Enter  Open link      Backspace  Back      Esc / q  Close
   /      Search all help by keyword (type, Enter to run, Esc to cancel)",
-        related: &["overview", "accounts"],
+        related: &["overview", "theme", "accounts"],
+    },
+    Topic {
+        id: "theme",
+        title: "Header and theme",
+        body: "\
+The header shows the Grok Bot logo and title, the account switcher, the theme
+switcher, the login, the active bot and the mouse state. In terminals smaller than
+80 × 24 it shrinks to one row with the same switchers.
+
+Account switcher
+  '@alias ▾' — click it or press F3 to pick an account (same as /account use).
+
+Theme switcher
+  dark · light · system — click one, press F4 to cycle, or /theme [dark|light|system].
+  system follows the terminal background: grokbot-tui asks the terminal at startup
+  (OSC 11), else reads $COLORFGBG, else uses dark. The header shows what system
+  resolved to, e.g. 'system (→ light)'. Restart after changing the terminal's colors.
+
+The choice is saved (global pref ui.theme_mode) and used for every account.",
+        related: &["keys", "prefs", "accounts"],
     },
     Topic {
         id: "accounts",
@@ -230,7 +252,7 @@ grokbot-tui keeps several accounts fully separate: logins, bots, chats, memory a
 
   /account                  List accounts (* = active)
   /account add <alias>      Create an account
-  /account use [alias]      Switch (no alias, F3 or clicking @account: pick list)
+  /account use [alias]      Switch (no alias, F3 or clicking @account ▾: pick list)
   /account rename <a> <b>   Rename
   /account remove <alias>   Delete (confirm in a pick list; Cancel is the default)
 
@@ -258,6 +280,8 @@ Per-account keys
 
 Global keys
   ui.sidebar_width       Sidebar width, 10–80. Default: 24.
+  ui.theme_mode          dark, light or system (follow the terminal). Default: system.
+                         Also F4, /theme, or clicking the header (see /help theme).
   active_account         Account opened at startup (set automatically).
 
 Environment variables override the cursor.* / sand.* prefs (see /help env).",
@@ -486,6 +510,11 @@ fn command_extra(
             "Local notes per bot (stored only in ~/.grokbot-tui, never sent).",
             &["/memory", "/memory add lang rust", "/memory clear lang"],
             &["accounts"],
+        ),
+        "theme" => (
+            "Switch the appearance. Bare /theme cycles dark → light → system (also F4 or a header click). system follows the terminal background, else dark. Saved in the global pref ui.theme_mode.",
+            &["/theme", "/theme light", "/theme system"],
+            &["theme", "keys", "prefs"],
         ),
         "quit" => ("Exit grokbot-tui.", &["/quit"], &["keys"]),
         _ => ("", &[], &["overview"]),

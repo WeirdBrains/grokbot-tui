@@ -445,7 +445,12 @@ pub struct App {
     pub focus: Focus,
     pub scroll: u16,
     pub sidebar_area: Rect,
+    /// The account switcher in the header (click opens the account picker).
     pub account_area: Rect,
+    /// The dark / light / system choices in the header (click selects one).
+    pub theme_areas: Vec<(Rect, crate::theme::Mode)>,
+    /// Terminal background detected at startup, used by the "system" theme mode.
+    pub detected_variant: Option<crate::theme::Variant>,
     pub pending_remove: Option<String>,
     pub login_url_draft: Option<String>,
     /// Bots with a sent prompt whose reply hasn't shown up yet.
@@ -562,6 +567,8 @@ impl App {
             scroll: 0,
             sidebar_area: Rect::default(),
             account_area: Rect::default(),
+            theme_areas: Vec::new(),
+            detected_variant: None,
             pending_remove: None,
             login_url_draft: None,
             awaiting: HashMap::new(),
@@ -1872,6 +1879,40 @@ impl App {
         self.set_mouse_capture(!self.mouse_capture);
     }
 
+    /// The color variant to draw with: the theme mode resolved against the detected
+    /// terminal background (system → detected, else dark).
+    pub fn theme_variant(&self) -> crate::theme::Variant {
+        self.config.theme_mode.resolve(self.detected_variant)
+    }
+
+    /// Switch the appearance (F4, header click, `/theme`) and save it (global pref).
+    pub fn set_theme_mode(&mut self, mode: crate::theme::Mode) {
+        use crate::theme::{Mode, Variant};
+        if let Err(e) = self
+            .store
+            .set_pref(crate::config::PREF_THEME_MODE, mode.as_str())
+        {
+            self.error(format!("{e:#}"));
+            return;
+        }
+        self.config.theme_mode = mode;
+        let note = match (mode, self.detected_variant) {
+            (Mode::System, Some(Variant::Light)) => " (terminal background: light)",
+            (Mode::System, Some(Variant::Dark)) => " (terminal background: dark)",
+            (Mode::System, None) => " (terminal background not detected: using dark)",
+            _ => "",
+        };
+        self.info(format!(
+            "Theme: {}{note}. F4 cycles dark → light → system.",
+            mode.as_str()
+        ));
+    }
+
+    /// dark → light → system → dark (F4).
+    pub fn cycle_theme_mode(&mut self) {
+        self.set_theme_mode(self.config.theme_mode.next());
+    }
+
     /// `/copy`: put the last bot message (or last message) on the clipboard via OSC 52.
     pub fn copy_last_message(&mut self) -> std::result::Result<(), String> {
         let feed = self.feed();
@@ -2018,10 +2059,12 @@ impl App {
     }
 
     pub fn click(&mut self, col: u16, row: u16) {
-        if self
-            .account_area
-            .contains(ratatui::layout::Position::new(col, row))
-        {
+        let at = ratatui::layout::Position::new(col, row);
+        if let Some(&(_, mode)) = self.theme_areas.iter().find(|(r, _)| r.contains(at)) {
+            self.set_theme_mode(mode);
+            return;
+        }
+        if self.account_area.contains(at) {
             self.open_account_picker();
             return;
         }
@@ -2879,7 +2922,7 @@ pub mod tests {
         assert_eq!(app.active, Some(2));
         type_line(&mut app, "/account add b");
         app.account_area = Rect::new(0, 1, 24, 1);
-        // Clicking the @account header opens the account pick list.
+        // Clicking the @account switcher in the header opens the account pick list.
         app.click(2, 1);
         let p = app
             .picker

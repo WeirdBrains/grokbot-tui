@@ -39,25 +39,32 @@ In mock mode any token logs in except `bad`. Sending `reject` simulates a 4xx an
 ## Layout
 
 ```
-┌ grokbot-tui  account: default  login: cursor · box.cursorvm.com  bot: Helper ┐  top bar
-│ @default ⇄    ┌ Chat: Helper · Helper is replying ⠹ ─────────────────┐│  account header (click to cycle)
-│┌ Bots ──────┐│ you: hi                                               ││
-││ Helper     ││ Helper: hello!                                        ││  body: command output
-││ Coder      ││                                                       ││  and chat transcript
-│└────────────┘└───────────────────────────────────────────────────────┘│
-│┌ /command or message ─────────────────────────────────────────────────┐│  bottom input bar
-││ > _                                                                  ││
-│└──────────────────────────────────────────────────────────────────────┘│
+ ▄▀▀▀▀▀▀▀▀▀▀▄  ▗▛▜▖        ▜▌      ▜▛▜▖     ▟     account  @default ▾  F3            header
+ ▀▀▀▀▀▀▀▀▀▀▀▀  █   ▜▟▜▖▟▀▙ ▐▌▟▘    ▐▙▟▘▟▀▙ ▝█▀    theme  dark  light  system  F4     (logo, title,
+ ▀▀▀▀▀▀▀▀▀▀▀▀  ▜▖▜▌▐▌▝▘█ █ ▐▛▙     ▐▌▐▌█ █  █▗    login cursor · box.cursorvm.com     switchers)
+ ▀▀▀▀▀▀▀▀▀▀▀▀   ▀▀▘▀▀  ▝▀▘ ▀▘▝▘    ▀▀▀ ▝▀▘  ▝▘    mouse: on (F6)
+┌ Bots ──────┐┌ Chat: Helper · Helper is replying ⠹ ──────────────────┐
+│ Helper     ││ you: hi                                               │  body: command output
+│ Coder      ││ Helper: hello!                                        │  and chat transcript
+└────────────┘└───────────────────────────────────────────────────────┘
+┌ /command or message ──────────────────────────────────────────────────┐  bottom input bar
+│ > _                                                                   │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Top bar:** account alias, login (method and gateway host), and active bot.
-- **Account header:** the active account; click it to cycle through accounts.
+- **Header:** the Grok Bot logo and title, then the account switcher (`@alias ▾`: click it or press
+  `F3` to pick an account), the theme switcher, the login (method and gateway host), the active bot and
+  the mouse state. Terminals smaller than 80 × 24 get a one-row header with the same switchers.
+- **Theme:** `dark`, `light` or `system`. Click one in the header, press `F4` to cycle, or run
+  `/theme [dark|light|system]`. `system` follows the terminal background (OSC 11 query at startup,
+  else `$COLORFGBG`, else dark). Saved in the global pref `ui.theme_mode` (default `system`).
 - **Sidebar:** the account's bots (agents flagged hidden-from-sidebar are left out unless `show_hidden_bots` is on). Click one to switch to its chat.
 - **Body:** each bot has its own log. Chats are restored from the local database, then kept current by polling.
 - **Bottom bar:** `/`-prefixed input runs a command; plain text is sent to the active bot.
 
 Keys: `Enter` submit · `Tab` toggle focus input/sidebar · `↑/↓` (or `j/k`) + `Enter` in sidebar to pick a bot ·
-`↑/↓`, `PgUp/PgDn`, mouse wheel scroll body · `Esc` cancel a prompt · `Ctrl-C`/`Ctrl-D` quit.
+`↑/↓`, `PgUp/PgDn`, mouse wheel scroll body · `Esc` cancel a prompt · `Ctrl-C`/`Ctrl-D` quit ·
+`F1` help · `F2` pick a bot · `F3` pick an account · `F4` cycle theme · `F6` mouse capture on/off.
 
 ### Responsiveness
 
@@ -87,6 +94,7 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 100 entries):
 | `/account rename <old> <new>` | Rename an account |
 | `/account remove <alias>` | Delete an account and all its data; you confirm by typing the alias (the active account can't be removed) |
 | `/prefs` (`/pref`) | List preferences; `/prefs get <key>`, `/prefs set <key> <value>` |
+| `/theme [dark\|light\|system]` (`/mode`) | Switch the theme; bare `/theme` cycles (also `F4` or a header click) |
 | `/memory` (`/mem`) | The active bot's local memory notes; `/memory add <key> <value>`, `/memory clear [key]` |
 | `/quit` (`/q`, `/exit`) | Exit |
 
@@ -215,7 +223,7 @@ The old placeholder-API tokens are **dropped** because they never pointed at a r
 v3→v4 allows method `desktop` and adds `credentials.desktop_entry`, keeping existing logins.
 The earlier one-time import from `~/.grokbot-tui` was removed, since everything it imported is now dead.
 
-**Preferences:** account-scoped `default_bot`, `active_bot` (automatic), `show_hidden_bots` (`false`); global `ui.sidebar_width` (`24`), `active_account`.
+**Preferences:** account-scoped `default_bot`, `active_bot` (automatic), `show_hidden_bots` (`false`); global `ui.sidebar_width` (`24`), `ui.theme_mode` (`dark`/`light`/`system`, default `system`), `active_account`.
 
 ## grokbot_api
 

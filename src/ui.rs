@@ -3,11 +3,275 @@
 //! All colors, borders and padding come from [`crate::theme`] (ratatui-lipgloss styles);
 //! this module only lays things out.
 use crate::app::{App, EntryKind, Focus, InputMode};
-use crate::theme;
+use crate::theme::{self, Mode};
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph, Wrap};
+use tui_big_text::{BigText, PixelSize};
+use unicode_width::UnicodeWidthStr;
+
+/// Rows of the tall header (logo, big title, four info rows); the compact header is 1 row.
+pub const TALL_HEADER_ROWS: u16 = 4;
+/// The tall header needs at least this many columns (logo + title + info) …
+pub const TALL_MIN_WIDTH: u16 = 80;
+/// … and this many rows, so the chat keeps enough room; otherwise the header is compact.
+pub const TALL_MIN_HEIGHT: u16 = 24;
+
+/// The header's size for a terminal of `area`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeaderKind {
+    /// Logo, big "Grok Bot" title and four info rows.
+    Tall,
+    /// One row: name tag, account and theme switchers, login, bot, mouse.
+    Compact,
+}
+
+impl HeaderKind {
+    pub fn rows(self) -> u16 {
+        match self {
+            HeaderKind::Tall => TALL_HEADER_ROWS,
+            HeaderKind::Compact => 1,
+        }
+    }
+}
+
+/// Tall when the terminal is at least [`TALL_MIN_WIDTH`] × [`TALL_MIN_HEIGHT`], else compact.
+pub fn header_kind(area: Rect) -> HeaderKind {
+    if area.width >= TALL_MIN_WIDTH && area.height >= TALL_MIN_HEIGHT {
+        HeaderKind::Tall
+    } else {
+        HeaderKind::Compact
+    }
+}
+
+/// The header title, drawn large with tui-big-text (4 columns × 4 rows per glyph).
+pub const TITLE: &str = "Grok Bot";
+
+/// The Grok Bot logo (the desktop app's icon: a white ball with two slanted eyes on a dark
+/// squircle) as 12 × 8 pixels, drawn with half blocks as 12 columns × 4 rows.
+/// `d` = dark, `W` = white, space = transparent. Generated from the app's
+/// `resources/icon.png` (512 px): box-resampled to 12 × 8, luminance threshold 140.
+const LOGO: [&str; 8] = [
+    " dddddddddd ",
+    "ddddWWWddddd",
+    "dWWWWWWWWWdd",
+    "WWWWWdWWddWd",
+    "WWWWWddWWWWW",
+    "WWWWWWdWWWWW",
+    "WWWWWWWWWWWW",
+    " WWWWWWWWWW ",
+];
+/// Columns the logo takes.
+pub const LOGO_WIDTH: u16 = 12;
+
+/// Draw [`LOGO`] at the top-left of `area` (clipped), leaving transparent pixels alone.
+fn draw_logo(buf: &mut Buffer, area: Rect) {
+    let (dark, white) = theme::logo_colors();
+    let px = |row: usize, col: usize| match LOGO[row].as_bytes().get(col) {
+        Some(b'd') => Some(dark),
+        Some(b'W') => Some(white),
+        _ => None,
+    };
+    for r in 0..(LOGO.len() / 2).min(area.height as usize) {
+        for c in 0..(LOGO_WIDTH as usize).min(area.width as usize) {
+            let pos = Position::new(area.x + c as u16, area.y + r as u16);
+            let Some(cell) = buf.cell_mut(pos) else {
+                continue;
+            };
+            match (px(2 * r, c), px(2 * r + 1, c)) {
+                (Some(top), Some(bottom)) => {
+                    cell.set_symbol("▀").set_fg(top).set_bg(bottom);
+                }
+                (Some(top), None) => {
+                    cell.set_symbol("▀").set_fg(top);
+                }
+                (None, Some(bottom)) => {
+                    cell.set_symbol("▄").set_fg(bottom);
+                }
+                (None, None) => {}
+            }
+        }
+    }
+}
+
+/// What a click on a header segment does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Target {
+    Account,
+    Mode(Mode),
+}
+
+/// A piece of header text, optionally clickable.
+struct Seg {
+    text: String,
+    style: ratatui_lipgloss::Style,
+    target: Option<Target>,
+}
+
+fn seg(text: impl Into<String>, style: ratatui_lipgloss::Style) -> Seg {
+    Seg {
+        text: text.into(),
+        style,
+        target: None,
+    }
+}
+
+fn hit(text: impl Into<String>, style: ratatui_lipgloss::Style, target: Target) -> Seg {
+    Seg {
+        text: text.into(),
+        style,
+        target: Some(target),
+    }
+}
+
+/// Render `segs` on the single row `area`, recording where the clickable ones landed.
+fn render_segs(f: &mut Frame, app: &mut App, area: Rect, segs: Vec<Seg>) {
+    let mut x = area.x;
+    let mut spans = Vec::with_capacity(segs.len());
+    for s in segs {
+        let w = s.text.width() as u16;
+        let visible = area.right().saturating_sub(x).min(w);
+        if let Some(t) = s.target
+            && visible > 0
+        {
+            let r = Rect::new(x, area.y, visible, 1);
+            match t {
+                Target::Account => app.account_area = r,
+                Target::Mode(m) => app.theme_areas.push((r, m)),
+            }
+        }
+        x = x.saturating_add(w);
+        spans.push(s.style.span(s.text));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// "account  @alias ▾  F3" (no label when compact)
+fn account_segs(app: &App, compact: bool) -> Vec<Seg> {
+    let label = if compact { "" } else { "account " };
+    vec![
+        seg(label, theme::header_label()),
+        hit(
+            format!(" @{} ▾ ", app.account().alias),
+            theme::account_switch(),
+            Target::Account,
+        ),
+        seg(" F3", theme::key_hint()),
+    ]
+}
+
+/// "theme  dark  light  system  F4 (→ dark)" (no label or "→" note when compact)
+fn theme_segs(app: &App, compact: bool) -> Vec<Seg> {
+    let current = app.config.theme_mode;
+    let label = if compact { "" } else { "theme " };
+    let mut v = vec![seg(label, theme::header_label())];
+    for m in Mode::ALL {
+        v.push(hit(
+            format!(" {} ", m.as_str()),
+            theme::mode_choice(m == current),
+            Target::Mode(m),
+        ));
+    }
+    v.push(seg(" F4", theme::key_hint()));
+    if current == Mode::System && !compact {
+        let v_name = match app.theme_variant() {
+            theme::Variant::Dark => "dark",
+            theme::Variant::Light => "light",
+        };
+        v.push(seg(format!(" (→ {v_name})"), theme::key_hint()));
+    }
+    v
+}
+
+fn login_and_bot(app: &App) -> (String, String) {
+    let user = match (&app.user_label, app.connecting) {
+        (Some(l), _) => l.clone(),
+        (None, true) => "connecting…".into(),
+        (None, false) => "not logged in".into(),
+    };
+    let bot = app
+        .active_bot()
+        .map(|b| b.name.clone())
+        .unwrap_or_else(|| "none".into());
+    (user, bot)
+}
+
+fn mouse_seg(app: &App) -> Seg {
+    if app.mouse_capture {
+        seg("mouse: on (F6)", theme::mouse_on())
+    } else {
+        seg("mouse: OFF — select text freely (F6)", theme::mouse_off())
+    }
+}
+
+/// The header: tall (logo, big title, four info rows) or one compact row.
+fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
+    app.account_area = Rect::default();
+    app.theme_areas.clear();
+    f.render_widget(Block::new().style(theme::top_bar()), area);
+    let (user, bot) = login_and_bot(app);
+    match kind {
+        HeaderKind::Compact => {
+            // Most useful first, so a narrow terminal clips the least important parts.
+            let mut segs = vec![
+                seg(" grokbot-tui ", theme::brand()),
+                seg(" ", theme::top_bar()),
+            ];
+            segs.extend(account_segs(app, true));
+            segs.push(seg("  ", theme::top_bar()));
+            segs.extend(theme_segs(app, true));
+            segs.push(seg(
+                format!("  login: {user}  bot: {bot}  "),
+                theme::top_bar(),
+            ));
+            segs.push(mouse_seg(app));
+            if app.mock {
+                segs.push(seg("   [MOCK]", theme::mock_tag()));
+            }
+            render_segs(f, app, area, segs);
+        }
+        HeaderKind::Tall => {
+            let title_w = TITLE.chars().count() as u16 * 4;
+            let [_, logo, _, title, _, info] = Layout::horizontal([
+                Constraint::Length(1),
+                Constraint::Length(LOGO_WIDTH),
+                Constraint::Length(2),
+                Constraint::Length(title_w),
+                Constraint::Length(3),
+                Constraint::Min(0),
+            ])
+            .areas(area);
+            draw_logo(f.buffer_mut(), logo);
+            f.render_widget(
+                BigText::builder()
+                    .pixel_size(PixelSize::Quadrant)
+                    .style(theme::title())
+                    .lines(vec![Line::from(TITLE)])
+                    .build(),
+                title,
+            );
+            let rows: [Rect; 4] = Layout::vertical([Constraint::Length(1); 4]).areas(info);
+            let segs = account_segs(app, false);
+            render_segs(f, app, rows[0], segs);
+            let segs = theme_segs(app, false);
+            render_segs(f, app, rows[1], segs);
+            let segs = vec![
+                seg("login ", theme::header_label()),
+                seg(user, theme::top_bar()),
+                seg("   bot ", theme::header_label()),
+                seg(bot, theme::top_bar()),
+            ];
+            render_segs(f, app, rows[2], segs);
+            let mut segs = vec![mouse_seg(app)];
+            if app.mock {
+                segs.push(seg("   [MOCK]", theme::mock_tag()));
+            }
+            render_segs(f, app, rows[3], segs);
+        }
+    }
+}
 
 /// Input text as shown (masked for token prompts) and its cursor byte offset.
 fn input_shown(app: &App) -> (String, usize) {
@@ -21,14 +285,17 @@ fn input_shown(app: &App) -> (String, usize) {
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
+    theme::set_variant(app.theme_variant());
+    f.render_widget(Block::new().style(theme::base()), f.area());
     // Input box: char-wrapped to its width, grows to 10 rows, then scrolls.
     let (shown, cur) = input_shown(app);
     let text_w = f.area().width.saturating_sub(4).max(1) as usize; // borders + "> "
     let il = crate::input::layout(&shown, cur, text_w);
     let vis = crate::input::visible_rows(il.rows.len());
     app.input_scroll = crate::input::scroll_for(app.input_scroll, il.cursor.0, il.rows.len(), vis);
+    let header = header_kind(f.area());
     let [top, mid, bottom] = Layout::vertical([
-        Constraint::Length(1),
+        Constraint::Length(header.rows()),
         Constraint::Min(3),
         Constraint::Length(vis as u16 + 2),
     ])
@@ -39,42 +306,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     ])
     .areas(mid);
 
-    // Top bar
-    let user = match (&app.user_label, app.connecting) {
-        (Some(l), _) => l.as_str(),
-        (None, true) => "connecting…",
-        (None, false) => "not logged in",
-    };
-    let bot = app.active_bot().map(|b| b.name.as_str()).unwrap_or("none");
-    let mut spans = vec![
-        theme::brand().span(" grokbot-tui "),
-        Span::raw(format!(
-            "  account: {}   login: {user}   bot: {bot}",
-            app.account().alias
-        )),
-    ];
-    spans.push(if app.mouse_capture {
-        theme::mouse_on().span("   mouse: on (F6)")
-    } else {
-        theme::mouse_off().span("   mouse: OFF — select text freely (F6)")
-    });
-    if app.mock {
-        spans.push(theme::mock_tag().span("   [MOCK]"));
-    }
-    f.render_widget(
-        Paragraph::new(Line::from(spans)).style(theme::top_bar()),
-        top,
-    );
+    draw_header(f, app, top, header);
 
-    // Sidebar: clickable account header (cycles accounts) above the bot list.
-    let [acct, side] = Layout::vertical([Constraint::Length(1), Constraint::Min(2)]).areas(side);
-    app.account_area = acct;
-    let n_accounts = app.store.accounts().map(|a| a.len()).unwrap_or(1);
-    let hint = if n_accounts > 1 { " ⇄" } else { "" };
-    f.render_widget(
-        Paragraph::new(format!(" @{}{hint}", app.account().alias)).style(theme::account_header()),
-        acct,
-    );
+    // Sidebar: the bot list (the account switcher is in the header).
     app.sidebar_area = side;
     let items: Vec<ListItem> = app
         .bots
@@ -498,13 +732,120 @@ mod tests {
         term.draw(|f| draw(f, &mut app)).unwrap();
         let buf = term.backend().buffer().clone();
         let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        // 120x20 is too short for the tall header: one compact row.
+        assert_eq!(header_kind(Rect::new(0, 0, 120, 20)), HeaderKind::Compact);
         assert!(text.contains("grokbot-tui"), "{text}");
-        assert!(text.contains("account: default"));
         assert!(text.contains("login: gateway · box.cursorvm.com"), "{text}");
-        assert!(text.contains("@default"));
-        assert!(text.contains("bot: Helper"));
+        assert!(text.contains("@default ▾"), "{text}");
+        assert!(text.contains("bot: Helper"), "{text}");
+        assert!(text.contains(" dark  light  system  F4"), "{text}");
         assert!(text.contains("Coder"));
         assert_eq!(app.sidebar_area.width, 24);
+        // The sidebar no longer has an account header: it starts right under the bar.
+        assert_eq!(app.sidebar_area.y, 1);
+        assert_eq!(app.account_area.y, 0);
+        assert_eq!(app.theme_areas.len(), 3);
+    }
+
+    #[test]
+    fn header_kind_falls_back_to_compact_in_small_terminals() {
+        let k = |w, h| header_kind(Rect::new(0, 0, w, h));
+        assert_eq!(k(80, 24), HeaderKind::Tall);
+        assert_eq!(k(200, 60), HeaderKind::Tall);
+        assert_eq!(k(79, 40), HeaderKind::Compact);
+        assert_eq!(k(120, 23), HeaderKind::Compact);
+        assert_eq!(k(40, 30), HeaderKind::Compact);
+        assert_eq!(HeaderKind::Tall.rows(), 4);
+        assert_eq!(HeaderKind::Compact.rows(), 1);
+    }
+
+    #[test]
+    fn tall_header_has_logo_title_and_switchers() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        crate::app::tests::mock_login(&mut app, "t");
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let r = screen_rows(&term);
+        let header = r[..4].join("\n");
+        // Logo: half blocks in columns 1..13 on all four rows.
+        for row in &r[..4] {
+            let logo: String = row.chars().skip(1).take(12).collect();
+            assert!(logo.contains('▀') || logo.contains('▄'), "{header}");
+        }
+        // Big title: quadrant glyphs between the logo and the info column.
+        let title: String = r[1].chars().skip(15).take(32).collect();
+        assert!(
+            title.chars().any(|c| ('▖'..='▟').contains(&c)
+                || c == '█'
+                || c == '▀'
+                || c == '▄'
+                || c == '▌'
+                || c == '▐'),
+            "{header}"
+        );
+        assert!(r[0].contains("account  @default ▾  F3"), "{header}");
+        assert!(
+            r[1].contains("theme  dark  light  system  F4 (→ dark)"),
+            "{header}"
+        );
+        assert!(
+            r[2].contains("login gateway · box.cursorvm.com   bot Helper"),
+            "{header}"
+        );
+        assert!(r[3].contains("mouse: on (F6)"), "{header}");
+        // The sidebar starts under the 4-row header and the account switcher is clickable.
+        assert_eq!(app.sidebar_area.y, 4);
+        assert_eq!(app.account_area.y, 0);
+        let modes: Vec<Mode> = app.theme_areas.iter().map(|(_, m)| *m).collect();
+        assert_eq!(modes, Mode::ALL);
+        assert!(app.theme_areas.iter().all(|(a, _)| a.y == 1));
+    }
+
+    #[test]
+    fn clicking_header_switches_theme_and_opens_account_picker() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let (light, _) = app.theme_areas[1];
+        app.click(light.x + 1, light.y);
+        assert_eq!(app.config.theme_mode, Mode::Light);
+        assert_eq!(app.theme_variant(), theme::Variant::Light);
+        // Saved as a global pref and survives a reload.
+        app.reload_config().unwrap();
+        assert_eq!(app.config.theme_mode, Mode::Light);
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        assert_eq!(theme::variant(), theme::Variant::Light);
+        let r = screen_rows(&term);
+        assert!(!r[1].contains("(→"), "{r:#?}");
+        // The header background follows the variant.
+        let bg = term.backend().buffer()[(60, 3)].bg;
+        assert_eq!(
+            bg,
+            ratatui::style::Style::from(theme::top_bar()).bg.unwrap()
+        );
+        let acct = app.account_area;
+        app.click(acct.x + 2, acct.y);
+        assert!(
+            app.picker.is_some(),
+            "account switcher click opens the picker"
+        );
+        theme::set_variant(theme::Variant::Dark);
+    }
+
+    #[test]
+    fn compact_header_switchers_are_clickable() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        assert_eq!(app.theme_areas.len(), 3);
+        let (dark, m) = app.theme_areas[0];
+        assert_eq!(m, Mode::Dark);
+        app.click(dark.x, 0);
+        assert_eq!(app.config.theme_mode, Mode::Dark);
+        theme::set_variant(theme::Variant::Dark);
     }
 
     fn screen_rows(term: &Terminal<TestBackend>) -> Vec<String> {

@@ -1,6 +1,7 @@
 //! grokbot-tui — terminal UI for Grok Bot.
 mod api;
 mod app;
+mod appearance;
 mod commands;
 mod config;
 mod datadir;
@@ -104,6 +105,9 @@ fn main() -> Result<()> {
     }
 
     let mut term = ratatui::init();
+    // Raw mode is on and nothing reads input yet: ask the terminal for its background
+    // (for the "system" theme mode) before mouse capture and the event loop start.
+    app.detected_variant = appearance::detect();
     execute!(std::io::stdout(), EnableMouseCapture)?;
     enable_shift_enter();
     let res = run(&mut term, &mut app);
@@ -167,6 +171,10 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                 }
                 if k.code == KeyCode::F(3) {
                     app.open_account_picker();
+                    continue;
+                }
+                if k.code == KeyCode::F(4) {
+                    app.cycle_theme_mode();
                     continue;
                 }
                 if app.shell.is_some() {

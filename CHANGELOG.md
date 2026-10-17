@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-17
+
+### Added
+
+- **Tall header** (4 rows instead of 1): the Grok Bot logo as half-block art (made from the
+  desktop app's icon), a big "Grok Bot" title (tui-big-text, quadrant pixels), and info
+  rows for the account, theme, login, bot and mouse state.
+- **Account switcher in the header**: `@alias ▾`. Click it or press F3 to open the account
+  pick list.
+- **Light theme and a dark / light / system switcher in the header.** Click a choice, press
+  **F4** to cycle, or use `/theme [dark|light|system]`. `system` follows the terminal
+  background (OSC 11 query at startup, else `$COLORFGBG`, else dark). The choice is saved
+  in the global pref `ui.theme_mode` (default `system`). New `/help theme` page.
+
+### Changed
+
+- Terminals smaller than 80 × 24 get a compact one-row header with the same switchers.
+- The sidebar's `@account` header is gone (the switcher lives in the top bar now), so the
+  bot list starts right under the header.
+
 ## [1.2.4] - 2026-10-17
 
 ### Changed
@@ -257,7 +277,8 @@ First release.
   handled like 401, re-reading or re-exchanging the credential.
 - A build break caused by quotes inside the delivery help text.
 
-[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.4...HEAD
+[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.4...v1.3.0
 [1.2.4]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.1...v1.2.2

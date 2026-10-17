@@ -22,8 +22,11 @@ pub const PREF_CLIENT_VERSION: &str = "cursor.client_version";
 pub const PREF_CLIENT_TYPE: &str = "cursor.client_type";
 pub const PREF_SANDBOX_NAMESPACE: &str = "sand.box_namespace";
 
+/// Pref key for the appearance: `dark`, `light` or `system` (global).
+pub const PREF_THEME_MODE: &str = "ui.theme_mode";
+
 /// Preference keys shared by all accounts. Every other key is account-scoped.
-pub const GLOBAL_KEYS: &[&str] = &["active_account", "ui.sidebar_width"];
+pub const GLOBAL_KEYS: &[&str] = &["active_account", "ui.sidebar_width", PREF_THEME_MODE];
 
 pub fn is_global(key: &str) -> bool {
     GLOBAL_KEYS.contains(&key)
@@ -41,6 +44,8 @@ pub struct Config {
     pub client_version: Option<String>,
     pub client_type: Option<String>,
     pub sandbox_namespace: Option<String>,
+    /// Appearance: dark, light or system (follow the terminal background).
+    pub theme_mode: crate::theme::Mode,
 }
 
 impl Default for Config {
@@ -53,6 +58,7 @@ impl Default for Config {
             client_version: None,
             client_type: None,
             sandbox_namespace: None,
+            theme_mode: crate::theme::Mode::System,
         }
     }
 }
@@ -68,6 +74,7 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_CLIENT_VERSION, String::new()),
         (PREF_CLIENT_TYPE, String::new()),
         (PREF_SANDBOX_NAMESPACE, String::new()),
+        (PREF_THEME_MODE, c.theme_mode.as_str().to_string()),
     ]
 }
 
@@ -87,6 +94,9 @@ impl Config {
             client_version: o(PREF_CLIENT_VERSION),
             client_type: o(PREF_CLIENT_TYPE),
             sandbox_namespace: o(PREF_SANDBOX_NAMESPACE),
+            theme_mode: o(PREF_THEME_MODE)
+                .and_then(|v| crate::theme::Mode::parse(&v))
+                .unwrap_or(d.theme_mode),
         }
     }
 }
@@ -106,5 +116,14 @@ mod tests {
         let c = Config::from_prefs(&m);
         assert_eq!(c.sidebar_width, 24);
         assert!(c.show_hidden_bots);
+        assert_eq!(c.theme_mode, crate::theme::Mode::System);
+        m.insert(PREF_THEME_MODE.into(), "light".into());
+        assert_eq!(Config::from_prefs(&m).theme_mode, crate::theme::Mode::Light);
+        m.insert(PREF_THEME_MODE.into(), "purple".into());
+        assert_eq!(
+            Config::from_prefs(&m).theme_mode,
+            crate::theme::Mode::System
+        );
+        assert!(is_global(PREF_THEME_MODE));
     }
 }

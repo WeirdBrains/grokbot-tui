@@ -65,6 +65,13 @@ pub fn registry() -> Registry {
                 run: mouse,
             },
             Command {
+                name: "theme",
+                aliases: &["mode"],
+                usage: "/theme [dark|light|system]",
+                help: "Switch the appearance; bare /theme cycles dark → light → system (also F4)",
+                run: theme,
+            },
+            Command {
                 name: "copy",
                 aliases: &[],
                 usage: "/copy",
@@ -255,6 +262,17 @@ fn whoami(app: &mut App, _: &str) -> Result<()> {
     lines.push(format!("database: {}", app.store.db_path().display()));
     lines.push("(The gateway has no identity call, so no user name is available.)".into());
     app.info(lines.join("\n"));
+    Ok(())
+}
+
+fn theme(app: &mut App, args: &str) -> Result<()> {
+    match args.trim() {
+        "" => app.cycle_theme_mode(),
+        a => match crate::theme::Mode::parse(a) {
+            Some(m) => app.set_theme_mode(m),
+            None => bail!("Usage: /theme [dark|light|system]"),
+        },
+    }
     Ok(())
 }
 
