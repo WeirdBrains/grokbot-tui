@@ -1,0 +1,106 @@
+# Builds a release automatically when a new version lands on main.
+#
+# On every push to main (including merged pull requests) and on every pushed v* tag:
+#   1. run CI (ci.yml);
+#   2. read the version from Cargo.toml; the release tag is v<version>;
+#   3. if a GitHub Release for that tag already exists, or a Release run for it is
+#      already queued or running, do nothing;
+#   4. otherwise create and push the annotated tag if it doesn't exist yet (a tag you
+#      pushed yourself is used as is), then start release.yml (cargo-dist) for it.
+#
+# Tags pushed with GITHUB_TOKEN don't trigger other workflows, so release.yml is
+# started with workflow_dispatch (dist-workspace.toml: dispatch-releases = true),
+# which GITHUB_TOKEN may trigger. No personal access token is needed.
+name: Auto release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+permissions:
+  contents: read
+
+# One run at a time, so two pushes can't start two releases for the same version.
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write # push the release tag
+      actions: write # start release.yml
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Needed to push the tag; the token is removed when the job ends.
+          persist-credentials: true
+      - name: Read the version from Cargo.toml
+        id: version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 |
+            jq -r '.packages[] | select(.name == "grokbot-tui") | .version')
+          [[ -n $version && $version != null ]]
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Cargo.toml version: $version"
+      - name: Decide whether to release
+        id: decide
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          EVENT_REF: ${{ github.ref }}
+        run: |
+          release=true
+          if [[ $EVENT_REF == refs/tags/* && $EVENT_REF != "refs/tags/$TAG" ]]; then
+            echo "::notice::Pushed tag ${EVENT_REF#refs/tags/} doesn't match Cargo.toml ($TAG); nothing to release."
+            release=false
+          elif gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::notice::Release $TAG already exists; nothing to do."
+            release=false
+          else
+            active=$(gh run list --workflow release.yml --event workflow_dispatch --limit 50 \
+              --json headBranch,status \
+              --jq "[.[] | select(.headBranch == \"$TAG\" and .status != \"completed\")] | length")
+            if (( active > 0 )); then
+              echo "::notice::A Release run for $TAG is already queued or running; nothing to do."
+              release=false
+            fi
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+      - name: Create the tag if it doesn't exist
+        if: steps.decide.outputs.release == 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+            echo "Tag $TAG already exists; releasing it as is."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "grokbot-tui ${TAG#v}" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG"
+          fi
+      - name: Start the release workflow
+        if: steps.decide.outputs.release == 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh workflow run release.yml --ref "$TAG" -f tag="$TAG"
+          # Wait until the run is listed, so a following auto-release run sees it.
+          for _ in $(seq 1 30); do
+            n=$(gh run list --workflow release.yml --event workflow_dispatch --limit 20 \
+              --json headBranch --jq "[.[] | select(.headBranch == \"$TAG\")] | length")
+            (( n > 0 )) && { echo "Release run for $TAG started."; exit 0; }
+            sleep 2
+          done
+          echo "::warning::Started release.yml for $TAG but the run isn't listed yet."

@@ -57,6 +57,19 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
   `--data-dir` still overrides everything.
 - Help text and docs call the app `grokbot-tui` and list the new names.
 
+### Added
+
+- **Automatic releases.** Pushing or merging to `main` with a bumped version in
+  `Cargo.toml` builds a release: `.github/workflows/auto-release.yml` runs CI, creates and
+  pushes the `v<version>` tag if it's missing (a tag you pushed yourself is used as is),
+  and starts the cargo-dist release (archives, installers, Homebrew formula, `.pkg`,
+  `.msi`, `.deb`/`.rpm`, AUR/winget manifests). It does nothing when that version already
+  has a release or a release run in progress. `release.yml` is now started with
+  `workflow_dispatch` (`dispatch-releases = true`) instead of a tag push, so the default
+  `GITHUB_TOKEN` is enough; no personal access token is needed. See PACKAGING.md.
+- **CI** (`.github/workflows/ci.yml`): `cargo fmt --check`, clippy with `-D warnings`,
+  tests and a release build on pull requests and branch pushes.
+
 ## [1.1.0] - 2026-10-17
 
 ### Changed

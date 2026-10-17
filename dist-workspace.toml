@@ -17,6 +17,10 @@ install-path = "CARGO_HOME"
 hosting = "github"
 # Whether to install an updater program
 install-updater = false
+# Releases are started by workflow_dispatch (tag input) instead of a tag push, so
+# .github/workflows/auto-release.yml can start one with the default GITHUB_TOKEN
+# (tags pushed with GITHUB_TOKEN don't trigger workflows; dispatches do).
+dispatch-releases = true
 # wix/main.wxs is hand-edited (MSI product/folder named grokbot-tui).
 # Keep dist from overwriting it or failing CI because it differs from its template.
 allow-dirty = ["msi"]

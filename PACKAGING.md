@@ -1,7 +1,7 @@
 # Packaging and releases
 
-Releases are built by GitHub Actions when you push a version tag. Nothing is built or
-signed on a local machine, and nothing is published outside this repository's GitHub
+Releases are built by GitHub Actions automatically: push or merge to `main` with a bumped
+version in `Cargo.toml` and a release gets built. Nothing is built or signed on a local machine, and nothing is published outside this repository's GitHub
 Releases unless you complete the manual steps below.
 
 ## What a release produces
@@ -32,13 +32,33 @@ Releases before 1.2.0 used `gb-` (the old package name). No `.dmg` is built; the
 1. Bump `version` in `[package]` in `Cargo.toml`.
 2. In `CHANGELOG.md`, rename `[Unreleased]` to the new version and date, then add a
    new empty `[Unreleased]` section.
-3. Commit, then tag and push:
-   ```sh
-   git tag v0.1.0
-   git push origin main v0.1.0
-   ```
-   The tag must match the Cargo version. A tag with a pre-release suffix such as
-   `v0.2.0-rc.1` makes a GitHub pre-release and skips the manifest job.
+3. Commit and push (or merge a pull request) to `main`. That's all:
+   `.github/workflows/auto-release.yml` takes it from there:
+   - runs CI (`ci.yml`: fmt, clippy `-D warnings`, tests, release build) and stops if it fails;
+   - reads the version from `Cargo.toml`; the release tag is `v<version>`;
+   - does nothing if a GitHub Release for that tag already exists, or a Release run for it
+     is already queued or running (so pushes that don't bump the version, and repeated
+     pushes, never make a second release);
+   - otherwise creates and pushes the annotated tag `v<version>` on the pushed commit
+     (unless the tag already exists, see below) and starts `release.yml` for it.
+
+   **Tagging yourself still works.** If you create and push `v<version>` yourself (e.g.
+   `git push origin main v1.2.0`), the tag is used as is: auto-release runs for the
+   branch push and for the tag push, one of them starts the release, the other sees it
+   queued or done and stops. A pushed tag that doesn't match the `Cargo.toml` version at
+   that commit is ignored. If a release run fails, the next push to `main` (or re-running
+   the failed workflow) tries again.
+
+   **Why `workflow_dispatch`:** tags pushed with the default `GITHUB_TOKEN` don't trigger
+   other workflows, so `release.yml` no longer starts on tag pushes. It's started with
+   `workflow_dispatch` (`dispatch-releases = true` in `dist-workspace.toml`), which
+   `GITHUB_TOKEN` is allowed to trigger. No personal access token or extra secret is
+   needed; the job only uses `contents: write` (push the tag) and `actions: write`
+   (start the run). To start a release by hand: Actions → Release → Run workflow, with
+   the tag as input (`gh workflow run release.yml --ref v1.2.0 -f tag=v1.2.0`).
+
+   A version with a pre-release suffix such as `1.3.0-rc.1` makes a GitHub pre-release
+   and skips the manifest job.
 4. GitHub Actions runs `.github/workflows/release.yml`:
    - **`plan`**: decides what to build. On pull requests it runs only this check.
    - **`build-local-artifacts`**: native builds for each target (archives, `.pkg`, `.msi`).
@@ -51,13 +71,18 @@ Releases before 1.2.0 used `gb-` (the old package name). No `.dmg` is built; the
      (`packaging/render-manifests.sh`), generates `.SRCINFO` in an Arch container,
      checks the PKGBUILDs with `namcap`, and attaches the bundle.
 
-To preview locally: `dist plan --tag v0.1.0` (install cargo-dist 0.33.0).
+To preview locally: `dist plan --tag v1.2.0` (install cargo-dist 0.33.0).
+
+Pull requests and pushes to other branches run `ci.yml`; `release.yml` also runs its
+`plan` step on pull requests.
 
 ### Changing the release configuration
 
 - cargo-dist config is in `dist-workspace.toml` (plus `[profile.dist]` in `Cargo.toml`).
   After editing it, run `dist generate` to regenerate `release.yml`. Do not hand-edit
   `release.yml`; CI checks that it matches the config.
+  `auto-release.yml` and `ci.yml` are ours, not generated, so `dist generate` leaves them
+  alone; keep `dispatch-releases = true`, or auto-release can't start `release.yml`.
 - `wix/main.wxs` is hand-edited (product named `grokbot-tui`) and excluded
   from that check with `allow-dirty = ["msi"]`. Keep the upgrade GUIDs in
   `Cargo.toml` unchanged, or Windows upgrades will install side by side.
