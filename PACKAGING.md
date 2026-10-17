@@ -29,7 +29,7 @@ Releases before 1.2.0 used `gb-` (the old package name). No `.dmg` is built; the
 
 ## Cutting a release
 
-1. Bump the version in the root `Cargo.toml` (`[workspace.package] version`).
+1. Bump `version` in `[package]` in `Cargo.toml`.
 2. In `CHANGELOG.md`, rename `[Unreleased]` to the new version and date, then add a
    new empty `[Unreleased]` section.
 3. Commit, then tag and push:
@@ -58,11 +58,11 @@ To preview locally: `dist plan --tag v0.1.0` (install cargo-dist 0.33.0).
 - cargo-dist config is in `dist-workspace.toml` (plus `[profile.dist]` in `Cargo.toml`).
   After editing it, run `dist generate` to regenerate `release.yml`. Do not hand-edit
   `release.yml`; CI checks that it matches the config.
-- `crates/grokbot-tui/wix/main.wxs` is hand-edited (product named `grokbot-tui`) and excluded
+- `wix/main.wxs` is hand-edited (product named `grokbot-tui`) and excluded
   from that check with `allow-dirty = ["msi"]`. Keep the upgrade GUIDs in
-  `crates/grokbot-tui/Cargo.toml` unchanged, or Windows upgrades will install side by side.
+  `Cargo.toml` unchanged, or Windows upgrades will install side by side.
 - `.deb` / `.rpm` contents: `[package.metadata.deb]` and
-  `[package.metadata.generate-rpm]` in `crates/grokbot-tui/Cargo.toml`.
+  `[package.metadata.generate-rpm]` in `Cargo.toml`.
 - AUR / winget templates: `packaging/aur/*/PKGBUILD.in`, `packaging/winget/*.yaml.in`.
   Identity values are in `packaging/identity.env`. URLs and checksums are filled in
   at release time; never commit real checksums into the templates.
@@ -79,7 +79,7 @@ To preview locally: `dist plan --tag v0.1.0` (install cargo-dist 0.33.0).
 ## License metadata
 
 The project is licensed under BSD-3-Clause (`LICENSE` at the repo root). Each format
-takes the license from `[workspace.package] license` in `Cargo.toml`:
+takes the license from `[package] license` in `Cargo.toml`:
 
 | Format | License field | License text shipped |
 |---|---|---|
@@ -92,7 +92,7 @@ takes the license from `[workspace.package] license` in `Cargo.toml`:
 | `.msi` / `.pkg` | none | not included in the installer (the binary only) |
 
 To also install the license file with the MSI, follow the "license sidecar" comments in
-`crates/grokbot-tui/wix/main.wxs` (untested; needs a Windows build to verify).
+`wix/main.wxs` (untested; needs a Windows build to verify).
 
 ## Manual steps that need your accounts or secrets
 

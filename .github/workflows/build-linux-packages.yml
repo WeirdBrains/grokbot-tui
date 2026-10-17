@@ -40,7 +40,7 @@ jobs:
         run: |
           mkdir -p target/linux-packages
           cargo deb -p grokbot-tui --no-build --output target/linux-packages/
-          cargo generate-rpm -p crates/grokbot-tui --output target/linux-packages/
+          cargo generate-rpm --output target/linux-packages/
           cd target/linux-packages
           for f in *.deb *.rpm; do sha256sum "$f" > "$f.sha256"; done
           ls -l

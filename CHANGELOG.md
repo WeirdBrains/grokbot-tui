@@ -10,10 +10,13 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 ### Changed
 
-- **The Cargo package is renamed from `gb` to `grokbot-tui`**, matching the binary. The
-  crate now lives in `crates/grokbot-tui`. Build with `cargo build -p grokbot-tui` and
-  install from source with `cargo install --path ./crates/grokbot-tui` (the old
-  `crates/gb` path no longer exists).
+- **The Cargo package is renamed from `gb` to `grokbot-tui`**, matching the binary.
+- **The project is now a single crate instead of a Cargo workspace.** `crates/gb` was the
+  only member once `grokbot_api` moved to crates.io, so `src/`, `wix/` and the package
+  manifest now live at the repository root (no `[workspace]`, no `crates/` directory).
+  Build with `cargo build` and install from source with `cargo install --path .` from the
+  repository root. The cargo-dist, cargo-deb, cargo-generate-rpm and WiX settings are in
+  the root `Cargo.toml` / `dist-workspace.toml` with updated paths.
 - **Release artifacts are renamed** from `gb-<target>.*` to `grokbot-tui-<target>.*`
   (e.g. `grokbot-tui-x86_64-unknown-linux-gnu.tar.xz`, `grokbot-tui-installer.sh`,
   `grokbot-tui-x86_64-pc-windows-msvc.msi`). The AUR, winget and Linux-package templates

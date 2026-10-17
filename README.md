@@ -1,7 +1,7 @@
 # grokbot-tui — Grok Bot TUI
 
 A terminal UI for Grok Bot, written in Rust (2024 edition, Rust 1.89 or newer) with ratatui + crossterm.
-The `grokbot-tui` binary lives in [`crates/grokbot-tui`](crates/grokbot-tui). All networking goes through the
+The `grokbot-tui` binary is this repository's single crate ([`src/`](src)). All networking goes through the
 [`grokbot_api`](https://crates.io/crates/grokbot_api) crate from crates.io: an async client for every known
 Grok Bot gateway call, the Cursor EnsureSandBox exchange, and the credential host allowlist.
 
@@ -21,14 +21,14 @@ Prebuilt packages are attached to each [GitHub Release](https://github.com/m3tal
 - **Fedora:** `sudo dnf install ./grokbot-tui-<ver>-1.<arch>.rpm`
 - **Homebrew, AUR, winget:** once published (see PACKAGING.md), `brew install m3talsmith/tap/grokbot-tui`,
   `yay -S grokbot-tui-bin`, `winget install m3talsmith.grokbot-tui`
-- **From source:** `cargo install --path ./crates/grokbot-tui`
+- **From source:** `cargo install --path .` (from the repository root)
 
 ## Run
 
 ```sh
-cargo run -p grokbot-tui -- --mock         # offline: fake bots, delayed echo replies
-cargo run -p grokbot-tui                   # real gateway
-cargo install --path ./crates/grokbot-tui  # installs the `grokbot-tui` binary
+cargo run -- --mock                        # offline: fake bots, delayed echo replies
+cargo run                                  # real gateway
+cargo install --path .                     # installs the `grokbot-tui` binary
 grokbot-tui --data-dir /tmp/gbtest         # different data directory (holds context.db)
 grokbot-tui --account work                 # start in an account (or GROKBOT_TUI_ACCOUNT=work)
 ```
@@ -90,7 +90,7 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 100 entries):
 | `/memory` (`/mem`) | The active bot's local memory notes; `/memory add <key> <value>`, `/memory clear [key]` |
 | `/quit` (`/q`, `/exit`) | Exit |
 
-Commands live in a registry in `crates/grokbot-tui/src/commands.rs`.
+Commands live in a registry in `src/commands.rs`.
 
 ## Authentication
 
