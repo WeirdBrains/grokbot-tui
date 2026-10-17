@@ -26,16 +26,19 @@ dispatch-releases = true
 allow-dirty = ["msi"]
 # Homebrew formula name (same as the Cargo package and the binary).
 formula = "grokbot-tui"
-# Homebrew tap repo (users run `brew install WeirdBrains/tap/grokbot-tui`). Every release
-# pushes the formula there ("homebrew" in publish-jobs); this needs the repo to exist and a
-# HOMEBREW_TAP_TOKEN secret with write access to it (see PACKAGING.md).
+# Homebrew tap repo (users run `brew install WeirdBrains/tap/grokbot-tui`). The formula
+# (grokbot-tui.rb) is built and attached to every release. Pushing it to the tap is
+# switched off for now; see publish-jobs below.
 tap = "WeirdBrains/homebrew-tap"
 # Extra jobs (reusable workflows in .github/workflows/):
 # .deb/.rpm built alongside dist's artifacts, so they are attached to the release.
 global-artifacts-jobs = ["./build-linux-packages"]
-# Publish jobs: push the Homebrew formula to the tap, and render the AUR PKGBUILD +
-# winget manifests from the real release sha256s.
-publish-jobs = ["homebrew", "./publish-manifests"]
+# Publish jobs: render the AUR PKGBUILD + winget manifests from the real release sha256s.
+# Automatic Homebrew publishing is commented out until the WeirdBrains/homebrew-tap repo
+# and the HOMEBREW_TAP_TOKEN secret exist. To re-enable it, swap the two lines below and
+# run `dist generate` (see PACKAGING.md).
+# publish-jobs = ["homebrew", "./publish-manifests"]
+publish-jobs = ["./publish-manifests"]
 # publish-manifests uploads its files to the GitHub release.
 github-custom-job-permissions = { "publish-manifests" = { contents = "write" } }
 

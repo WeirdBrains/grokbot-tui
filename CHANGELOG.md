@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.2.4] - 2026-10-17
+
+### Changed
+
+- **Automatic Homebrew publishing is switched off for now**, until the
+  `WeirdBrains/homebrew-tap` repo and the `HOMEBREW_TAP_TOKEN` secret exist. `"homebrew"` is
+  commented out of `publish-jobs` in `dist-workspace.toml` (re-enabling is a one-line
+  change plus `dist generate`; see PACKAGING.md). The formula `grokbot-tui.rb` is still
+  built and attached to every release, and the `tap` setting is kept.
+
 ## [1.2.3] - 2026-10-17
 
 ### Added
@@ -247,7 +257,8 @@ First release.
   handled like 401, re-reading or re-exchanging the credential.
 - A build break caused by quotes inside the delivery help text.
 
-[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.3...HEAD
+[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.4...HEAD
+[1.2.4]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.0...v1.2.1
