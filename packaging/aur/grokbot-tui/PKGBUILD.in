@@ -16,26 +16,26 @@ sha256sums=('@SHA256_SOURCE@')
 _srcdir="@SOURCE_DIR@"
 
 prepare() {
-  cd "${_srcdir}"
+  cd "${_srcdir}" || exit 1
   export RUSTUP_TOOLCHAIN=stable
   cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
 }
 
 build() {
-  cd "${_srcdir}"
+  cd "${_srcdir}" || exit 1
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
   cargo build --frozen --release -p gb
 }
 
 check() {
-  cd "${_srcdir}"
+  cd "${_srcdir}" || exit 1
   export RUSTUP_TOOLCHAIN=stable
   cargo test --frozen -p gb
 }
 
 package() {
-  cd "${_srcdir}"
+  cd "${_srcdir}" || exit 1
   install -Dm755 target/release/grokbot-tui "${pkgdir}/usr/bin/grokbot-tui"
   install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
 }

@@ -20,7 +20,7 @@ tag=$1 version=$2 sums=$3 srcdir=$4 out=$5
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(cd "$here/.." && pwd)
 
-# shellcheck source=identity.env
+# shellcheck source=SCRIPTDIR/identity.env
 source "$here/identity.env"
 
 license=$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" |
