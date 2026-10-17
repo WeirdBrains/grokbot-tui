@@ -1,0 +1,56 @@
+# Builds .deb (cargo-deb) and .rpm (cargo-generate-rpm) for x86_64 and aarch64.
+# Called by release.yml (dist "global-artifacts-jobs"). Files uploaded as
+# `artifacts-*` are attached to the GitHub Release by dist's host job.
+name: Build Linux packages
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  linux-packages:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Install cargo-deb and cargo-generate-rpm
+        run: cargo install --locked cargo-deb cargo-generate-rpm
+      - name: Build
+        run: cargo build --release --locked -p gb
+      - name: Package .deb and .rpm
+        run: |
+          mkdir -p target/linux-packages
+          cargo deb -p gb --no-build --output target/linux-packages/
+          cargo generate-rpm -p crates/gb --output target/linux-packages/
+          cd target/linux-packages
+          for f in *.deb *.rpm; do sha256sum "$f" > "$f.sha256"; done
+          ls -l
+      - name: Smoke-test the .deb
+        run: |
+          sudo apt-get install -y ./target/linux-packages/*.deb
+          grokbot-tui --help
+          sudo apt-get remove -y grokbot-tui
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-linux-packages-${{ matrix.arch }}
+          path: target/linux-packages/*
