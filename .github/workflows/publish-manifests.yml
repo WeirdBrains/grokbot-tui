@@ -1,0 +1,73 @@
+# Renders the AUR PKGBUILDs and winget manifests from the published release's real
+# checksums and attaches them to the release as packaging-manifests-<tag>.tar.gz.
+# Called by release.yml (dist "publish-jobs") after the release exists. It does not
+# submit anything to the AUR or winget-pkgs; see PACKAGING.md for those steps.
+name: Publish packaging manifests
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  manifests:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PLAN: ${{ inputs.plan }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Read tag and version from the dist plan
+        id: plan
+        run: |
+          tag=$(jq -r '.announcement_tag' <<<"$PLAN")
+          version=$(jq -r '.releases[] | select(.app_name == "gb") | .app_version' <<<"$PLAN")
+          [[ -n $tag && $tag != null && -n $version && $version != null ]]
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Download checksums and source tarball from the release
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          mkdir -p checksums
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p '*.sha256' -D checksums
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p 'source.tar.gz' -D .
+          # Verify the tarball against the release checksum before trusting its layout.
+          echo "$(awk '{print $1}' checksums/source.tar.gz.sha256)  source.tar.gz" | sha256sum -c -
+      - name: Render manifests
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          srcdir=$(tar -tzf source.tar.gz | head -1 | cut -d/ -f1)
+          bash packaging/render-manifests.sh "$TAG" "$VERSION" checksums "$srcdir" out
+      - name: Generate .SRCINFO and check PKGBUILDs (Arch container)
+        run: |
+          docker run --rm -v "$PWD/out/aur:/aur" archlinux:base-devel bash -euc '
+            pacman -Sy --noconfirm --needed namcap >/dev/null
+            useradd -m builder
+            chown -R builder /aur
+            for d in /aur/*/; do
+              su builder -c "cd $d && makepkg --printsrcinfo > .SRCINFO && namcap PKGBUILD"
+            done
+            chmod -R a+rwX /aur'
+      - name: Bundle and attach to the release
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          bundle="packaging-manifests-$TAG.tar.gz"
+          tar -czf "$bundle" -C out .
+          sha256sum "$bundle" > "$bundle.sha256"
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$bundle" "$bundle.sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packaging-manifests
+          path: out/
+          include-hidden-files: true

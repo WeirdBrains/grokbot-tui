@@ -1,0 +1,41 @@
+# Maintainer: @MAINTAINER@
+# Generated from packaging/aur/grokbot-tui/PKGBUILD.in by packaging/render-manifests.sh.
+# Builds from the release's source tarball.
+pkgname=grokbot-tui
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc="Terminal UI for Grok Bot"
+arch=('x86_64' 'aarch64')
+url="https://github.com/m3talsmith/gb"
+license=('@LICENSE@')
+depends=('glibc' 'gcc-libs')
+makedepends=('cargo')
+conflicts=('grokbot-tui-bin')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/m3talsmith/gb/releases/download/@TAG@/source.tar.gz")
+sha256sums=('@SHA256_SOURCE@')
+_srcdir="@SOURCE_DIR@"
+
+prepare() {
+  cd "${_srcdir}"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "${_srcdir}"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release -p gb
+}
+
+check() {
+  cd "${_srcdir}"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo test --frozen -p gb
+}
+
+package() {
+  cd "${_srcdir}"
+  install -Dm755 target/release/grokbot-tui "${pkgdir}/usr/bin/grokbot-tui"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}

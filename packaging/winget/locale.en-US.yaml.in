@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: @WINGET_ID@
+PackageVersion: @VERSION@
+PackageLocale: en-US
+Publisher: @PUBLISHER@
+PublisherUrl: https://github.com/m3talsmith
+PublisherSupportUrl: https://github.com/m3talsmith/gb/issues
+PackageName: grokbot-tui
+PackageUrl: https://github.com/m3talsmith/gb
+License: @LICENSE@
+ShortDescription: Terminal UI for Grok Bot
+Description: A terminal user interface for Grok Bot. Chat with your bots, switch accounts, and keep a local history. Unofficial; uses the Grok Bot gateway API.
+Moniker: grokbot-tui
+Tags:
+  - grok
+  - tui
+  - terminal
+  - chat
+ReleaseNotesUrl: https://github.com/m3talsmith/gb/releases/tag/@TAG@
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

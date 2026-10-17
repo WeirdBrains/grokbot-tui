@@ -1,0 +1,23 @@
+# Maintainer: @MAINTAINER@
+# Generated from packaging/aur/grokbot-tui-bin/PKGBUILD.in by packaging/render-manifests.sh.
+# Prebuilt binaries from the GitHub release.
+pkgname=grokbot-tui-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc="Terminal UI for Grok Bot (prebuilt binary)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/m3talsmith/gb"
+license=('@LICENSE@')
+depends=('glibc' 'gcc-libs')
+provides=('grokbot-tui')
+conflicts=('grokbot-tui')
+source_x86_64=("gb-x86_64-unknown-linux-gnu-${pkgver}.tar.xz::https://github.com/m3talsmith/gb/releases/download/@TAG@/gb-x86_64-unknown-linux-gnu.tar.xz")
+source_aarch64=("gb-aarch64-unknown-linux-gnu-${pkgver}.tar.xz::https://github.com/m3talsmith/gb/releases/download/@TAG@/gb-aarch64-unknown-linux-gnu.tar.xz")
+sha256sums_x86_64=('@SHA256_LINUX_X86_64@')
+sha256sums_aarch64=('@SHA256_LINUX_AARCH64@')
+
+package() {
+  local dir="gb-${CARCH}-unknown-linux-gnu"
+  install -Dm755 "${dir}/grokbot-tui" "${pkgdir}/usr/bin/grokbot-tui"
+  install -Dm644 "${dir}/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}
