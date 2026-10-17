@@ -11,6 +11,20 @@ A terminal UI for Grok Bot, written in Rust (2024 edition) with ratatui + crosst
 > Its protocol was reverse-engineered from [grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli)
 > and **can change or break at any time**. Use `grokbot-tui --mock` to try the UI without a server.
 
+## Install
+
+Prebuilt packages are attached to each [GitHub Release](https://github.com/m3talsmith/gb/releases)
+(see [PACKAGING.md](PACKAGING.md) for how releases are made and what is published where):
+
+- **Shell installer (macOS/Linux):** the `gb-installer.sh` command shown in the release notes
+- **PowerShell (Windows):** the `gb-installer.ps1` command shown in the release notes
+- **Windows:** `gb-x86_64-pc-windows-msvc.msi` · **macOS:** `gb-<arch>.pkg` (unsigned)
+- **Debian/Ubuntu:** `sudo apt install ./grokbot-tui_<ver>-1_<arch>.deb`
+- **Fedora:** `sudo dnf install ./grokbot-tui-<ver>-1.<arch>.rpm`
+- **Homebrew, AUR, winget:** once published (see PACKAGING.md), `brew install m3talsmith/tap/grokbot-tui`,
+  `yay -S grokbot-tui-bin`, `winget install m3talsmith.grokbot-tui`
+- **From source:** `cargo install --path crates/gb`
+
 ## Run
 
 ```sh
