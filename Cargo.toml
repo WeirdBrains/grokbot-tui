@@ -1,9 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["crates/grokbot_api", "crates/gb"]
+members = ["crates/gb"]
 
 [workspace.package]
 edition = "2024"
+rust-version = "1.89"
 version = "1.0.0"
 license = "BSD-3-Clause"
 authors = ["Michael Christenson II <m3talsmith@gmail.com>"]

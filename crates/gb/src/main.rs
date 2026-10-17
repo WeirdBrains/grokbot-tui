@@ -33,7 +33,28 @@ struct Cli {
     data_dir: Option<std::path::PathBuf>,
 }
 
+/// Environment variables that grokbot_api 1.1 renamed: `(old gb name, new library name)`.
+/// The old names keep working: [`legacy_env_updates`] copies them at startup.
+const LEGACY_ENV: [(&str, &str); 2] = [
+    ("GB_ALLOW_LOCAL_GATEWAY", "GROKBOT_ALLOW_LOCAL_GATEWAY"),
+    ("GB_GROKBOT_APP_DIR", "GROKBOT_APP_DIR"),
+];
+
+/// The `(new name, value)` pairs to set so legacy `GB_` names keep working: an old name
+/// with a non-empty value is copied only when the new name is not set at all.
+fn legacy_env_updates(get: impl Fn(&str) -> Option<String>) -> Vec<(&'static str, String)> {
+    LEGACY_ENV
+        .iter()
+        .filter(|(_, new)| get(new).is_none())
+        .filter_map(|(old, new)| get(old).filter(|v| !v.is_empty()).map(|v| (*new, v)))
+        .collect()
+}
+
 fn main() -> Result<()> {
+    for (name, value) in legacy_env_updates(|k| std::env::var(k).ok()) {
+        // SAFETY: runs first in `main`, before the tokio runtime or any other thread exists.
+        unsafe { std::env::set_var(name, value) };
+    }
     let cli = Cli::parse();
     let store = Store::open(
         match cli.data_dir {
@@ -342,5 +363,44 @@ mod key_tests {
             KeyCode::Enter,
             KeyModifiers::NONE
         )));
+    }
+}
+
+#[cfg(test)]
+mod legacy_env_tests {
+    use super::legacy_env_updates;
+    use std::collections::HashMap;
+
+    fn updates(vars: &[(&str, &str)]) -> Vec<(&'static str, String)> {
+        let m: HashMap<String, String> = vars
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        legacy_env_updates(|k| m.get(k).cloned())
+    }
+
+    #[test]
+    fn legacy_gb_env_names_are_copied_to_the_new_names() {
+        assert_eq!(
+            updates(&[
+                ("GB_ALLOW_LOCAL_GATEWAY", "1"),
+                ("GB_GROKBOT_APP_DIR", "/opt/gb")
+            ]),
+            vec![
+                ("GROKBOT_ALLOW_LOCAL_GATEWAY", "1".to_string()),
+                ("GROKBOT_APP_DIR", "/opt/gb".to_string()),
+            ]
+        );
+        // The new name wins when it is set (even to an empty value).
+        assert!(
+            updates(&[
+                ("GB_ALLOW_LOCAL_GATEWAY", "1"),
+                ("GROKBOT_ALLOW_LOCAL_GATEWAY", "")
+            ])
+            .is_empty()
+        );
+        // Empty or missing old values are ignored.
+        assert!(updates(&[("GB_GROKBOT_APP_DIR", "")]).is_empty());
+        assert!(updates(&[]).is_empty());
     }
 }

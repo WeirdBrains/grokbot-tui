@@ -129,6 +129,29 @@ pub fn real_desktop_lister() -> DesktopLister {
     })
 }
 
+/// Text for a desktop-session error. grokbot_api describes `AMBIGUOUS_ENTRIES` without naming
+/// any app's commands, so point the user at gb's own: `/login desktop <name|number>`, and
+/// `/account add` when several desktop Cursor accounts exist.
+fn desktop_error_text(e: &gw::Error) -> String {
+    match e {
+        gw::Error::Desktop { code, message } if code == "AMBIGUOUS_ENTRIES" => {
+            let what = message
+                .split(" Specify which")
+                .next()
+                .unwrap_or(message)
+                .trim_end();
+            if message.contains("Cursor accounts") {
+                format!(
+                    "{what} Choose one with /login desktop <number> (tip: /account add <alias> first so each gets its own gb account)."
+                )
+            } else {
+                format!("{what} Choose one with /login desktop <name>.")
+            }
+        }
+        _ => e.to_string(),
+    }
+}
+
 /// The real reader: the platform's app-data dir + OS keychain (see `grokbot_api::desktop`).
 pub fn real_desktop_reader() -> DesktopReader {
     Arc::new(|entry, policy| {
@@ -1273,7 +1296,7 @@ impl App {
             }
             let read = joined
                 .map_err(|e| format!("desktop session reader failed: {e}"))
-                .and_then(|(r, _)| r.map_err(|e| e.to_string()));
+                .and_then(|(r, _)| r.map_err(|e| desktop_error_text(&e)));
             let (result, desktop_entry) = match read {
                 Ok((gw::desktop::DesktopCredential::Session(session), stored)) => (
                     login_task(mock, opts, Some(session), None).await,
@@ -2889,7 +2912,41 @@ pub mod tests {
                 .last()
                 .unwrap()
                 .text
-                .contains("GB_ALLOW_LOCAL_GATEWAY")
+                .contains("GROKBOT_ALLOW_LOCAL_GATEWAY")
+        );
+    }
+
+    #[test]
+    fn ambiguous_desktop_errors_point_to_tui_commands() {
+        let err = |message: &str| gw::Error::Desktop {
+            code: "AMBIGUOUS_ENTRIES".into(),
+            message: message.into(),
+        };
+        assert_eq!(
+            desktop_error_text(&err(
+                "The desktop app has several saved sessions (personal, work). Specify which one to load by its entry name."
+            )),
+            "The desktop app has several saved sessions (personal, work). Choose one with /login desktop <name>."
+        );
+        let accounts = desktop_error_text(&err(
+            "The desktop app has several Cursor accounts (1) aaaa1111…, 2) bbbb2222…). Specify which one to use by its number, its full account key, or a unique key prefix of at least 4 characters.",
+        ));
+        assert!(accounts.starts_with(
+            "The desktop app has several Cursor accounts (1) aaaa1111…, 2) bbbb2222…)."
+        ));
+        assert!(
+            accounts.contains("/login desktop <number>")
+                && accounts.contains("/account add <alias>")
+        );
+        assert!(!accounts.contains("Specify which"));
+        // Other desktop errors are shown unchanged.
+        let other = gw::Error::Desktop {
+            code: "NOT_SIGNED_IN".into(),
+            message: "Sign in from the desktop app first.".into(),
+        };
+        assert_eq!(
+            desktop_error_text(&other),
+            "Sign in from the desktop app first."
         );
     }
 
@@ -3080,12 +3137,12 @@ pub mod tests {
     fn desktop_login_only_reads_when_asked_and_handles_entries() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = test_app(&rt);
-        let (reader, calls) = fake_reader(|_, entry| match entry {
+        let (reader, calls) = fake_reader(|_, entry| {
+            match entry {
             None => Err(gw::Error::Desktop {
                 code: "AMBIGUOUS_ENTRIES".into(),
-                message:
-                    "several saved sessions: personal, work. Choose one with /login desktop <name>."
-                        .into(),
+                message: "The desktop app has several saved sessions (personal, work). Specify which one to load by its entry name."
+                    .into(),
             }),
             Some(name) => Ok((
                 gw::desktop::DesktopCredential::Session(Session::new(
@@ -3094,6 +3151,7 @@ pub mod tests {
                 )),
                 Some(name.to_string()),
             )),
+        }
         });
         app.desktop_reader = reader;
         app.connect();

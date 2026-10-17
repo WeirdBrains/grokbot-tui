@@ -57,7 +57,7 @@ Which method?
     /login gateway  Paste a gateway URL + gateway token directly.
                     Getting these by hand is not documented — use /login desktop.
 
-Credentials are only sent to allowed hosts (see /help env, GB_ALLOW_LOCAL_GATEWAY).
+Credentials are only sent to allowed hosts (see /help env, GROKBOT_ALLOW_LOCAL_GATEWAY).
 /logout removes this account's stored login and keeps chats and memory.
 /whoami shows how the account is logged in (never the token).",
         related: &[
@@ -161,7 +161,7 @@ Non-interactive use (startup account only, never saved)
   Optional GB_GROKBOT_GATEWAY_HEADERS='{\"x-anyrun-network-token\":\"…\"}'
 
 Allowed hosts: https on cursor.sh, cursor.com, *.cursor.sh, *.cursor.com, *.cursorvm.com.
-Loopback only with GB_ALLOW_LOCAL_GATEWAY=1. URLs with user:pass@ are rejected.",
+Loopback only with GROKBOT_ALLOW_LOCAL_GATEWAY=1. URLs with user:pass@ are rejected.",
         related: &["login", "login-desktop", "env", "troubleshooting"],
     },
     Topic {
@@ -281,8 +281,10 @@ EnsureSandBox (Cursor token exchange)
 
 Other
   GB_ACCOUNT                  Starting account alias (same as --account).
-  GB_ALLOW_LOCAL_GATEWAY=1    Allow http(s) loopback gateways (development).
-  GB_GROKBOT_APP_DIR          Grok Bot install dir for version detection.
+  GROKBOT_ALLOW_LOCAL_GATEWAY=1
+                              Allow http(s) loopback gateways (development).
+  GROKBOT_APP_DIR             Grok Bot install dir for version detection.
+  The old names GB_ALLOW_LOCAL_GATEWAY and GB_GROKBOT_APP_DIR still work.
 
 Data lives in ~/.gb/context.db (override with --data-dir). /whoami shows the
 client version in use and where it came from.",
@@ -706,14 +708,8 @@ pub fn hint_for_error(msg: &str) -> Option<&'static str> {
             "keychain did not return",
             "Unlock your keyring, then /login desktop. See /help login desktop.",
         ),
-        (
-            "several cursor accounts",
-            "Pick one with /login desktop <number>. See /help login desktop.",
-        ),
-        (
-            "several saved sessions",
-            "Pick one with /login desktop <name>. See /help login desktop.",
-        ),
+        ("several cursor accounts", "See /help login desktop."),
+        ("several saved sessions", "See /help login desktop."),
         (
             "could not decrypt",
             "Sign out and back in to the Grok Bot app. See /help login desktop.",
