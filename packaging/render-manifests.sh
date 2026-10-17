@@ -48,6 +48,7 @@ render() { # template output
     -e "s|@LICENSE@|$license|g" \
     -e "s|@MAINTAINER@|$MAINTAINER|g" \
     -e "s|@PUBLISHER@|$PUBLISHER|g" \
+    -e "s|@PUBLISHER_URL@|$PUBLISHER_URL|g" \
     -e "s|@WINGET_ID@|$WINGET_ID|g" \
     -e "s|@SOURCE_DIR@|$srcdir|g" \
     -e "s|@SHA256_LINUX_X86_64@|$sha_linux_x86_64|g" \

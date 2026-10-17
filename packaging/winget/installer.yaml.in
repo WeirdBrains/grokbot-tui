@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
 PackageIdentifier: @WINGET_ID@
-PackageVersion: @VERSION@
+PackageVersion: "@VERSION@"
 MinimumOSVersion: 10.0.0.0
 InstallerType: wix
 Scope: machine
@@ -10,6 +10,6 @@ Commands:
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/WeirdBrains/grokbot-tui/releases/download/@TAG@/grokbot-tui-x86_64-pc-windows-msvc.msi
-    InstallerSha256: @SHA256_WINDOWS_MSI@
+    InstallerSha256: "@SHA256_WINDOWS_MSI@"
 ManifestType: installer
 ManifestVersion: 1.6.0

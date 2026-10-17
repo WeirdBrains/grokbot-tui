@@ -1,9 +1,9 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
 PackageIdentifier: @WINGET_ID@
-PackageVersion: @VERSION@
+PackageVersion: "@VERSION@"
 PackageLocale: en-US
 Publisher: @PUBLISHER@
-PublisherUrl: https://github.com/m3talsmith
+PublisherUrl: @PUBLISHER_URL@
 PublisherSupportUrl: https://github.com/WeirdBrains/grokbot-tui/issues
 PackageName: grokbot-tui
 PackageUrl: https://github.com/WeirdBrains/grokbot-tui

@@ -26,10 +26,10 @@ dispatch-releases = true
 allow-dirty = ["msi"]
 # Homebrew formula name (same as the Cargo package and the binary).
 formula = "grokbot-tui"
-# TODO(confirm): Homebrew tap repo. The formula is built and attached to every release;
-# it is NOT pushed anywhere unless you add "homebrew" to publish-jobs and a
-# HOMEBREW_TAP_TOKEN secret (see PACKAGING.md).
-tap = "m3talsmith/homebrew-tap"
+# Homebrew tap repo (users run `brew install WeirdBrains/tap/grokbot-tui`). The formula is
+# built and attached to every release; it is NOT pushed anywhere unless you add "homebrew"
+# to publish-jobs and a HOMEBREW_TAP_TOKEN secret (see PACKAGING.md).
+tap = "WeirdBrains/homebrew-tap"
 # Extra jobs (reusable workflows in .github/workflows/):
 # .deb/.rpm built alongside dist's artifacts, so they are attached to the release.
 global-artifacts-jobs = ["./build-linux-packages"]
@@ -39,6 +39,6 @@ publish-jobs = ["./publish-manifests"]
 github-custom-job-permissions = { "publish-manifests" = { contents = "write" } }
 
 [dist.mac-pkg-config]
-# TODO(confirm): reverse-DNS bundle identifier for the macOS .pkg.
-identifier = "io.github.m3talsmith.grokbot-tui"
+# Reverse-DNS bundle identifier for the macOS .pkg.
+identifier = "io.github.weirdbrains.grokbot-tui"
 install-location = "/usr/local"

@@ -19,8 +19,8 @@ Prebuilt packages are attached to each [GitHub Release](https://github.com/Weird
 - **Windows:** `grokbot-tui-x86_64-pc-windows-msvc.msi` · **macOS:** `grokbot-tui-<arch>.pkg` (unsigned)
 - **Debian/Ubuntu:** `sudo apt install ./grokbot-tui_<ver>-1_<arch>.deb`
 - **Fedora:** `sudo dnf install ./grokbot-tui-<ver>-1.<arch>.rpm`
-- **Homebrew, AUR, winget:** once published (see PACKAGING.md), `brew install m3talsmith/tap/grokbot-tui`,
-  `yay -S grokbot-tui-bin`, `winget install m3talsmith.grokbot-tui`
+- **Homebrew, AUR, winget:** once published (see PACKAGING.md), `brew install WeirdBrains/tap/grokbot-tui`,
+  `yay -S grokbot-tui-bin`, `winget install WeirdBrains.grokbot-tui`
 - **From source:** `cargo install --path .` (from the repository root)
 
 ## Run

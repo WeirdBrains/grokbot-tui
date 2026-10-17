@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.2.2] - 2026-10-17
+
+### Changed
+
+- **Package identifiers moved to WeirdBrains:**
+  - Homebrew tap `m3talsmith/homebrew-tap` → `WeirdBrains/homebrew-tap`; install with
+    `brew install WeirdBrains/tap/grokbot-tui`.
+  - winget `PackageIdentifier` `m3talsmith.grokbot-tui` → `WeirdBrains.grokbot-tui`
+    (manifests now render under `manifests/w/WeirdBrains/grokbot-tui/<version>/`),
+    `Publisher` `WeirdBrains`, `PublisherUrl` <https://github.com/WeirdBrains>.
+  - macOS `.pkg` bundle identifier `io.github.m3talsmith.grokbot-tui` →
+    `io.github.weirdbrains.grokbot-tui`.
+
+  The maintainer/author email and the MSI upgrade GUID are unchanged.
+
+### Fixed
+
+- The winget templates now quote `PackageVersion` and `InstallerSha256`, so a hash made
+  only of digits (or a version like `1.3`) can't be read as a number and fail winget's
+  schema validation.
+
 ## [1.2.1] - 2026-10-17
 
 ### Changed
@@ -216,7 +237,8 @@ First release.
   handled like 401, re-reading or re-exchanging the credential.
 - A build break caused by quotes inside the delivery help text.
 
-[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.0.0...v1.1.0

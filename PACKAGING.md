@@ -92,14 +92,15 @@ Pull requests and pushes to other branches run `ci.yml`; `release.yml` also runs
   Identity values are in `packaging/identity.env`. URLs and checksums are filled in
   at release time; never commit real checksums into the templates.
 
-## Values to confirm (placeholders)
+## Package identity
 
-| Value | Where | Placeholder |
+| Value | Where | Value |
 |---|---|---|
-| Maintainer name/email | `Cargo.toml` `authors`, `[package.metadata.deb] maintainer`, `packaging/identity.env` | from git history |
-| Homebrew tap repo | `dist-workspace.toml` `tap` | `m3talsmith/homebrew-tap` |
-| macOS bundle identifier | `dist-workspace.toml` `[dist.mac-pkg-config] identifier` | `io.github.m3talsmith.grokbot-tui` |
-| winget PackageIdentifier / Publisher | `packaging/identity.env` | `m3talsmith.grokbot-tui` / `Michael Christenson II` |
+| Homebrew tap repo | `dist-workspace.toml` `tap` | `WeirdBrains/homebrew-tap` (`brew install WeirdBrains/tap/grokbot-tui`) |
+| macOS bundle identifier | `dist-workspace.toml` `[dist.mac-pkg-config] identifier` | `io.github.weirdbrains.grokbot-tui` |
+| winget PackageIdentifier | `packaging/identity.env` `WINGET_ID` | `WeirdBrains.grokbot-tui` |
+| winget Publisher / PublisherUrl | `packaging/identity.env` `PUBLISHER`, `PUBLISHER_URL` | `WeirdBrains` / `https://github.com/WeirdBrains` |
+| Maintainer name/email (to confirm) | `Cargo.toml` `authors`, `[package.metadata.deb] maintainer`, `packaging/identity.env` `MAINTAINER` | from git history |
 
 ## License metadata
 
@@ -125,14 +126,14 @@ None of these are automated. A release succeeds without them; they only make the
 packages installable from each ecosystem's usual place.
 
 1. **Homebrew tap** (GitHub account).
-   - Create a public repo named `homebrew-tap` (or whatever you set as `tap`).
+   - Create the public repo `WeirdBrains/homebrew-tap` (the `tap` setting).
    - Manual: each release, copy `grokbot-tui.rb` from the release into `Formula/` in the
      tap.
    - Automatic (optional):
      1. Add `"homebrew"` to `publish-jobs` in `dist-workspace.toml` and run `dist generate`.
-     2. Create a fine-grained token with *Contents: read/write* on the tap repo only.
+     2. Create a fine-grained token with *Contents: read/write* on `WeirdBrains/homebrew-tap` only.
      3. Save it as the repo secret `HOMEBREW_TAP_TOKEN`.
-   - Users then run `brew install m3talsmith/tap/grokbot-tui`.
+   - Users then run `brew install WeirdBrains/tap/grokbot-tui`.
    - Getting into homebrew-core is a separate, stricter review.
 2. **AUR** (AUR account with an SSH key).
    - For each of `grokbot-tui-bin` (prebuilt) and `grokbot-tui` (source build), take
@@ -145,7 +146,7 @@ packages installable from each ecosystem's usual place.
    - Repeat every release. Automating this would need an `AUR_SSH_KEY` secret and a
      push job (not set up).
 3. **winget** (GitHub account; Microsoft CLA on your first PR).
-   - Copy `winget/manifests/m/m3talsmith/grokbot-tui/<ver>/` from the bundle into a fork
+   - Copy `winget/manifests/w/WeirdBrains/grokbot-tui/<ver>/` from the bundle into a fork
      of `microsoft/winget-pkgs`, at the same path.
    - Check with `winget validate --manifest <dir>` on Windows, then open a PR
      (or use `wingetcreate submit <dir>`).
