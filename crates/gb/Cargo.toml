@@ -2,7 +2,45 @@
 name = "gb"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Terminal UI for Grok Bot"
+readme = "../../README.md"
+keywords = ["grok", "tui", "chat", "terminal"]
+categories = ["command-line-utilities"]
+
+[package.metadata.wix]
+upgrade-guid = "49193C36-7DFF-424F-AC0D-1247767E9970"
+path-guid = "D7774F8D-69B3-4386-B1DE-FB956F917C8C"
+license = false
+eula = false
+
+
+# --- Linux packages (built in CI by .github/workflows/build-linux-packages.yml) ---
+[package.metadata.deb]
+name = "grokbot-tui"
+# TODO(confirm): maintainer (taken from git history).
+maintainer = "Michael Christenson II <m3talsmith@gmail.com>"
+section = "utils"
+priority = "optional"
+extended-description = """\
+A terminal user interface for Grok Bot: chat with your bots, switch accounts, \
+and keep a local SQLite history. Unofficial; uses the Grok Bot gateway API."""
+depends = "$auto"
+assets = [
+    ["target/release/grokbot-tui", "usr/bin/", "755"],
+    ["../../README.md", "usr/share/doc/grokbot-tui/README.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "grokbot-tui"
+summary = "Terminal UI for Grok Bot"
+assets = [
+    { source = "target/release/grokbot-tui", dest = "/usr/bin/grokbot-tui", mode = "755" },
+    { source = "../../README.md", dest = "/usr/share/doc/grokbot-tui/README.md", mode = "644", doc = true },
+]
 
 [[bin]]
 name = "grokbot-tui"

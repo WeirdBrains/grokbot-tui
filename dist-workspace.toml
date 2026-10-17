@@ -1,0 +1,40 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist'
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.33.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "powershell", "homebrew", "msi", "pkg"]
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+# Where to host releases
+hosting = "github"
+# Whether to install an updater program
+install-updater = false
+# crates/gb/wix/main.wxs is hand-edited (MSI product/folder named grokbot-tui, not gb).
+# Keep dist from overwriting it or failing CI because it differs from its template.
+allow-dirty = ["msi"]
+# Homebrew formula name (the Cargo package is "gb", the binary "grokbot-tui").
+formula = "grokbot-tui"
+# TODO(confirm): Homebrew tap repo. The formula is built and attached to every release;
+# it is NOT pushed anywhere unless you add "homebrew" to publish-jobs and a
+# HOMEBREW_TAP_TOKEN secret (see PACKAGING.md).
+tap = "m3talsmith/homebrew-tap"
+# Extra jobs (reusable workflows in .github/workflows/):
+# .deb/.rpm built alongside dist's artifacts, so they are attached to the release.
+global-artifacts-jobs = ["./build-linux-packages"]
+# AUR PKGBUILD + winget manifests filled in from the real release sha256s.
+publish-jobs = ["./publish-manifests"]
+# publish-manifests uploads its files to the GitHub release.
+github-custom-job-permissions = { "publish-manifests" = { contents = "write" } }
+
+[dist.mac-pkg-config]
+# TODO(confirm): reverse-DNS bundle identifier for the macOS .pkg.
+identifier = "io.github.m3talsmith.grokbot-tui"
+install-location = "/usr/local"
