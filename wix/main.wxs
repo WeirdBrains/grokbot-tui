@@ -129,22 +129,6 @@
                                 KeyPath='yes'/>
                         </Component>
                     </Directory>
-                    <!-- Shipped themes: grokbot-tui looks in <exe dir>\..\share\grokbot-tui\themes
-                         and copies them into the user's themes folder on first run. -->
-                    <Directory Id='Share' Name='share'>
-                        <Directory Id='ShareApp' Name='grokbot-tui'>
-                            <Directory Id='ShareThemes' Name='themes'>
-                                <Component Id='themes' Guid='*'>
-                                    <File
-                                        Id='themeDefault'
-                                        Name='default.toml'
-                                        DiskId='1'
-                                        Source='themes\default.toml'
-                                        KeyPath='yes'/>
-                                </Component>
-                            </Directory>
-                        </Directory>
-                    </Directory>
                 </Directory>
             </Directory>
         </Directory>
@@ -166,7 +150,6 @@
             <!--<ComponentRef Id='License'/>-->
 
             <ComponentRef Id='binary0'/>
-            <ComponentRef Id='themes'/>
 
             <Feature
                 Id='Environment'

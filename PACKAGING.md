@@ -120,25 +120,19 @@ takes the license from `[package] license` in `Cargo.toml`:
 To also install the license file with the MSI, follow the "license sidecar" comments in
 `wix/main.wxs` (untested; needs a Windows build to verify).
 
-## Shipped theme files
+## Theme files
 
-grokbot-tui has no built-in theme: `themes/*.toml` in the repo are installed to a shared
-directory, and on startup they are copied into the user's `<data dir>/themes` when it has no
-themes yet. The app looks in (first match per name wins): `<exe dir>/../share/grokbot-tui/themes`,
-`<exe dir>/themes`, each `$XDG_DATA_DIRS` entry (default `/usr/local/share:/usr/share`) +
-`/grokbot-tui/themes`, then `/usr/share`, `/usr/local/share` and `/opt/homebrew/share`.
-
-| Format | Where the themes go | Configured in |
-|---|---|---|
-| `.deb` / `.rpm` | `/usr/share/grokbot-tui/themes/` | `Cargo.toml` `[package.metadata.deb] assets`, `[package.metadata.generate-rpm] assets` |
-| Archives (`.tar.xz` / `.zip`) | `themes/` next to the binary | `dist-workspace.toml` `include = ["themes/"]` |
-| Homebrew formula | `share/grokbot-tui/themes/` (the formula's `pkgshare.install` of leftover archive files) | follows from `include` |
-| AUR PKGBUILDs | `/usr/share/grokbot-tui/themes/` | `packaging/aur/*/PKGBUILD.in` `package()` |
-| `.msi` | `<install dir>\share\grokbot-tui\themes\` (the exe is in `bin\`) | `wix/main.wxs` component `themes` (untested; needs a Windows build) |
-| `.pkg`, shell / PowerShell installers, `cargo install` | not installed (binary only) | users run `/theme init` or download `themes/default.toml` |
-
-Adding a theme to the repo: put it in `themes/`, then add it to the deb/rpm assets and the MSI
-component (the archive `include`, Homebrew and AUR pick up every `themes/*.toml`).
+No package installs a theme. Themes live only in the user's `<data dir>/themes`
+(`~/.grokbot-tui/themes` by default), and the app reads no other folder. The repo's
+`themes/default.toml` is the source of the default theme: on first run, when the user's
+themes folder is empty, the app downloads it from the git tag matching its version
+(`https://raw.githubusercontent.com/WeirdBrains/grokbot-tui/v<version>/themes/default.toml`)
+and saves it there. So every format (deb, rpm, AUR, Homebrew, MSI, macOS `.pkg`, the shell
+and PowerShell installers, `cargo install`) gets the same theme, and **the release tag must
+contain `themes/default.toml`**. Users can opt out with `GROKBOT_TUI_NO_THEME_DOWNLOAD=1` or
+`/prefs set ui.theme_download false`. 1.5.0 installed themes into system folders
+(`/usr/share/grokbot-tui/themes`, Homebrew `pkgshare`, the MSI and the archives' `themes/`);
+1.6.0 removed that.
 
 ## Manual steps that need your accounts or secrets
 
