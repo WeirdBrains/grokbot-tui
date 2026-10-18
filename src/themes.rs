@@ -42,16 +42,47 @@ pub const NO_DOWNLOAD_ENV: &str = "GROKBOT_TUI_NO_THEME_DOWNLOAD";
 /// Give up on a theme download after this long (startup never waits for it).
 pub const DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// The shipped `default.toml` at the git tag of a release, e.g. `v1.6.0`.
-pub fn release_url(version: &str) -> String {
-    format!(
-        "https://raw.githubusercontent.com/WeirdBrains/grokbot-tui/v{version}/themes/default.toml"
-    )
+/// Env var overriding where themes are downloaded from: a URL base that `<name>.toml` is
+/// appended to (e.g. a local mock server in tests, or a fork).
+pub const URL_ENV: &str = "GROKBOT_TUI_THEME_URL";
+/// The themes in the repo's `themes/` folder (`/theme init all` downloads these).
+pub const SHIPPED: &[&str] = &["default"];
+/// How long `--list-themes` / `--theme` wait for the first-run download.
+pub const CLI_DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The repo's `themes/` folder at the git tag of a release, e.g. `v1.7.0`.
+pub fn release_base(version: &str) -> String {
+    format!("https://raw.githubusercontent.com/WeirdBrains/grokbot-tui/v{version}/themes/")
 }
 
-/// The shipped `default.toml` matching this build.
+/// The shipped `default.toml` at the git tag of a release.
+#[cfg(test)]
+pub fn release_url(version: &str) -> String {
+    theme_url(&release_base(version), DEFAULT_ID)
+}
+
+/// Where to download from: `GROKBOT_TUI_THEME_URL` when set (`env`), else this build's tag.
+pub fn download_base(env: Option<&str>) -> String {
+    env.map(str::trim)
+        .filter(|b| !b.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| release_base(env!("CARGO_PKG_VERSION")))
+}
+
+/// [`download_base`] for this process.
+pub fn download_base_now() -> String {
+    download_base(std::env::var(URL_ENV).ok().as_deref())
+}
+
+/// The download URL of theme `name` under `base`.
+pub fn theme_url(base: &str, name: &str) -> String {
+    let sep = if base.ends_with('/') { "" } else { "/" };
+    format!("{base}{sep}{name}.toml")
+}
+
+/// The default theme's URL for this process.
 pub fn default_url() -> String {
-    release_url(env!("CARGO_PKG_VERSION"))
+    theme_url(&download_base_now(), DEFAULT_ID)
 }
 
 /// Whether an env value turns the download off (`1`, `true`, `yes`, `on`; empty / `0` /
@@ -68,12 +99,18 @@ pub fn opted_out(env_value: Option<&str>) -> bool {
 /// Fetch a theme file over HTTPS (with `DOWNLOAD_TIMEOUT`), refusing anything larger than
 /// `MAX_BYTES` or that doesn't parse as a theme. Returns the file's exact text.
 pub async fn download(url: &str) -> Result<String, String> {
+    download_within(url, DOWNLOAD_TIMEOUT).await
+}
+
+/// [`download`] with its own time limit.
+pub async fn download_within(url: &str, timeout: std::time::Duration) -> Result<String, String> {
     let client = reqwest::Client::builder()
-        .timeout(DOWNLOAD_TIMEOUT)
+        .timeout(timeout)
         .connect_timeout(std::time::Duration::from_secs(3))
         .user_agent(concat!("grokbot-tui/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| e.to_string())?;
+    let describe = |e: &reqwest::Error| describe(e, timeout);
     let mut resp = client.get(url).send().await.map_err(|e| describe(&e))?;
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
@@ -93,9 +130,9 @@ pub async fn download(url: &str) -> Result<String, String> {
     Ok(text)
 }
 
-fn describe(e: &reqwest::Error) -> String {
+fn describe(e: &reqwest::Error, timeout: std::time::Duration) -> String {
     if e.is_timeout() {
-        format!("timed out after {}s", DOWNLOAD_TIMEOUT.as_secs())
+        format!("timed out after {}s", timeout.as_secs())
     } else if e.is_connect() {
         "couldn't connect (offline?)".into()
     } else {
@@ -797,6 +834,48 @@ pub fn list_text(dir: &Path, current: &str) -> String {
     out.join("\n")
 }
 
+/// What [`first_run_download`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FirstRun {
+    /// The folder already had themes: nothing to do.
+    NotNeeded,
+    /// Downloading is turned off (env or pref).
+    Off,
+    Downloaded(PathBuf),
+    Failed(String),
+}
+
+/// `--list-themes` / `--theme` on a first run: when `dir` has no themes, download the
+/// default from `base` (waiting at most `timeout`) and save it (never over a file).
+pub fn first_run_download(
+    dir: &Path,
+    base: Option<&str>,
+    timeout: std::time::Duration,
+) -> FirstRun {
+    if !list(dir).is_empty() {
+        return FirstRun::NotNeeded;
+    }
+    let Some(base) = base else {
+        return FirstRun::Off;
+    };
+    let url = theme_url(base, DEFAULT_ID);
+    let got = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())
+        .and_then(|rt| rt.block_on(download_within(&url, timeout)));
+    match got {
+        Ok(text) => match write_new(dir, DEFAULT_ID, &text) {
+            Ok(p) => FirstRun::Downloaded(p),
+            Err(e) => FirstRun::Failed(format!(
+                "couldn't write {}: {e}",
+                path(dir, DEFAULT_ID).display()
+            )),
+        },
+        Err(e) => FirstRun::Failed(format!("couldn't download {url}: {e}")),
+    }
+}
+
 /// `YYYYmmdd-HHMMSSZ` in UTC (no date crate needed).
 pub fn utc_stamp(t: std::time::SystemTime) -> String {
     let secs = t
@@ -1012,6 +1091,56 @@ mod tests {
     }
 
     #[test]
+    fn first_run_download_fetches_the_default_into_an_empty_folder() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path as at};
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let body = std::fs::read_to_string(repo_dir().join("default.toml")).unwrap();
+        let srv = rt.block_on(async {
+            let srv = MockServer::start().await;
+            Mock::given(at("/t/default.toml"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(body.clone()))
+                .mount(&srv)
+                .await;
+            Mock::given(at("/slow/default.toml"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(body.clone())
+                        .set_delay(std::time::Duration::from_secs(3)),
+                )
+                .mount(&srv)
+                .await;
+            srv
+        });
+        let quick = std::time::Duration::from_millis(500);
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("themes");
+        assert_eq!(first_run_download(&dir, None, quick), FirstRun::Off);
+        let FirstRun::Failed(e) =
+            first_run_download(&dir, Some(&format!("{}/nope/", srv.uri())), quick)
+        else {
+            panic!()
+        };
+        assert!(e.contains("HTTP 404"), "{e}");
+        let FirstRun::Failed(e) =
+            first_run_download(&dir, Some(&format!("{}/slow/", srv.uri())), quick)
+        else {
+            panic!()
+        };
+        assert!(e.contains("timed out"), "{e}");
+        assert!(list(&dir).is_empty());
+        let got = first_run_download(&dir, Some(&format!("{}/t", srv.uri())), quick);
+        assert_eq!(got, FirstRun::Downloaded(path(&dir, DEFAULT_ID)));
+        assert_eq!(
+            std::fs::read_to_string(path(&dir, DEFAULT_ID)).unwrap(),
+            body
+        );
+        assert_eq!(
+            first_run_download(&dir, Some(&format!("{}/t/", srv.uri())), quick),
+            FirstRun::NotNeeded
+        );
+    }
+
+    #[test]
     fn utc_stamps_are_civil_dates() {
         use std::time::{Duration, UNIX_EPOCH};
         let at = |s| utc_stamp(UNIX_EPOCH + Duration::from_secs(s));
@@ -1186,7 +1315,16 @@ mod tests {
             release_url("1.6.0"),
             "https://raw.githubusercontent.com/WeirdBrains/grokbot-tui/v1.6.0/themes/default.toml"
         );
-        assert!(default_url().contains(&format!("/v{}/", env!("CARGO_PKG_VERSION"))));
+        assert!(download_base(None).ends_with(&format!("/v{}/themes/", env!("CARGO_PKG_VERSION"))));
+        assert_eq!(download_base(Some("  ")), download_base(None));
+        assert_eq!(download_base(Some("http://h/t/")), "http://h/t/");
+        assert_eq!(theme_url("http://h/t/", "x"), "http://h/t/x.toml");
+        assert_eq!(theme_url("http://h/t", "x"), "http://h/t/x.toml");
+        assert!(
+            SHIPPED
+                .iter()
+                .all(|n| repo_dir().join(format!("{n}.toml")).exists())
+        );
         for on in ["1", "true", "YES", "on", "x"] {
             assert!(opted_out(Some(on)), "{on}");
         }

@@ -260,7 +260,9 @@ Commands
   /theme use <name>     Switch theme (also /theme <name>; no name: pick list)
   /theme list           List theme files (● = in use; broken files say why)
   /theme edit [name]    Open the editor (default: the theme in use)
-  /theme init [name]    Download the default theme (else write the starter; never overwrites)
+  /theme init [name|all]
+                        Download a shipped theme from the release (default: default; all:
+                        every shipped one; existing files are kept)
   /theme starter [name] Write a minimal starter theme (no download; never overwrites)
   /theme delete <name>  Delete a theme file (asks first)
   /theme export <name> [path]
@@ -276,7 +278,9 @@ Theme editor (Shift-F5)
   Enter / e   Edit: a color takes hex (#ff8800), 0-255 or a name (cyan); a part
               opens its fields (fg, bg, border for boxes, bold italic underline
               reverse dim): ← → choose, Enter edit/toggle, Space toggle, Backspace clear
-  p           Pick from the 256-color palette (arrows, Enter or click)
+  p           Color picker with tabs: 16 colors · 216 cube · 24 grays · @ palette
+              (Tab / Shift-Tab switch, arrows, Enter or click; @ palette offers the
+              palette colors for parts, and reset)
   r / R       Revert this item / everything since the last save
   s, Ctrl-S   Save (applied right away if it's the theme in use)
   d / n       Duplicate this theme / new starter theme (asks for a name)
@@ -323,8 +327,12 @@ When a theme can't be used
   (reverse video). Fix the file and /theme reload, pick another theme (F5), or
   /theme init. A broken file is never overwritten without asking.
 
-/theme init [name] downloads the default theme as <name>.toml (default: default.toml);
-if downloading is off or fails, it writes the minimal starter instead.
+/theme init [name|all] downloads <name>.toml from the release's themes/ folder (default:
+default; all: every shipped theme, which is just default for now). Existing files are
+kept. If downloading is off it writes the minimal starter instead; if it fails it says why.
+--list-themes and --theme also download the default first when the folder is empty
+(waiting up to 3 s). GROKBOT_TUI_THEME_URL replaces the download address (a URL that
+<name>.toml is appended to, e.g. a fork or a local server).
 /theme starter [name] always writes the minimal starter: every part mapped to a palette
 role (title → @accent, errors → @danger, …) but every color set to your terminal's
 default. Set the colors in the editor to make it yours.
@@ -450,6 +458,8 @@ Other
       Grok Bot install dir for version detection.
   GROKBOT_TUI_NO_THEME_DOWNLOAD=1
       Never download the default theme (see /help theme-files).
+  GROKBOT_TUI_THEME_URL
+      Download themes from here instead of the release tag (<url><name>.toml).
   The library's own names GROKBOT_ALLOW_LOCAL_GATEWAY and GROKBOT_APP_DIR work too.
 
 Older names: every GB_* variable (e.g. GB_GROKBOT_TOKEN) still works when its
@@ -645,13 +655,13 @@ fn command_extra(
             &["accounts"],
         ),
         "theme" => (
-            "Switch, list and edit themes, or the dark/light mode. Bare /theme cycles dark → light → system (also F4); system follows the terminal background, else dark. /theme use <name> (or F5) picks a theme file, /theme edit (or Shift-F5) opens the editor, /theme list lists them, /theme init [name] downloads the default theme (else writes the minimal starter), /theme starter [name] always writes the starter, /theme delete <name> deletes one (asks first), /theme export <name> [path] copies one out, /theme reload re-reads the files. Saved in the global prefs ui.theme and ui.theme_mode.",
+            "Switch, list and edit themes, or the dark/light mode. Bare /theme cycles dark → light → system (also F4); system follows the terminal background, else dark. /theme use <name> (or F5) picks a theme file, /theme edit (or Shift-F5) opens the editor, /theme list lists them, /theme init [name|all] downloads a shipped theme from the release (else writes the minimal starter), /theme starter [name] always writes the starter, /theme delete <name> deletes one (asks first), /theme export <name> [path] copies one out, /theme reload re-reads the files. Saved in the global prefs ui.theme and ui.theme_mode.",
             &[
                 "/theme",
                 "/theme light",
                 "/theme use default",
                 "/theme edit",
-                "/theme init mine",
+                "/theme init all",
                 "/theme list",
             ],
             &["theme", "theme-files", "keys", "prefs"],

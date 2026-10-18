@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+From acp-rs-scraper 2.14.0. These changes missed the 1.7.0 tag, which was already published.
+
+### Added
+
+- **`/theme init [name|all]`** downloads that theme's file from the release's `themes/` folder.
+  `all` downloads every shipped theme, which for now is just `default`. Existing files are kept
+  and nothing is downloaded for them; several downloads run one after another.
+- **Tabbed color picker in the theme editor (`p`):**
+  - tabs: 16 colors, the 216-color cube, 24 grays, and `@ palette`
+  - `@ palette` offers the palette colors as references for parts, plus `reset`
+  - Tab and Shift-Tab switch tabs, and the tabs can be clicked
+  - the picker opens on the tab and cell of the current value
+- **`--list-themes` and `--theme` download the default theme first** when the themes folder is
+  empty, waiting up to 3 s. A notice on stderr says what happened. There is no download with
+  `--mock` for `--theme`, or when downloads are turned off.
+- **`GROKBOT_TUI_THEME_URL`** replaces the theme download address: a URL base that
+  `<name>.toml` is appended to. The tests use it with a local mock server.
+
+### Changed
+
+- **`/theme init <name>`** no longer saves a renamed copy of the default theme; use the editor's
+  `d` (duplicate) for that. If the download fails, it now says why and points to
+  `/theme starter <name>`. The starter is still written automatically when downloads are turned
+  off.
+- **The theme editor's 256-color palette grid** is replaced by the tabbed picker.
+
 ## [1.7.0] - 2026-10-17
 
 The theme system now matches acp-rs-scraper's.

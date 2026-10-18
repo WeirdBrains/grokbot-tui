@@ -108,6 +108,33 @@ fn main() -> Result<()> {
     }
     let store = Store::open(dir, cli.account.as_deref())?;
     let themes_dir = themes::user_dir(&store.dir);
+    if cli.list_themes || (cli.theme.is_some() && !cli.mock) {
+        // First run (no themes yet): fetch the default before listing or checking, waiting
+        // at most CLI_DOWNLOAD_TIMEOUT. Never in mock mode for --theme (the app doesn't
+        // download there either).
+        let allowed = !themes::opted_out(std::env::var(themes::NO_DOWNLOAD_ENV).ok().as_deref())
+            && store.load_config()?.theme_download;
+        let base = allowed.then(themes::download_base_now);
+        match themes::first_run_download(&themes_dir, base.as_deref(), themes::CLI_DOWNLOAD_TIMEOUT)
+        {
+            themes::FirstRun::NotNeeded => {}
+            themes::FirstRun::Off => eprintln!(
+                "grokbot-tui: no themes in {} and theme downloads are off ({}=1 or \
+                 ui.theme_download = false); plain terminal colors are used.",
+                themes_dir.display(),
+                themes::NO_DOWNLOAD_ENV
+            ),
+            themes::FirstRun::Downloaded(p) => {
+                eprintln!(
+                    "grokbot-tui: downloaded the default theme into {}",
+                    p.display()
+                )
+            }
+            themes::FirstRun::Failed(e) => eprintln!(
+                "grokbot-tui: warning: {e}; plain terminal colors are used (/theme init retries)."
+            ),
+        }
+    }
     if cli.list_themes {
         let current = cli.theme.clone().unwrap_or(store.load_config()?.theme);
         println!("{}", themes::list_text(&themes_dir, &current));

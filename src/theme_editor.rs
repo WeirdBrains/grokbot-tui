@@ -22,13 +22,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
 
-/// Why the default theme is being downloaded.
+/// Why a theme is being downloaded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DownloadFor {
-    /// No theme files at startup / `/theme reload`.
+    /// No theme files at startup / `/theme reload`: the default theme.
     Startup,
-    /// `/theme init [name]`: write it as `<name>.toml`.
-    Init(String),
+    /// `/theme init [name|all]`: these shipped themes, one after another (the first is
+    /// the one being downloaded).
+    Init(Vec<String>),
 }
 
 const EDIT_ITEM: &str = "\u{1}edit";
@@ -52,7 +53,7 @@ impl App {
             if self.theme_downloading {
                 return;
             }
-            if let Some(url) = self.download_url() {
+            if let Some(url) = self.download_url(themes::DEFAULT_ID) {
                 self.theme = Arc::new(Theme::unstyled(themes::DEFAULT_ID));
                 self.theme_problem = Some("downloading");
                 self.info(format!(
@@ -68,11 +69,12 @@ impl App {
         self.load_theme();
     }
 
-    /// The default theme's download URL, unless downloading is off (env, pref, mock mode).
-    pub fn download_url(&self) -> Option<String> {
-        self.theme_download_url
-            .clone()
+    /// Theme `name`'s download URL, unless downloading is off (env, pref, mock mode).
+    pub fn download_url(&self, name: &str) -> Option<String> {
+        self.theme_download_base
+            .as_deref()
             .filter(|_| self.config.theme_download)
+            .map(|b| themes::theme_url(b, name))
     }
 
     fn start_theme_download(&mut self, purpose: DownloadFor, url: String) {
@@ -117,37 +119,39 @@ impl App {
                 }
                 self.load_theme();
             }
-            DownloadFor::Init(id) => {
-                let text = match result {
-                    Ok(text) if id == themes::DEFAULT_ID => Ok(text),
-                    // Another name: same colors, the display name is the new id.
-                    Ok(text) => themes::parse(&id, &text).map(|(mut t, _)| {
-                        t.name = id.clone();
-                        themes::serialize(&t)
-                    }),
-                    Err(e) => Err(e),
-                };
-                match text {
+            DownloadFor::Init(mut queue) => {
+                let id = queue.remove(0);
+                match result {
                     Ok(text) => match themes::write_new(&dir, &id, &text) {
                         Ok(p) => {
                             self.info(format!(
-                                "Downloaded the default theme from {url} into {}.",
+                                "Downloaded the {id} theme from {url} into {}.",
                                 p.display()
                             ));
                             self.after_theme_written(&id);
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                            self.info(format!(
+                                "{} already exists; it was kept.",
+                                themes::path(&dir, &id).display()
+                            ))
                         }
                         Err(e) => self.error(format!(
                             "Couldn't write {}: {e}",
                             themes::path(&dir, &id).display()
                         )),
                     },
-                    Err(e) => {
-                        self.error(format!(
-                            "Couldn't download the default theme from {url}: {e}. Writing the \
-                             minimal starter instead."
-                        ));
-                        self.write_starter(&id);
-                    }
+                    Err(e) => self.error(format!(
+                        "Couldn't download the {id} theme from {url}: {e}. Shipped themes: {}. \
+                         /theme starter {id} writes a minimal starter instead.",
+                        themes::SHIPPED.join(", ")
+                    )),
+                }
+                // Next in line (`/theme init all`).
+                if let Some(next) = queue.first()
+                    && let Some(url) = self.download_url(next)
+                {
+                    self.start_theme_download(DownloadFor::Init(queue), url);
                 }
             }
         }
@@ -276,7 +280,7 @@ impl App {
             })
             .collect();
         if ids.is_empty() {
-            let label = if self.download_url().is_some() {
+            let label = if self.download_url(themes::DEFAULT_ID).is_some() {
                 "Download the default theme (/theme init)"
             } else {
                 "Write a starter theme (/theme init)"
@@ -328,21 +332,59 @@ impl App {
         }
     }
 
-    /// `/theme init [name]`: download the shipped default theme for this version (when
-    /// downloading is allowed), else write the minimal starter. Never overwrites.
+    /// `/theme init [name|all]`: download a shipped theme (default `default`; `all` = every
+    /// one in [`themes::SHIPPED`]) from the release's `themes/` folder as `<name>.toml`.
+    /// Existing files are kept. With downloading off, the minimal starter is written instead.
     pub fn theme_init(&mut self, name: Option<&str>) {
-        let Some(id) = self.new_theme_id(name) else {
+        let dir = self.themes_dir();
+        let wanted: Vec<String> = match name.map(str::trim) {
+            Some("all") => themes::SHIPPED.iter().map(|s| s.to_string()).collect(),
+            Some(n) => vec![n.to_string()],
+            None => vec![themes::DEFAULT_ID.to_string()],
+        };
+        if let Some(bad) = wanted.iter().find(|n| !themes::valid_id(n)) {
+            self.error(format!(
+                "'{bad}' isn't a valid theme name (a-z, 0-9, _ and -, up to 32)."
+            ));
+            return;
+        }
+        let mut queue = vec![];
+        for n in wanted {
+            let p = themes::path(&dir, &n);
+            if p.exists() {
+                self.info(format!(
+                    "{} already exists; it was kept (nothing downloaded).",
+                    p.display()
+                ));
+            } else {
+                queue.push(n);
+            }
+        }
+        let Some(first) = queue.first().cloned() else {
             return;
         };
-        match self.download_url() {
+        match self.download_url(&first) {
             Some(url) if !self.theme_downloading => {
-                self.info(format!("Downloading the default theme from {url}…"));
-                self.start_theme_download(DownloadFor::Init(id), url);
+                self.info(format!(
+                    "Downloading {} from {}…",
+                    queue.join(", "),
+                    self.theme_download_base.clone().unwrap_or_default()
+                ));
+                self.start_theme_download(DownloadFor::Init(queue), url);
             }
             Some(_) => {
                 self.error("A theme download is already running; try again in a moment.".into())
             }
-            None => self.write_starter(&id),
+            None => {
+                self.info(format!(
+                    "Theme downloads are off ({}=1 or ui.theme_download = false); writing the \
+                     minimal starter instead.",
+                    themes::NO_DOWNLOAD_ENV
+                ));
+                for id in queue {
+                    self.write_starter(&id);
+                }
+            }
         }
     }
 
@@ -902,10 +944,11 @@ pub enum Edit {
         buf: String,
         err: Option<String>,
     },
-    /// The 256-color grid.
+    /// The color picker: a tab of [`PICKER_TABS`] and the selected cell in it.
     Palette {
         target: Target,
-        cursor: u8,
+        tab: usize,
+        cursor: usize,
     },
     /// Naming a new or duplicated theme.
     Name {
@@ -916,6 +959,29 @@ pub enum Edit {
 }
 
 /// What the app has to do after an editor key.
+/// The color picker's tabs.
+pub const PICKER_TABS: [&str; 4] = ["16 colors", "216 cube", "24 grays", "@ palette"];
+
+/// The 16 ANSI colors, in terminal order (the picker's first tab).
+const ANSI16: [Color; 16] = [
+    Color::Black,
+    Color::Red,
+    Color::Green,
+    Color::Yellow,
+    Color::Blue,
+    Color::Magenta,
+    Color::Cyan,
+    Color::Gray,
+    Color::DarkGray,
+    Color::LightRed,
+    Color::LightGreen,
+    Color::LightYellow,
+    Color::LightBlue,
+    Color::LightMagenta,
+    Color::LightCyan,
+    Color::White,
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     None,
@@ -956,6 +1022,8 @@ pub struct ThemeEditor {
     pub palette_area: Rect,
     pub palette_cols: u16,
     pub palette_cell_w: u16,
+    /// Hit areas of the color picker's tabs.
+    pub palette_tab_areas: Vec<(Rect, usize)>,
     /// Mark the selected part's cells in the preview (`h` toggles).
     pub highlight: bool,
     pub preview_area: Rect,
@@ -986,6 +1054,7 @@ impl ThemeEditor {
             palette_area: Rect::default(),
             palette_cols: 16,
             palette_cell_w: 3,
+            palette_tab_areas: Vec::new(),
             highlight: true,
             preview_area: Rect::default(),
         }
@@ -1158,18 +1227,93 @@ impl ThemeEditor {
         }
     }
 
-    pub fn open_palette(&mut self, t: Target) {
-        let cursor = match self.target_value(t).map(|r| self.var().color(r)) {
-            Some(Color::Indexed(n)) => n,
-            _ => 0,
-        };
-        self.edit = Edit::Palette { target: t, cursor };
+    /// The cells of picker tab `tab` for target `t`. The `@ palette` tab offers the
+    /// palette colors (parts only; palette colors themselves take literals) and `reset`.
+    pub fn grid(t: Target, tab: usize) -> Vec<ColorRef> {
+        match tab {
+            0 => ANSI16.iter().map(|c| ColorRef::Lit(*c)).collect(),
+            1 => (16u8..=231)
+                .map(|i| ColorRef::Lit(Color::Indexed(i)))
+                .collect(),
+            2 => (232u8..=255)
+                .map(|i| ColorRef::Lit(Color::Indexed(i)))
+                .collect(),
+            _ => {
+                let mut v: Vec<ColorRef> = match t {
+                    Target::Color(_) => vec![],
+                    _ => (0..N_COLORS).map(ColorRef::Slot).collect(),
+                };
+                v.push(ColorRef::Lit(Color::Reset));
+                v
+            }
+        }
     }
 
-    pub fn palette_pick(&mut self, idx: u8) {
-        if let Edit::Palette { target, .. } = self.edit {
-            self.set_target(target, Some(ColorRef::Lit(Color::Indexed(idx))));
+    /// Columns of picker tab `tab` (1: a list).
+    pub fn grid_cols(tab: usize) -> usize {
+        match tab {
+            0 => 8,
+            1 => 18,
+            2 => 12,
+            _ => 1,
+        }
+    }
+
+    /// Open the color picker on the tab and cell holding the current value.
+    pub fn open_palette(&mut self, t: Target) {
+        let cur = self.target_value(t).map(|r| match r {
+            // 0-15 are the same colors as the named ones in the first tab.
+            ColorRef::Lit(Color::Indexed(n)) if n < 16 => ColorRef::Lit(ANSI16[n as usize]),
+            other => other,
+        });
+        let (tab, cursor) = cur
+            .and_then(|c| {
+                (0..PICKER_TABS.len()).find_map(|tab| {
+                    Self::grid(t, tab)
+                        .iter()
+                        .position(|g| *g == c)
+                        .map(|i| (tab, i))
+                })
+            })
+            .unwrap_or((0, 0));
+        self.edit = Edit::Palette {
+            target: t,
+            tab,
+            cursor,
+        };
+    }
+
+    /// Set the picker's target to cell `idx` of its current tab and close the picker.
+    pub fn palette_pick(&mut self, idx: usize) {
+        if let Edit::Palette { target, tab, .. } = self.edit
+            && let Some(c) = Self::grid(target, tab).get(idx)
+        {
+            self.set_target(target, Some(*c));
             self.edit = Self::back_from(target);
+        }
+    }
+
+    /// Move the picker's selection by `d` cells, or switch tab by `dt`.
+    fn palette_move(&mut self, d: i32, dt: i32) {
+        if let Edit::Palette {
+            target,
+            tab,
+            cursor,
+        } = self.edit
+        {
+            let n = PICKER_TABS.len() as i32;
+            let tab = (tab as i32 + dt).rem_euclid(n) as usize;
+            let len = Self::grid(target, tab).len() as i32;
+            let cursor = if dt != 0 {
+                0
+            } else {
+                (cursor as i32 + d).clamp(0, len - 1) as usize
+            };
+            self.edit = Edit::Palette {
+                target,
+                tab,
+                cursor,
+            };
         }
     }
 
@@ -1386,34 +1530,25 @@ impl ThemeEditor {
                 }
                 Action::None
             }
-            Edit::Palette { target, cursor } => {
-                let cols = if self.palette_cols == 0 {
-                    16
-                } else {
-                    self.palette_cols as i32
-                };
-                let mv = |d: i32| (cursor as i32 + d).clamp(0, 255) as u8;
-                let next = match k.code {
-                    KeyCode::Esc => {
-                        self.edit = Self::back_from(target);
-                        return Action::None;
-                    }
-                    KeyCode::Enter | KeyCode::Char(' ') => {
-                        self.palette_pick(cursor);
-                        return Action::None;
-                    }
-                    KeyCode::Left | KeyCode::Char('h') => mv(-1),
-                    KeyCode::Right | KeyCode::Char('l') => mv(1),
-                    KeyCode::Up | KeyCode::Char('k') => mv(-cols),
-                    KeyCode::Down | KeyCode::Char('j') => mv(cols),
-                    KeyCode::Home => 0,
-                    KeyCode::End => 255,
-                    _ => cursor,
-                };
-                self.edit = Edit::Palette {
-                    target,
-                    cursor: next,
-                };
+            Edit::Palette {
+                target,
+                tab,
+                cursor,
+            } => {
+                let cols = Self::grid_cols(tab) as i32;
+                match k.code {
+                    KeyCode::Esc => self.edit = Self::back_from(target),
+                    KeyCode::Enter | KeyCode::Char(' ') => self.palette_pick(cursor),
+                    KeyCode::Tab => self.palette_move(0, 1),
+                    KeyCode::BackTab => self.palette_move(0, -1),
+                    KeyCode::Left | KeyCode::Char('h') => self.palette_move(-1, 0),
+                    KeyCode::Right | KeyCode::Char('l') => self.palette_move(1, 0),
+                    KeyCode::Up | KeyCode::Char('k') => self.palette_move(-cols, 0),
+                    KeyCode::Down | KeyCode::Char('j') => self.palette_move(cols, 0),
+                    KeyCode::Home => self.palette_move(-(cursor as i32), 0),
+                    KeyCode::End => self.palette_move(i32::MAX / 2, 0),
+                    _ => {}
+                }
                 Action::None
             }
             Edit::Form { field } => {
@@ -1531,13 +1666,19 @@ impl ThemeEditor {
             self.variant = v;
             return;
         }
-        if let Edit::Palette { .. } = self.edit {
-            if self.palette_area.contains(at) {
+        if let Edit::Palette { target, tab, .. } = self.edit {
+            if let Some(&(_, t)) = self.palette_tab_areas.iter().find(|(r, _)| r.contains(at)) {
+                self.edit = Edit::Palette {
+                    target,
+                    tab: t,
+                    cursor: 0,
+                };
+            } else if self.palette_area.contains(at) {
                 let cx = (col - self.palette_area.x) / self.palette_cell_w.max(1);
                 let cy = row - self.palette_area.y;
-                let idx = cy as u32 * self.palette_cols as u32 + cx as u32;
-                if cx < self.palette_cols && idx < 256 {
-                    self.palette_pick(idx as u8);
+                let idx = cy as usize * self.palette_cols as usize + cx as usize;
+                if cx < self.palette_cols && idx < Self::grid(target, tab).len() {
+                    self.palette_pick(idx);
                 }
             }
             return;
@@ -1561,9 +1702,8 @@ impl ThemeEditor {
     }
 
     pub fn scroll(&mut self, delta: i32) {
-        if let Edit::Palette { target, cursor } = self.edit {
-            let c = (cursor as i32 + delta * self.palette_cols as i32).clamp(0, 255) as u8;
-            self.edit = Edit::Palette { target, cursor: c };
+        if let Edit::Palette { .. } = self.edit {
+            self.palette_move(delta * self.palette_cols.max(1) as i32, 0);
         } else {
             self.move_by(delta);
         }
@@ -1628,8 +1768,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     f.render_widget(Paragraph::new(Line::from(spans)), tabs);
 
     draw_list(f, &mut ed, list);
-    if let Edit::Palette { cursor, .. } = ed.edit {
-        draw_palette(f, &mut ed, preview_box, cursor);
+    if let Edit::Palette {
+        target,
+        tab,
+        cursor,
+    } = ed.edit
+    {
+        draw_palette(f, &mut ed, preview_box, target, tab, cursor);
     } else {
         ed.preview_area = preview_box;
         draw_preview(f, app, &ed, preview_box);
@@ -1649,7 +1794,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             "Type 0-255, #rrggbb, #rgb, a name (cyan, darkgray…) or reset; styles also take @palette or empty",
             "Enter apply · Esc cancel",
         ],
-        Edit::Palette { .. } => ["Arrows move · Enter/click pick", "Esc cancel"],
+        Edit::Palette { .. } => [
+            "Tab / Shift-Tab: 16 colors · 216 cube · 24 grays · @ palette · arrows move · Enter/click pick",
+            "Esc cancel",
+        ],
         Edit::Name { .. } => ["Theme name: a-z, 0-9, _ and -", "Enter create · Esc cancel"],
     };
     f.render_widget(
@@ -1925,34 +2073,93 @@ fn draw_more_samples(f: &mut Frame, help: Rect) {
     }
 }
 
-fn draw_palette(f: &mut Frame, ed: &mut ThemeEditor, area: Rect, cursor: u8) {
+fn draw_palette(
+    f: &mut Frame,
+    ed: &mut ThemeEditor,
+    area: Rect,
+    target: Target,
+    tab: usize,
+    cursor: usize,
+) {
+    let grid = ThemeEditor::grid(target, tab);
+    let selected = grid.get(cursor).copied();
     let block = theme::block(&theme::panel(true)).title(format!(
-        " Palette: {} ",
-        themes::format_color(Color::Indexed(cursor))
+        " Color: {} · Tab: grid · arrows · Enter sets · Esc ",
+        selected.map(themes::format_color_ref).unwrap_or_default()
     ));
     let p = block.inner(area);
     f.render_widget(block, area);
-    let cols: u16 = if p.height < 16 && p.width >= 64 {
-        32
-    } else {
-        16
-    };
-    let cell_w = (p.width / cols).clamp(1, 3);
+    // Tabs.
+    ed.palette_tab_areas.clear();
+    let mut x = p.x;
+    let mut spans = vec![];
+    for (k, t) in PICKER_TABS.iter().enumerate() {
+        let label = format!(" {t} ");
+        let w = label.chars().count() as u16;
+        ed.palette_tab_areas
+            .push((Rect::new(x, p.y, w.min(p.right().saturating_sub(x)), 1), k));
+        x += w + 1;
+        let st = if k == tab {
+            theme::selected()
+        } else {
+            theme::modal_text()
+        };
+        spans.push(st.span(label));
+        spans.push(Span::raw(" "));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), Rect { height: 1, ..p });
+    if p.height < 3 {
+        return;
+    }
+    let g = Rect::new(p.x, p.y + 2, p.width, p.height - 2);
+    let cols = ThemeEditor::grid_cols(tab) as u16;
+    let v = ed.var().clone();
+    if cols == 1 {
+        // A list: swatch and name.
+        ed.palette_cols = 1;
+        ed.palette_cell_w = g.width.max(1);
+        let rows = (grid.len() as u16).min(g.height);
+        ed.palette_area = Rect::new(g.x, g.y, g.width, rows);
+        let lines: Vec<Line> = grid
+            .iter()
+            .enumerate()
+            .take(rows as usize)
+            .map(|(k, c)| {
+                let st = if k == cursor {
+                    theme::selected()
+                } else {
+                    theme::modal_text()
+                };
+                Line::from(vec![
+                    swatch(v.color(*c)),
+                    st.span(format!(" {}", themes::format_color_ref(*c))),
+                ])
+            })
+            .collect();
+        let mut lines = lines;
+        if matches!(target, Target::Color(_)) && rows < g.height {
+            lines.push(Line::raw(""));
+            lines.push(theme::key_hint().line("Palette colors take a literal color, not @name."));
+        }
+        f.render_widget(Paragraph::new(lines), g);
+        return;
+    }
+    let cell_w = (g.width / cols).clamp(1, 3);
     ed.palette_cols = cols;
     ed.palette_cell_w = cell_w;
-    let rows = (256 / cols).min(p.height);
-    ed.palette_area = Rect::new(p.x, p.y, cols * cell_w, rows);
+    let rows = (grid.len() as u16).div_ceil(cols).min(g.height);
+    ed.palette_area = Rect::new(g.x, g.y, cols * cell_w, rows);
     let buf = f.buffer_mut();
-    for i in 0..(rows * cols) {
-        let (cx, cy) = (i % cols, i / cols);
-        let c = Color::Indexed(i as u8);
+    for (i, c) in grid.iter().enumerate().take((rows * cols) as usize) {
+        let (cx, cy) = (i as u16 % cols, i as u16 / cols);
+        let col = v.color(*c);
         for dx in 0..cell_w {
-            if let Some(cell) = buf.cell_mut(Position::new(p.x + cx * cell_w + dx, p.y + cy)) {
-                let mark = i as u8 == cursor && dx == cell_w / 2;
-                cell.set_symbol(if mark { "◆" } else { " " }).set_bg(c);
+            if let Some(cell) = buf.cell_mut(Position::new(g.x + cx * cell_w + dx, g.y + cy)) {
+                let mark = i == cursor && dx == cell_w / 2;
+                cell.set_symbol(if mark { "◆" } else { " " }).set_bg(col);
                 if mark {
-                    let (r, g, b) = themes::rgb_of(c).unwrap_or((0, 0, 0));
-                    let light = (r as u32 * 299 + g as u32 * 587 + b as u32 * 114) / 1000 > 128;
+                    let (r, gg, b) = themes::rgb_of(col).unwrap_or((0, 0, 0));
+                    let light = (r as u32 * 299 + gg as u32 * 587 + b as u32 * 114) / 1000 > 128;
                     cell.set_fg(if light { Color::Black } else { Color::White });
                 }
             }
@@ -2442,6 +2649,62 @@ mod tests {
     }
 
     #[test]
+    fn the_color_picker_offers_palette_refs_for_parts() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        app.open_theme_editor(Some("default"));
+        let ed = app.editor.as_mut().unwrap();
+        let g = ThemeEditor::grid(Target::Fg(theme::slot::TITLE), 3);
+        assert_eq!(g.len(), N_COLORS + 1);
+        assert_eq!(g[color::OK], ColorRef::Slot(color::OK));
+        assert_eq!(*g.last().unwrap(), ColorRef::Lit(Color::Reset));
+        assert_eq!(
+            [0, 1, 2].map(|t| ThemeEditor::grid(Target::Color(0), t).len()),
+            [16, 216, 24]
+        );
+        // A part that points at @accent opens on that ref; picking @ok sets the ref.
+        ed.var_mut().styles[theme::slot::TITLE].fg = Some(ColorRef::Slot(color::ACCENT));
+        ed.open_palette(Target::Fg(theme::slot::TITLE));
+        assert_eq!(
+            ed.edit,
+            Edit::Palette {
+                target: Target::Fg(theme::slot::TITLE),
+                tab: 3,
+                cursor: color::ACCENT
+            }
+        );
+        ed.palette_pick(color::OK);
+        assert_eq!(
+            ed.var().styles[theme::slot::TITLE].fg,
+            Some(ColorRef::Slot(color::OK))
+        );
+        // Indexed 0-15 open on the matching named color in the first tab.
+        ed.var_mut().colors[color::WARN] = Color::Indexed(3);
+        ed.open_palette(Target::Color(color::WARN));
+        assert!(matches!(
+            ed.edit,
+            Edit::Palette {
+                tab: 0,
+                cursor: 3,
+                ..
+            }
+        ));
+        // The picker draws its tabs.
+        let mut term = Terminal::new(TestBackend::new(140, 45)).unwrap();
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let text: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        for t in PICKER_TABS {
+            assert!(text.contains(t), "{t}");
+        }
+    }
+
+    #[test]
     fn header_switcher_opens_the_theme_picker() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = test_app(&rt);
@@ -2518,23 +2781,57 @@ mod tests {
         app.editor.as_mut().unwrap().cursor = color::HEADER;
         key(&mut app, KeyCode::Char('p'));
         let cur = |app: &App| match app.editor.as_ref().unwrap().edit {
-            Edit::Palette { cursor, .. } => cursor,
+            Edit::Palette { tab, cursor, .. } => (tab, cursor),
             _ => panic!("palette open"),
         };
-        assert_eq!(cur(&app), 237, "starts on the current color");
+        assert_eq!(
+            cur(&app),
+            (2, 237 - 232),
+            "starts on the current color's tab and cell"
+        );
         key(&mut app, KeyCode::Right);
+        assert_eq!(cur(&app), (2, 6));
         key(&mut app, KeyCode::Up);
-        assert_eq!(cur(&app), 238 - 16);
+        assert_eq!(cur(&app), (2, 0), "clamped at the first cell");
         for _ in 0..3 {
             key(&mut app, KeyCode::Down);
         }
-        assert_eq!(cur(&app), 255, "clamped at 255");
+        assert_eq!(cur(&app), (2, 23), "clamped at the last gray");
         key(&mut app, KeyCode::Home);
         key(&mut app, KeyCode::Right);
         key(&mut app, KeyCode::Enter);
         assert_eq!(
             app.editor.as_ref().unwrap().theme.dark.colors[color::HEADER],
-            Color::Indexed(1)
+            Color::Indexed(233)
+        );
+        // Tabs: 16 colors · 216 cube · 24 grays · @ palette (palette colors: only reset).
+        key(&mut app, KeyCode::Char('p'));
+        key(&mut app, KeyCode::Tab);
+        assert_eq!(cur(&app), (3, 0));
+        assert_eq!(
+            ThemeEditor::grid(Target::Color(color::HEADER), 3),
+            vec![ColorRef::Lit(Color::Reset)]
+        );
+        key(&mut app, KeyCode::Tab);
+        assert_eq!(cur(&app), (0, 0), "wraps to the 16 colors");
+        key(&mut app, KeyCode::Right);
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.editor.as_ref().unwrap().theme.dark.colors[color::HEADER],
+            Color::Red
+        );
+        key(&mut app, KeyCode::Char('p'));
+        key(&mut app, KeyCode::BackTab);
+        key(&mut app, KeyCode::BackTab);
+        key(&mut app, KeyCode::End);
+        assert_eq!(cur(&app), (2, 23));
+        key(&mut app, KeyCode::BackTab);
+        key(&mut app, KeyCode::End);
+        assert_eq!(cur(&app), (1, 215), "the 216 cube");
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.editor.as_ref().unwrap().theme.dark.colors[color::HEADER],
+            Color::Indexed(231)
         );
         // Style form: make `title` italic, point its fg at @ok, clear its bg.
         app.editor.as_mut().unwrap().cursor = N_COLORS + theme::slot::TITLE;
@@ -2779,12 +3076,22 @@ mod tests {
         key(&mut app, KeyCode::Esc);
         key(&mut app, KeyCode::Char('p'));
         term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        // Click the 216-cube tab, then a cell.
+        let ed = app.editor.as_ref().unwrap();
+        let (tr, _) = ed.palette_tab_areas[1];
+        app.editor_click(tr.x + 1, tr.y);
+        assert!(matches!(
+            app.editor.as_ref().unwrap().edit,
+            Edit::Palette { tab: 1, .. }
+        ));
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
         let ed = app.editor.as_ref().unwrap();
         let (pa, cw, cols) = (ed.palette_area, ed.palette_cell_w, ed.palette_cols);
+        assert_eq!(cols, 18);
         app.editor_click(pa.x + 2 * cw, pa.y + 1);
         assert_eq!(
             app.editor.as_ref().unwrap().theme.light.colors[color::ACCENT],
-            Color::Indexed((cols + 2) as u8)
+            Color::Indexed(16 + 18 + 2)
         );
         // Wheel moves the selection.
         app.editor_scroll(1);
@@ -2795,7 +3102,7 @@ mod tests {
     fn bare_app(rt: &tokio::runtime::Runtime, url: Option<String>) -> (App, tempfile::TempDir) {
         let (mut app, d) = test_app(rt);
         std::fs::remove_file(themes::path(&app.themes_dir(), "default")).unwrap();
-        app.theme_download_url = url;
+        app.theme_download_base = url;
         (app, d)
     }
 
@@ -2819,11 +3126,11 @@ mod tests {
     fn downloads_are_off_in_tests_mock_mode_and_by_opt_out() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = test_app(&rt);
-        assert_eq!(app.theme_download_url, None, "mock mode never downloads");
-        app.theme_download_url = Some("http://127.0.0.1:9/default.toml".into());
-        assert!(app.download_url().is_some());
+        assert_eq!(app.theme_download_base, None, "mock mode never downloads");
+        app.theme_download_base = Some("http://127.0.0.1:9/".into());
+        assert!(app.download_url("default").is_some());
         type_line(&mut app, "/prefs set ui.theme_download false");
-        assert_eq!(app.download_url(), None);
+        assert_eq!(app.download_url("default"), None);
     }
 
     #[test]
@@ -2831,7 +3138,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let srv = serve(&rt, 200, &shipped());
         let url = format!("{}/default.toml", srv.uri());
-        let (mut app, _d) = bare_app(&rt, Some(url.clone()));
+        let (mut app, _d) = bare_app(&rt, Some(format!("{}/", srv.uri())));
         app.init_themes();
         // Startup doesn't wait: plain colors and a notice first.
         assert_eq!(app.theme_problem, Some("downloading"));
@@ -2853,7 +3160,7 @@ mod tests {
     fn a_failed_download_keeps_plain_colors_and_explains() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let srv = serve(&rt, 404, "nope");
-        let (mut app, _d) = bare_app(&rt, Some(format!("{}/default.toml", srv.uri())));
+        let (mut app, _d) = bare_app(&rt, Some(format!("{}/", srv.uri())));
         app.init_themes();
         app.wait_idle(std::time::Duration::from_secs(10));
         assert_eq!(app.theme_problem, Some("missing"));
@@ -2870,14 +3177,14 @@ mod tests {
     }
 
     #[test]
-    fn theme_init_downloads_when_it_can_else_writes_the_starter() {
+    fn theme_init_downloads_shipped_themes_by_name_or_all() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let srv = serve(&rt, 200, &shipped());
-        let (mut app, _d) = bare_app(&rt, Some(format!("{}/default.toml", srv.uri())));
-        app.theme_download_url = None;
+        let base = format!("{}/", srv.uri());
+        let (mut app, _d) = bare_app(&rt, None);
         app.init_themes();
         assert_eq!(app.theme_problem, Some("missing"));
-        app.theme_download_url = Some(format!("{}/default.toml", srv.uri()));
+        app.theme_download_base = Some(base.clone());
         app.open_theme_picker();
         assert!(
             app.picker.as_ref().unwrap().items[0]
@@ -2893,23 +3200,36 @@ mod tests {
             std::fs::read_to_string(themes::path(&dir, "default")).unwrap(),
             shipped()
         );
-        // Another name: same colors, its own display name.
+        // `all` = every shipped theme; existing files are kept without downloading.
+        type_line(&mut app, "/theme init all");
+        assert!(!app.theme_downloading);
+        assert!(notices(&app).contains("default.toml already exists; it was kept"));
+        std::fs::remove_file(themes::path(&dir, "default")).unwrap();
+        type_line(&mut app, "/theme init all");
+        app.wait_idle(std::time::Duration::from_secs(10));
+        assert_eq!(themes::list(&dir), themes::SHIPPED);
+        // A name is that theme's file in the release, not the default renamed.
         type_line(&mut app, "/theme init mine");
         app.wait_idle(std::time::Duration::from_secs(10));
-        let (mine, _) = themes::load(&dir, "mine").unwrap();
-        assert_eq!(mine.name, "mine");
-        assert_eq!(mine.dark, app.theme.dark);
-        // Download fails: the starter is written instead.
-        let bad = serve(&rt, 500, "");
-        app.theme_download_url = Some(format!("{}/default.toml", bad.uri()));
+        assert!(!themes::path(&dir, "mine").exists());
+        let n = notices(&app);
+        assert!(
+            n.contains(&format!(
+                "Couldn't download the mine theme from {base}mine.toml"
+            )),
+            "{n}"
+        );
+        assert!(n.contains("Shipped themes: default"), "{n}");
+        // Downloads off: the starter is written instead.
+        app.theme_download_base = None;
         type_line(&mut app, "/theme init other");
-        app.wait_idle(std::time::Duration::from_secs(10));
-        assert!(notices(&app).contains("Writing the minimal starter instead"));
+        assert!(notices(&app).contains("writing the minimal starter instead"));
         assert_eq!(
             themes::load(&dir, "other").unwrap().0.dark,
             Theme::unstyled("x").dark
         );
         // /theme starter never downloads.
+        app.theme_download_base = Some(base);
         type_line(&mut app, "/theme starter plain");
         assert!(!app.theme_downloading);
         assert_eq!(

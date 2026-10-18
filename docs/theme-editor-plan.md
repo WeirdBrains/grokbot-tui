@@ -35,6 +35,10 @@ It now describes what was built and why. Before 1.5.0,
   file), loads it and shows a notice. Until then, and if it fails, plain terminal colors plus a
   notice. Mock mode never downloads.
 - **Opt-out:** `GROKBOT_TUI_NO_THEME_DOWNLOAD=1` or the global pref `ui.theme_download = false`.
+- `GROKBOT_TUI_THEME_URL` replaces the base (`<base><name>.toml`); the tests point it at a mock
+  server. `/theme init [name|all]` downloads `<name>.toml` (`all` = `themes::SHIPPED`, just
+  `default` today) one after another. `--list-themes` and `--theme` do the first-run download
+  synchronously, waiting at most 3 s.
 - Once the folder has any theme, upgrades don't touch it. A new default reaches existing users
   only via `/theme init <name>` or by deleting their copy. That's the accepted cost of "your
   files are yours".
@@ -143,7 +147,8 @@ the edited theme into an off-screen `TestBackend` and copied in. A detail pane a
 - Enter / `e`: a color takes a literal or `@name` (invalid input shows the reason and is refused).
   A part opens a form: fg, bg, border (boxes only), then bold/italic/underline/reverse/dim
   toggles. Backspace / Delete clears a field.
-- `p`: 256-color palette grid (keyboard or mouse). Typing a `#rrggbb` warns when `COLORTERM`
+- `p`: color picker with tabs: 16 colors, the 216-color cube, 24 grays and `@ palette` (palette
+  refs for parts, plus `reset`), by keyboard (Tab/Shift-Tab, arrows) or mouse. Typing a `#rrggbb` warns when `COLORTERM`
   isn't truecolor/24bit.
 - Contrast: WCAG ratio for text/background pairs, with a warning below 3:1.
 - `s` / Ctrl-S: save (asks before replacing a broken file or one changed on disk). It applies right
@@ -200,7 +205,10 @@ grokbot-tui's theme system is kept in sync with the one in acp-rs-scraper. In 1.
 `--theme` / `--list-themes`, `/theme export`, live preview in the pick list, atomic `0600` writes
 (PID-named temp file created with the mode, removed on failure; folder `0700` only when created;
 no mode on Windows), the size check before reading (64 KiB), a warning for a missing `schema`,
-and the editor's `[` / `]`, Shift-F5 close, Ctrl-D/N/X and `⚠` contrast markers.
+and the editor's `[` / `]`, Shift-F5 close, Ctrl-D/N/X and `⚠` contrast markers. From
+acp-rs-scraper 2.14.0: `/theme init [name|all]` downloading shipped themes by name, the tabbed
+color picker, the first-run download for `--list-themes` / `--theme`, and the download URL
+override (`GROKBOT_TUI_THEME_URL`). acp-rs-scraper's six extra themes are not shipped.
 
 Deliberately different:
 - Files live only in `<data dir>/themes`; the default is downloaded from the release tag (no

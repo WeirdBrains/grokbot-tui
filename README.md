@@ -122,8 +122,11 @@ panel_focused = { fg = "@text", border = "@accent" }
 - **`/theme export <name> [path]`** copies a theme file (exact text) to
   `<data dir>/exports/<name>-<UTC time>.toml`, or to the path given (a folder gets `<name>.toml`).
   It never overwrites.
-- **`/theme init [name]`** downloads the default theme the same way and saves it as `<name>.toml`
-  (default `default.toml`). If downloading is off or fails, it writes the minimal starter instead.
+- **`/theme init [name|all]`** downloads `<name>.toml` from the release's `themes/` folder the same
+  way (default `default`; `all` = every shipped theme, currently just `default`). Existing files
+  are kept. With downloading off it writes the minimal starter instead. `--list-themes` and
+  `--theme` also fetch the default first when the folder is empty (waiting up to 3 s).
+  `GROKBOT_TUI_THEME_URL` replaces the download address (`<url><name>.toml`).
 - **`/theme starter [name]`** always writes the minimal starter: every part is mapped to a palette
   role (title → `@accent`, errors → `@danger`, …) but every color is the terminal default. Set the
   colors in the editor.
@@ -131,7 +134,7 @@ panel_focused = { fg = "@text", border = "@accent" }
   preview of the app on the right (drawn by the real UI code with your unsaved changes, plus sample
   chat entries and modals). The selected color or part is marked in reverse video in the preview
   (`h` toggles; the preview title says when the part isn't on screen). `Tab` flips
-  dark/light, `Enter`/`e` edits (hex, 0-255, a name or `@palette`), `p` opens the 256-color palette,
+  dark/light, `Enter`/`e` edits (hex, 0-255, a name or `@palette`), `p` opens the color picker (tabs: 16 colors, the 216-color cube, 24 grays, `@palette` refs),
   `r`/`R` revert the item/everything, `s` saves (applied immediately if it's the theme in use),
   `d` duplicates, `n` creates a starter theme, `x` deletes (asks first; `Ctrl-D`/`Ctrl-N`/`Ctrl-X`
   work too), `t` opens another theme and `[`/`]` step to the previous/next one, `Esc` (or
@@ -170,7 +173,7 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 100 entries):
 | `/theme use [name]` | Switch theme (also `/theme <name>`); no name: pick list (also `F5`) |
 | `/theme list` · `/theme reload` | List theme files (`●` = in use; broken files say why) · re-read them after editing by hand |
 | `/theme edit [name]` | Open the theme editor (also `Shift-F5`) |
-| `/theme init [name]` | Download the default theme (else write the minimal starter; never overwrites) |
+| `/theme init [name\|all]` | Download a shipped theme from the release (else write the minimal starter; never overwrites) |
 | `/theme starter [name]` | Write a minimal starter theme (no download; never overwrites) |
 | `/theme delete <name>` | Delete a theme file (confirm in a pick list) |
 | `/theme export <name> [path]` | Copy a theme file out (default `<data dir>/exports/<name>-<UTC time>.toml`; never overwrites) |
@@ -238,6 +241,7 @@ Redirects are never followed, requests time out after 30 s, responses are capped
 | `GROKBOT_TUI_MAX_RESPONSE_BYTES` | Cap on one gateway response body in bytes (default 64 MiB) |
 | `GROKBOT_TUI_APP_DIR` | Grok Bot desktop app install directory, for client version detection |
 | `GROKBOT_TUI_NO_THEME_DOWNLOAD` | `1` = never download the default theme (see [Themes](#themes)) |
+| `GROKBOT_TUI_THEME_URL` | Download themes from this URL base instead of the release tag (`<url><name>.toml`; used by the tests) |
 | `GROKBOT_TUI_ACCOUNT` | Starting account alias |
 
 `GROKBOT_TUI_ALLOW_LOCAL_GATEWAY` and `GROKBOT_TUI_APP_DIR` are forwarded at startup to

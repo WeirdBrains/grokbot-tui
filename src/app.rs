@@ -462,9 +462,10 @@ pub struct App {
     pub theme: Arc<crate::theme::Theme>,
     /// Why the selected theme couldn't be loaded ("missing" / "broken"), if it couldn't.
     pub theme_problem: Option<&'static str>,
-    /// Where to download the shipped default theme when no theme files are found: the
-    /// release tag matching this build. None = never (mock mode, GROKBOT_TUI_NO_THEME_DOWNLOAD).
-    pub theme_download_url: Option<String>,
+    /// Where shipped themes are downloaded from (`<base><name>.toml`): the repo's `themes/`
+    /// at this build's tag, or GROKBOT_TUI_THEME_URL. None = never (mock mode,
+    /// GROKBOT_TUI_NO_THEME_DOWNLOAD).
+    pub theme_download_base: Option<String>,
     /// A theme download is in flight.
     pub theme_downloading: bool,
     /// `--theme <name>`: the theme for this run only (never saved; survives config reloads
@@ -597,13 +598,13 @@ impl App {
             detected_variant: None,
             theme: Arc::new(crate::theme::Theme::unstyled(crate::themes::DEFAULT_ID)),
             theme_problem: None,
-            theme_download_url: (!mock
+            theme_download_base: (!mock
                 && !crate::themes::opted_out(
                     std::env::var(crate::themes::NO_DOWNLOAD_ENV)
                         .ok()
                         .as_deref(),
                 ))
-            .then(crate::themes::default_url),
+            .then(crate::themes::download_base_now),
             theme_downloading: false,
             theme_override: None,
             theme_preview: None,
