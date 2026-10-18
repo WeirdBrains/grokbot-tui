@@ -44,6 +44,10 @@ pub const PREF_THEME_MODE: &str = "ui.theme_mode";
 /// Pref key for the selected theme: a file name in `<data dir>/themes/` without `.toml` (global).
 pub const PREF_THEME: &str = "ui.theme";
 
+/// Pref key: may grokbot-tui download the shipped default theme from GitHub when the themes
+/// folder is empty (`true`/`false`, global). `GROKBOT_TUI_NO_THEME_DOWNLOAD=1` also turns it off.
+pub const PREF_THEME_DOWNLOAD: &str = "ui.theme_download";
+
 /// Pref key for the big header title's glyphs: `auto`, `quadrant` or `half` (global).
 pub const PREF_TITLE_GLYPHS: &str = "ui.title_glyphs";
 
@@ -54,6 +58,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_THEME_MODE,
     PREF_TITLE_GLYPHS,
     PREF_THEME,
+    PREF_THEME_DOWNLOAD,
 ];
 
 /// Which block glyphs draw the big header title (pref `ui.title_glyphs`).
@@ -124,6 +129,8 @@ pub struct Config {
     pub title_glyphs: TitleGlyphs,
     /// Selected theme id (`<data dir>/themes/<id>.toml`).
     pub theme: String,
+    /// Allow downloading the shipped default theme (see `PREF_THEME_DOWNLOAD`).
+    pub theme_download: bool,
 }
 
 impl Default for Config {
@@ -139,6 +146,7 @@ impl Default for Config {
             theme_mode: crate::theme::Mode::System,
             title_glyphs: TitleGlyphs::Auto,
             theme: crate::themes::DEFAULT_ID.to_string(),
+            theme_download: true,
         }
     }
 }
@@ -157,6 +165,7 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_THEME_MODE, c.theme_mode.as_str().to_string()),
         (PREF_TITLE_GLYPHS, c.title_glyphs.as_str().to_string()),
         (PREF_THEME, c.theme.clone()),
+        (PREF_THEME_DOWNLOAD, c.theme_download.to_string()),
     ]
 }
 
@@ -186,6 +195,9 @@ impl Config {
                 .map(|v| v.trim().to_string())
                 .filter(|v| crate::themes::valid_id(v))
                 .unwrap_or(d.theme),
+            theme_download: o(PREF_THEME_DOWNLOAD)
+                .map(|v| !matches!(v.trim(), "false" | "0" | "no" | "off"))
+                .unwrap_or(d.theme_download),
         }
     }
 }
@@ -216,6 +228,12 @@ mod tests {
         assert!(is_global(PREF_THEME_MODE));
         assert_eq!(c.theme, "default");
         assert!(is_global(PREF_THEME));
+        assert!(c.theme_download);
+        assert!(is_global(PREF_THEME_DOWNLOAD));
+        m.insert(PREF_THEME_DOWNLOAD.into(), "false".into());
+        assert!(!Config::from_prefs(&m).theme_download);
+        m.insert(PREF_THEME_DOWNLOAD.into(), "true".into());
+        assert!(Config::from_prefs(&m).theme_download);
         m.insert(PREF_THEME.into(), "solar-2".into());
         assert_eq!(Config::from_prefs(&m).theme, "solar-2");
         m.insert(PREF_THEME.into(), "../etc/passwd".into());

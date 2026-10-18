@@ -72,7 +72,8 @@ Keys: `Enter` submit · `Tab` toggle focus input/sidebar · `↑/↓` (or `j/k`)
 ### Themes
 
 Every theme, including `default`, is a TOML file in `~/.grokbot-tui/themes/<name>.toml` (it follows
-`--data-dir`). Nothing is built into the binary. Each file has a `[dark]` and a `[light]` variant:
+`--data-dir`), and themes are read only from that folder: nothing is built into the binary and no
+system folder is searched. Each file has a `[dark]` and a `[light]` variant:
 a palette of 14 named colors and a style for each part of the screen.
 
 ```toml
@@ -96,22 +97,29 @@ panel_focused = { fg = "@text", border = "@accent" }
 # …
 ```
 
-- **Where `default.toml` comes from:** the repo's [`themes/default.toml`](themes/default.toml) is
-  installed by the packages (deb, rpm, AUR: `/usr/share/grokbot-tui/themes`; Homebrew:
-  `share/grokbot-tui/themes`; MSI: `share\grokbot-tui\themes` next to `bin`; release archives:
-  `themes/`). At startup, if your themes folder has no themes, they are copied into it. Your files
-  are never overwritten. With the shell/PowerShell installers or `cargo install`, download
-  `default.toml` into the themes folder, or run `/theme init`.
+- **Where `default.toml` comes from:** on first run, when your themes folder has no themes,
+  grokbot-tui downloads the repo's [`themes/default.toml`](themes/default.toml) from the git tag
+  matching its version
+  (`https://raw.githubusercontent.com/WeirdBrains/grokbot-tui/v<version>/themes/default.toml`),
+  checks that it's a valid theme, saves it there and shows a notice. This works the same for every
+  install method. Startup never waits for it: plain terminal colors until it arrives, and it gives
+  up after 5 seconds. Offline or failed: plain colors plus a notice; `/theme init` tries again. Your
+  files are never overwritten. **Opt out** with `GROKBOT_TUI_NO_THEME_DOWNLOAD=1` or
+  `/prefs set ui.theme_download false`.
 - **Missing or broken theme:** grokbot-tui uses your terminal's own colors (highlights stay visible
   via reverse video), shows a notice saying why, and marks the header `‹name: missing›` /
   `‹name: broken›`. A broken file is never overwritten without asking. Partial files are fine:
   missing colors use the terminal default, missing parts use the starter rule, a missing variant
   copies the other, and each problem is listed once.
-- **`/theme init [name]`** writes a minimal starter: every part is mapped to a palette role (title →
-  `@accent`, errors → `@danger`, …) but every color is the terminal default. Set the colors in the
-  editor.
+- **`/theme init [name]`** downloads the default theme the same way and saves it as `<name>.toml`
+  (default `default.toml`). If downloading is off or fails, it writes the minimal starter instead.
+- **`/theme starter [name]`** always writes the minimal starter: every part is mapped to a palette
+  role (title → `@accent`, errors → `@danger`, …) but every color is the terminal default. Set the
+  colors in the editor.
 - **Editor (`Shift-F5` or `/theme edit [name]`):** the palette and every part on the left, a live
-  preview of the app on the right (drawn by the real UI code with your unsaved changes). `Tab` flips
+  preview of the app on the right (drawn by the real UI code with your unsaved changes, plus sample
+  chat entries and modals). The selected color or part is marked in reverse video in the preview
+  (`h` toggles; the preview title says when the part isn't on screen). `Tab` flips
   dark/light, `Enter`/`e` edits (hex, 0-255, a name or `@palette`), `p` opens the 256-color palette,
   `r`/`R` revert the item/everything, `s` saves (applied immediately if it's the theme in use),
   `d` duplicates, `n` creates a starter theme, `x` deletes (asks first), `t` opens another theme,
@@ -150,7 +158,8 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 100 entries):
 | `/theme use [name]` | Switch theme (also `/theme <name>`); no name: pick list (also `F5`) |
 | `/theme list` · `/theme reload` | List theme files (`*` = in use) · re-read them after editing by hand |
 | `/theme edit [name]` | Open the theme editor (also `Shift-F5`) |
-| `/theme init [name]` | Write a minimal starter theme (never overwrites) |
+| `/theme init [name]` | Download the default theme (else write the minimal starter; never overwrites) |
+| `/theme starter [name]` | Write a minimal starter theme (no download; never overwrites) |
 | `/theme delete <name>` | Delete a theme file (confirm in a pick list) |
 | `/memory` (`/mem`) | The active bot's local memory notes; `/memory add <key> <value>`, `/memory clear [key]` |
 | `/quit` (`/q`, `/exit`) | Exit |
@@ -215,6 +224,7 @@ Redirects are never followed, requests time out after 30 s, responses are capped
 | `GROKBOT_TUI_ALLOW_LOCAL_GATEWAY` | `1` to permit loopback gateways (development) |
 | `GROKBOT_TUI_MAX_RESPONSE_BYTES` | Cap on one gateway response body in bytes (default 64 MiB) |
 | `GROKBOT_TUI_APP_DIR` | Grok Bot desktop app install directory, for client version detection |
+| `GROKBOT_TUI_NO_THEME_DOWNLOAD` | `1` = never download the default theme (see [Themes](#themes)) |
 | `GROKBOT_TUI_ACCOUNT` | Starting account alias |
 
 `GROKBOT_TUI_ALLOW_LOCAL_GATEWAY` and `GROKBOT_TUI_APP_DIR` are forwarded at startup to
@@ -281,7 +291,7 @@ The old placeholder-API tokens are **dropped** because they never pointed at a r
 v3→v4 allows method `desktop` and adds `credentials.desktop_entry`, keeping existing logins.
 The earlier one-time import from `~/.grokbot-tui` was removed, since everything it imported is now dead.
 
-**Preferences:** account-scoped `default_bot`, `active_bot` (automatic), `show_hidden_bots` (`false`); global `ui.sidebar_width` (`24`), `ui.theme` (`default`), `ui.theme_mode` (`dark`/`light`/`system`, default `system`), `active_account`.
+**Preferences:** account-scoped `default_bot`, `active_bot` (automatic), `show_hidden_bots` (`false`); global `ui.sidebar_width` (`24`), `ui.theme` (`default`), `ui.theme_download` (`true`), `ui.theme_mode` (`dark`/`light`/`system`, default `system`), `active_account`.
 
 ## grokbot_api
 

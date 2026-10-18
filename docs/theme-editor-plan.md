@@ -1,15 +1,18 @@
-# Theme editor (shipped in 1.5.0)
+# Theme editor (shipped in 1.5.0, revised in 1.6.0)
 
 Status: implemented in 1.5.0. This document started as the 1.4.0 plan and was revised when the
-design changed to **no built-in theme**. It now describes what was built and why. Before 1.5.0,
+design changed to **no built-in theme**. It was revised again in 1.6.0, when themes became
+**user-level only**: system theme folders were dropped in favor of downloading the default
+theme. It now describes what was built and why. Before 1.5.0,
 `src/theme.rs` had two hard-coded palettes and a `Mode` (dark / light / system, global pref
 `ui.theme_mode`).
 
 ## 1. Goals
 
 - Themes are data, not code: one TOML file per theme, each with a `dark` and a `light` variant.
-- **No theme is embedded in the binary.** `default` is a file like any other. The repo ships
-  `themes/default.toml` (exactly the 1.4.0 look), and the packages install it.
+- **No theme is embedded in the binary.** `default` is a file like any other. The repo's
+  `themes/default.toml` (exactly the 1.4.0 look) is its source, fetched from the release tag.
+- **Themes are user-level only:** read from `<data dir>/themes` and nowhere else.
 - An in-app editor with a live preview: edit colors and per-part styles, then save, revert,
   duplicate, create or delete themes.
 - A theme switcher in the header next to the mode switcher, plus hotkeys.
@@ -20,17 +23,20 @@ design changed to **no built-in theme**. It now describes what was built and why
 
 - User themes: `<data dir>/themes/<name>.toml` (normally `~/.grokbot-tui/themes/`, following
   `--data-dir`). Names match `[a-z0-9][a-z0-9_-]{0,31}`, and the file name is the theme id.
-- Shipped themes (`themes/*.toml` in the repo) are installed to a shared directory: deb/rpm/AUR
-  `/usr/share/grokbot-tui/themes`, archives `themes/` (Homebrew: `pkgshare` =
-  `share/grokbot-tui/themes`), MSI `share\grokbot-tui\themes` next to `bin`. See PACKAGING.md.
-- `themes::shared_dirs()` searches, in order: `<canonical exe dir>/../share/grokbot-tui/themes`,
-  `<exe dir>/themes`, `$XDG_DATA_DIRS/*/grokbot-tui/themes` (default `/usr/local/share:/usr/share`),
-  then `/usr/share`, `/usr/local/share`, `/opt/homebrew/share`. Duplicates are removed.
-- **Seeding:** on startup, if the user's themes folder has no `*.toml`, every valid-named
-  `*.toml` in the shared dirs is copied in (the first dir wins per name; nothing is ever
-  overwritten), and a notice names the files. Once the folder has any theme, upgrades don't
-  touch it. A new shipped default reaches existing users only if they delete or replace their
-  copy. That's the accepted cost of "your files are yours".
+- **Only that folder is read.** There are no system theme folders (1.5.0 had
+  `/usr/share/grokbot-tui/themes`, Homebrew `pkgshare`, next-to-binary and `$XDG_DATA_DIRS`
+  lookups, and the packages installed `default.toml` there; 1.6.0 removed all of it).
+- **First run:** when the folder has no `*.toml`, the app downloads
+  `https://raw.githubusercontent.com/WeirdBrains/grokbot-tui/v<version>/themes/default.toml`
+  (the tag of the running version, so file and binary match). It uses the existing reqwest/rustls
+  stack, in the background (startup never waits), with a 5 s timeout (3 s to connect) and a
+  64 KiB cap. It checks that the file parses as a theme, writes it verbatim (never over an existing
+  file), loads it and shows a notice. Until then, and if it fails, plain terminal colors plus a
+  notice. Mock mode never downloads.
+- **Opt-out:** `GROKBOT_TUI_NO_THEME_DOWNLOAD=1` or the global pref `ui.theme_download = false`.
+- Once the folder has any theme, upgrades don't touch it. A new default reaches existing users
+  only via `/theme init <name>` or by deleting their copy. That's the accepted cost of "your
+  files are yours".
 - Writes are atomic (temp file, fsync, rename) with 0600 files in a 0700 directory.
 
 ## 3. TOML schema (v1)
@@ -92,12 +98,13 @@ pixel art are code. The logo's two colors are the palette's `logo_dark` / `logo_
 - A thread-local active theme (`Arc<Theme>`) next to the `Variant`. The style functions keep their
   names (`theme::brand()` …), so call sites in ui.rs, picker.rs etc. didn't change.
 - `themes.rs`: color parsing/formatting, WCAG contrast, `parse(id, text) -> (Theme, warnings)`,
-  `serialize`, and the store (`list`, `load`, `save`, `delete`, `seed`, `shared_dirs`).
+  `serialize`, and the store (`list`, `load`, `save`, `write_new`, `delete`) and `download`.
 
 ## 5. Fallback rules
 
 | Problem | Result |
 |---|---|
+| No themes at all (first run) | Download `default.toml` (above); header `‹default: downloading›` meanwhile |
 | Selected theme file missing | Terminal colors (`Theme::unstyled`), notice with the download URL and `/theme init`, header `‹name: missing›` |
 | Invalid TOML (with line number), > 64 KiB, no `[dark]`/`[light]`, `schema` > 1 | Same, header `‹name: broken›`. The file is never overwritten without asking |
 | Missing color | `reset` (terminal default) + warning |
@@ -113,12 +120,13 @@ the file is missing, so restoring the file brings it back.
 - `ui.theme` (global, default `default`) next to `ui.theme_mode`.
 - Header: `theme  ‹default› ▾  dark  light  system  F4`. The `‹name› ▾` segment is clickable in
   both tall and compact headers and opens the theme pick list.
-- **F5** opens the theme pick list (themes, then *Edit themes…*; with no themes at all, *Write a
-  starter theme*). **Shift-F5** (also F17, which some terminals send) opens the editor. F4
+- **F5** opens the theme pick list (themes, then *Edit themes…*; with no themes at all, *Download
+  the default theme*, or *Write a starter theme* when downloading is off). **Shift-F5** (also F17, which some terminals send) opens the editor. F4
   still cycles the mode.
 - `/theme` (alias `/mode`): bare cycles the mode, `dark|light|system`, `use [name]` (or
-  `/theme <name>`), `list` (`ls`), `edit [name]`, `init [name]`, `delete <name>` (`rm`, asks
-  first), `reload`.
+  `/theme <name>`), `list` (`ls`), `edit [name]`, `init [name]` (download the default theme as
+  `<name>.toml`, else the starter), `starter [name]` (always the minimal starter), `delete <name>`
+  (`rm`, asks first), `reload`.
 
 ## 7. Editor
 
@@ -140,13 +148,19 @@ the edited theme into an off-screen `TestBackend` and copied in. A detail pane a
   theme, including default; deleting the active theme switches to default or the first theme
   left, else falls back).
 - `t` edits another theme. Esc / `q` close (Save / Discard / Cancel if there are unsaved changes).
+- **Preview highlight (1.6.0):** the selected palette color or part is marked in reverse video in
+  the preview (`h` toggles). It works by rendering the preview a second time with that item set to
+  colors the variant doesn't use, and marking every cell that differs. So it follows the real
+  drawing code for every part, with no per-part list to maintain. The preview also draws sample
+  chat entries and shell frames, so those parts can be seen even in an empty chat. The title says
+  when the selected part isn't on screen (the compact header's `brand`, `mouse_off`, `cursor_row`).
 
 Removed from the 1.4.0 plan: "Reset to built-in" (there's no built-in) and `/theme export`
-(themes are already files). Not done: highlighting the selected part inside the preview.
+(themes are already files). Highlighting the selected part, deferred in 1.5.0, shipped in 1.6.0.
 
 ## 8. The starter trade-off
 
-`/theme init` and the fallback can't contain colors without re-embedding a theme. So the binary
+`/theme starter` and the fallback (and `/theme init` when it can't download) can't contain colors without re-embedding a theme. So the binary
 keeps only the *structure*: which palette role each part uses, plus reverse video for highlights so
 selection stays visible. Every color is the terminal default.
 - **Pros:** one source of truth for the look (the shipped file); no stale built-in defaults; the
@@ -160,9 +174,13 @@ selection stays visible. Every color is the terminal default.
   and recipes exactly (both variants, logo 232/255, title not bold). Also slot tables, the
   unstyled fallback, active theme and variant, boxed styles, and mode parsing.
 - `themes.rs`: color literals round-trip, contrast, names, serialize ↔ parse (the shipped file
-  is byte-identical to the serializer output), partial files, refused files, seeding (only into an
-  empty dir, never overwrites, 0600), load/save/delete.
-- `theme_editor.rs` (temp data dir, never the real one): seeding at startup, missing/broken
+  is byte-identical to the serializer output), partial files, refused files, load/save/delete,
+  `write_new` (never overwrites, 0600), the download URL / opt-out, and `download` against a local mock
+  server (exact text, 404, invalid, over 64 KiB, not UTF-8, connection refused).
+- `theme_editor.rs` (temp data dir, never the real one, never the real network): background
+  download at startup (success, failure, opt-out), `/theme init` download / fallback, `/theme
+  starter`, only the user dir is read, preview highlight (colors and parts, `h`, off-screen
+  parts), missing/broken
   fallback + notice + header marker, `/theme init|use|list|delete|reload`, F5 picker, header
   click, editor text/palette/form edits, revert, save-and-apply, close prompt, duplicate/new/
   delete, conflict and broken-file prompts, contrast warning, preview reflects unsaved edits,

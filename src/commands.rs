@@ -265,7 +265,7 @@ fn whoami(app: &mut App, _: &str) -> Result<()> {
     Ok(())
 }
 
-const THEME_USAGE: &str = "Usage: /theme [dark|light|system] · /theme use|edit|delete <name> · /theme list · /theme init [name] · /theme reload";
+const THEME_USAGE: &str = "Usage: /theme [dark|light|system] · /theme use|edit|delete <name> · /theme list · /theme init|starter [name] · /theme reload";
 
 fn theme(app: &mut App, args: &str) -> Result<()> {
     let mut it = args.split_whitespace();
@@ -282,6 +282,7 @@ fn theme(app: &mut App, args: &str) -> Result<()> {
         }
         ("edit", id) => app.open_theme_editor(id),
         ("init", name) => app.theme_init(name),
+        ("starter", name) => app.theme_starter(name),
         ("reload", _) => app.reload_themes(),
         ("delete" | "rm", Some(id)) => app.confirm_delete_theme(id),
         (a, None) => match crate::theme::Mode::parse(a) {

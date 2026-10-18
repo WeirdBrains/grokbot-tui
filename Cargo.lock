@@ -1064,6 +1064,7 @@ dependencies = [
  "libc",
  "ratatui",
  "ratatui-lipgloss",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",

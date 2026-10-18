@@ -22,6 +22,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
 
+/// Why the default theme is being downloaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DownloadFor {
+    /// No theme files at startup / `/theme reload`.
+    Startup,
+    /// `/theme init [name]`: write it as `<name>.toml`.
+    Init(String),
+}
+
 const EDIT_ITEM: &str = "\u{1}edit";
 const INIT_ITEM: &str = "\u{1}init";
 
@@ -33,36 +42,115 @@ impl App {
         themes::user_dir(&self.store.dir)
     }
 
-    /// Startup: copy the shipped themes in when the user has none, then load `ui.theme`.
+    /// Startup: download the default theme when the user has no themes, then load `ui.theme`.
     pub fn init_themes(&mut self) {
         let dir = self.themes_dir();
-        let sources = self.theme_sources.clone();
-        match themes::seed(&dir, &sources) {
-            Ok(copied) if !copied.is_empty() => {
-                let names: Vec<String> = copied
-                    .iter()
-                    .filter_map(|p| p.file_name()?.to_str().map(str::to_string))
-                    .collect();
-                let mut from: Vec<String> = copied
-                    .iter()
-                    .filter_map(|p| p.parent().map(|d| d.display().to_string()))
-                    .collect();
-                from.dedup();
-                self.info(format!(
-                    "Copied the shipped theme{} {} from {} into {}.",
-                    if names.len() == 1 { "" } else { "s" },
-                    names.join(", "),
-                    from.join(", "),
-                    dir.display()
-                ));
+        // Themes live only in the user's themes dir. When it has none (first run), fetch
+        // default.toml from this version's git tag in the background. Until it arrives (or
+        // if it fails) the terminal's own colors are used.
+        if themes::list(&dir).is_empty() {
+            if self.theme_downloading {
+                return;
             }
-            Ok(_) => {}
-            Err(e) => self.error(format!(
-                "Couldn't copy the shipped themes into {}: {e}",
-                dir.display()
-            )),
+            if let Some(url) = self.download_url() {
+                self.theme = Arc::new(Theme::unstyled(themes::DEFAULT_ID));
+                self.theme_problem = Some("downloading");
+                self.info(format!(
+                    "No theme files found. Downloading the default theme from {url} (plain \
+                     terminal colors until then; turn this off with {}=1 or /prefs set \
+                     ui.theme_download false).",
+                    themes::NO_DOWNLOAD_ENV
+                ));
+                self.start_theme_download(DownloadFor::Startup, url);
+                return;
+            }
         }
         self.load_theme();
+    }
+
+    /// The default theme's download URL, unless downloading is off (env, pref, mock mode).
+    pub fn download_url(&self) -> Option<String> {
+        self.theme_download_url
+            .clone()
+            .filter(|_| self.config.theme_download)
+    }
+
+    fn start_theme_download(&mut self, purpose: DownloadFor, url: String) {
+        self.theme_downloading = true;
+        self.spawn(async move {
+            let result = themes::download(&url).await;
+            crate::app::Event::ThemeDownload {
+                purpose,
+                url,
+                result,
+            }
+        });
+    }
+
+    /// A default-theme download finished: write it (never over an existing file) and use it.
+    pub fn on_theme_download(
+        &mut self,
+        purpose: DownloadFor,
+        url: &str,
+        result: Result<String, String>,
+    ) {
+        self.theme_downloading = false;
+        let dir = self.themes_dir();
+        match purpose {
+            DownloadFor::Startup => {
+                match result {
+                    Ok(text) => match themes::write_new(&dir, themes::DEFAULT_ID, &text) {
+                        Ok(p) => self.info(format!(
+                            "Downloaded the default theme from {url} into {}.",
+                            p.display()
+                        )),
+                        // Someone put a file there meanwhile: keep theirs.
+                        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                        Err(e) => self.error(format!(
+                            "Downloaded the default theme but couldn't write it to {}: {e}",
+                            themes::path(&dir, themes::DEFAULT_ID).display()
+                        )),
+                    },
+                    Err(e) => self.error(format!(
+                        "Couldn't download the default theme from {url}: {e}."
+                    )),
+                }
+                self.load_theme();
+            }
+            DownloadFor::Init(id) => {
+                let text = match result {
+                    Ok(text) if id == themes::DEFAULT_ID => Ok(text),
+                    // Another name: same colors, the display name is the new id.
+                    Ok(text) => themes::parse(&id, &text).map(|(mut t, _)| {
+                        t.name = id.clone();
+                        themes::serialize(&t)
+                    }),
+                    Err(e) => Err(e),
+                };
+                match text {
+                    Ok(text) => match themes::write_new(&dir, &id, &text) {
+                        Ok(p) => {
+                            self.info(format!(
+                                "Downloaded the default theme from {url} into {}.",
+                                p.display()
+                            ));
+                            self.after_theme_written(&id);
+                        }
+                        Err(e) => self.error(format!(
+                            "Couldn't write {}: {e}",
+                            themes::path(&dir, &id).display()
+                        )),
+                    },
+                    Err(e) => {
+                        self.error(format!(
+                            "Couldn't download the default theme from {url}: {e}. Writing the \
+                             minimal starter instead."
+                        ));
+                        self.write_starter(&id);
+                    }
+                }
+            }
+        }
     }
 
     /// Load the selected theme (`ui.theme`). On failure, draw with plain terminal colors and
@@ -123,12 +211,11 @@ impl App {
         match e {
             LoadError::Missing(p) => format!(
                 "Theme '{id}' not found: {} is missing, so plain terminal colors are used. \
-                 Fix: copy a theme file there and run /theme reload (packages install \
-                 default.toml in /usr/share/grokbot-tui/themes or Homebrew's \
-                 share/grokbot-tui/themes; or download {}){use_hint} · /theme init writes a \
-                 minimal starter theme to edit (Shift-F5).",
+                 Fix: /theme init (downloads the default theme), or save {} there and run \
+                 /theme reload{use_hint} · /theme starter writes a minimal starter theme to \
+                 edit (Shift-F5).",
                 p.display(),
-                themes::DEFAULT_URL
+                themes::default_url()
             ),
             LoadError::Broken(p, err) => format!(
                 "Theme '{id}' can't be used: {}: {err}. Plain terminal colors are used and the \
@@ -187,10 +274,12 @@ impl App {
             })
             .collect();
         if ids.is_empty() {
-            items.push(PickItem::new(
-                "Write a starter theme (/theme init)",
-                INIT_ITEM,
-            ));
+            let label = if self.download_url().is_some() {
+                "Download the default theme (/theme init)"
+            } else {
+                "Write a starter theme (/theme init)"
+            };
+            items.push(PickItem::new(label, INIT_ITEM));
         }
         items.push(PickItem::new("Edit themes…", EDIT_ITEM));
         let current = self.config.theme.clone();
@@ -224,7 +313,33 @@ impl App {
     }
 
     /// `/theme init [name]`: write the minimal starter theme (every color `reset`).
+    /// `/theme init [name]`: download the shipped default theme for this version (when
+    /// downloading is allowed), else write the minimal starter. Never overwrites.
     pub fn theme_init(&mut self, name: Option<&str>) {
+        let Some(id) = self.new_theme_id(name) else {
+            return;
+        };
+        match self.download_url() {
+            Some(url) if !self.theme_downloading => {
+                self.info(format!("Downloading the default theme from {url}…"));
+                self.start_theme_download(DownloadFor::Init(id), url);
+            }
+            Some(_) => {
+                self.error("A theme download is already running; try again in a moment.".into())
+            }
+            None => self.write_starter(&id),
+        }
+    }
+
+    /// `/theme starter [name]`: always the minimal starter (no download).
+    pub fn theme_starter(&mut self, name: Option<&str>) {
+        if let Some(id) = self.new_theme_id(name) {
+            self.write_starter(&id);
+        }
+    }
+
+    /// The id for a new theme file: `name`, or `default` if that doesn't exist yet.
+    fn new_theme_id(&mut self, name: Option<&str>) -> Option<String> {
         let dir = self.themes_dir();
         let id = match name {
             Some(n) => n.trim().to_string(),
@@ -233,26 +348,38 @@ impl App {
             }
             None => {
                 self.error(format!(
-                    "{} already exists; use /theme init <name> for another starter.",
+                    "{} already exists; use /theme init <name> for another one.",
                     themes::path(&dir, themes::DEFAULT_ID).display()
                 ));
-                return;
+                return None;
             }
         };
         if !themes::valid_id(&id) {
             self.error(format!(
                 "'{id}' isn't a valid theme name (a-z, 0-9, _ and -, up to 32)."
             ));
-            return;
+            return None;
         }
         if themes::path(&dir, &id).exists() {
             self.error(format!(
                 "{} already exists; not overwritten.",
                 themes::path(&dir, &id).display()
             ));
+            return None;
+        }
+        Some(id)
+    }
+
+    fn write_starter(&mut self, id: &str) {
+        let dir = self.themes_dir();
+        let t = starter(id);
+        if themes::path(&dir, id).exists() {
+            self.error(format!(
+                "{} already exists; not overwritten.",
+                themes::path(&dir, id).display()
+            ));
             return;
         }
-        let t = starter(&id);
         match themes::save(&dir, &t) {
             Ok(p) => {
                 self.info(format!(
@@ -260,20 +387,25 @@ impl App {
                      Set colors with Shift-F5.",
                     p.display()
                 ));
-                if id == self.config.theme {
-                    self.load_theme();
-                } else if self.theme_problem.is_some() {
-                    self.set_theme(&id);
-                }
+                self.after_theme_written(id);
             }
             Err(e) => self.error(format!(
                 "Couldn't write {}: {e}",
-                themes::path(&dir, &id).display()
+                themes::path(&dir, id).display()
             )),
         }
     }
 
-    /// `/theme reload`: re-read the selected file (and copy shipped themes if there are none).
+    /// A new theme file exists: use it if it's the selected one, or if nothing loads.
+    fn after_theme_written(&mut self, id: &str) {
+        if id == self.config.theme {
+            self.load_theme();
+        } else if self.theme_problem.is_some() {
+            self.set_theme(id);
+        }
+    }
+
+    /// `/theme reload`: re-read the selected file (and download the default if there are none).
     pub fn reload_themes(&mut self) {
         let before = self.theme_problem;
         self.init_themes();
@@ -747,6 +879,9 @@ pub struct ThemeEditor {
     pub palette_area: Rect,
     pub palette_cols: u16,
     pub palette_cell_w: u16,
+    /// Mark the selected part's cells in the preview (`h` toggles).
+    pub highlight: bool,
+    pub preview_area: Rect,
 }
 
 impl ThemeEditor {
@@ -774,6 +909,8 @@ impl ThemeEditor {
             palette_area: Rect::default(),
             palette_cols: 16,
             palette_cell_w: 3,
+            highlight: true,
+            preview_area: Rect::default(),
         }
     }
 
@@ -792,6 +929,48 @@ impl ThemeEditor {
 
     pub fn row(&self) -> Row {
         row_at(self.cursor)
+    }
+
+    /// The selected item's name (`accent`, `panel_focused`, …).
+    pub fn row_name(&self) -> &'static str {
+        match self.row() {
+            Row::Color(c) => COLOR_SLOTS[c],
+            Row::Style(s) => STYLE_SLOTS[s].key,
+        }
+    }
+
+    /// A copy of the theme where the selected palette color or part is drawn in colors the
+    /// variant doesn't use anywhere, so diffing a render of it against the normal render
+    /// finds exactly the cells that item paints.
+    pub fn marked_theme(&self) -> Theme {
+        let mut t = self.theme.clone();
+        let v = t.variant_mut(self.variant);
+        let used = |c: Color, v: &VariantSpec| {
+            v.colors.contains(&c)
+                || v.styles
+                    .iter()
+                    .any(|s| [s.fg, s.bg, s.border].contains(&Some(ColorRef::Lit(c))))
+        };
+        let mut free = (1u8..=250)
+            .step_by(3)
+            .map(|n| Color::Rgb(n, 255 - n, n / 2 + 7))
+            .filter(|c| !used(*c, v));
+        let (a, b) = (
+            free.next().unwrap_or(Color::Rgb(1, 2, 3)),
+            free.next().unwrap_or(Color::Rgb(3, 2, 1)),
+        );
+        match self.row() {
+            Row::Color(c) => v.colors[c] = a,
+            Row::Style(s) => {
+                let st = &mut v.styles[s];
+                st.fg = Some(ColorRef::Lit(a));
+                st.bg = Some(ColorRef::Lit(b));
+                if STYLE_SLOTS[s].framed {
+                    st.border = Some(ColorRef::Lit(a));
+                }
+            }
+        }
+        t
     }
 
     pub fn move_by(&mut self, d: i32) {
@@ -1238,6 +1417,10 @@ impl ThemeEditor {
                 }
                 KeyCode::Char('x') | KeyCode::Delete => Action::Delete,
                 KeyCode::Char('t') => Action::OpenOther,
+                KeyCode::Char('h') => {
+                    self.highlight = !self.highlight;
+                    Action::None
+                }
                 _ => Action::None,
             },
         }
@@ -1349,6 +1532,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if let Edit::Palette { cursor, .. } = ed.edit {
         draw_palette(f, &mut ed, preview_box, cursor);
     } else {
+        ed.preview_area = preview_box;
         draw_preview(f, app, &ed, preview_box);
     }
     draw_detail(f, &mut ed, detail_box);
@@ -1356,7 +1540,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let keys = match &ed.edit {
         Edit::None => [
             "↑↓ select · Enter edit · p palette · Tab dark/light · r revert part · R revert all · s save",
-            "d duplicate · n new · x delete · t edit another theme · Esc close (asks if unsaved)",
+            "d duplicate · n new · x delete · t other theme · h highlight in preview · Esc close",
         ],
         Edit::Form { .. } => [
             "←→ field · Enter/Space edit or toggle · p palette · Del clear color · ↑↓ other part",
@@ -1457,20 +1641,49 @@ fn draw_list(f: &mut Frame, ed: &mut ThemeEditor, area: Rect) {
 /// The live preview: the real screen (header, sidebar, chat, input) drawn off-screen with
 /// the edited theme, plus sample modals, copied into `area`.
 fn draw_preview(f: &mut Frame, app: &mut App, ed: &ThemeEditor, area: Rect) {
-    let title = format!(
-        " Preview ({}) ",
-        match ed.variant {
-            Variant::Dark => "dark",
-            Variant::Light => "light",
-        }
-    );
-    let block = theme::block(&theme::panel(false)).title(title);
-    let p = block.inner(area);
-    f.render_widget(block, area);
+    let variant_name = match ed.variant {
+        Variant::Dark => "dark",
+        Variant::Light => "light",
+    };
+    let p = theme::block(&theme::panel(false)).inner(area);
     if p.width < 10 || p.height < 4 {
+        f.render_widget(theme::block(&theme::panel(false)), area);
         return;
     }
-    let edited = Arc::new(ed.theme.clone());
+    let mut shown = preview_buffer(app, &ed.theme, ed.variant, p.width, p.height);
+    let mut marked_cells = 0;
+    if ed.highlight {
+        let marked = preview_buffer(app, &ed.marked_theme(), ed.variant, p.width, p.height);
+        marked_cells = highlight_changes(&mut shown, &marked);
+    }
+    let note = match (ed.highlight, marked_cells) {
+        (false, _) => " · h: highlight".to_string(),
+        (true, 0) => format!(" · ‹{}› isn't in the preview", ed.row_name()),
+        (true, _) => format!(" · ‹{}› highlighted (h)", ed.row_name()),
+    };
+    let block =
+        theme::block(&theme::panel(false)).title(format!(" Preview ({variant_name}){note} "));
+    f.render_widget(block, area);
+    let buf = f.buffer_mut();
+    for y in 0..p.height {
+        for x in 0..p.width {
+            if let Some(c) = buf.cell_mut(Position::new(p.x + x, p.y + y)) {
+                *c = shown[(x, y)].clone();
+            }
+        }
+    }
+}
+
+/// Draw the app (and sample modals) with `t` into an off-screen buffer, leaving the app's
+/// click areas, scroll positions and the active theme as they were.
+fn preview_buffer(
+    app: &mut App,
+    t: &Theme,
+    variant: Variant,
+    w: u16,
+    h: u16,
+) -> ratatui::buffer::Buffer {
+    let edited = Arc::new(t.clone());
     let keep = (
         app.sidebar_area,
         app.account_area,
@@ -1480,18 +1693,14 @@ fn draw_preview(f: &mut Frame, app: &mut App, ed: &ThemeEditor, area: Rect) {
         app.input_scroll,
     );
     let (prev_theme, prev_var) = (theme::active(), theme::variant());
-    let mut term =
-        match ratatui::Terminal::new(ratatui::backend::TestBackend::new(p.width, p.height)) {
-            Ok(t) => t,
-            Err(_) => return,
-        };
-    let variant = ed.variant;
+    let Ok(mut term) = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h));
     let _ = term.draw(|pf| {
         theme::set_theme(edited.clone());
         theme::set_variant(variant);
         crate::ui::draw_main(pf, app);
         draw_modal_samples(pf);
     });
+    let out = term.backend().buffer().clone();
     theme::set_theme(prev_theme);
     theme::set_variant(prev_var);
     (
@@ -1502,15 +1711,24 @@ fn draw_preview(f: &mut Frame, app: &mut App, ed: &ThemeEditor, area: Rect) {
         app.scroll,
         app.input_scroll,
     ) = keep;
-    let src = term.backend().buffer();
-    let buf = f.buffer_mut();
-    for y in 0..p.height {
-        for x in 0..p.width {
-            if let Some(c) = buf.cell_mut(Position::new(p.x + x, p.y + y)) {
-                *c = src[(x, y)].clone();
-            }
+    out
+}
+
+/// Flip reverse video on every cell of `shown` whose colors or attributes differ in
+/// `marked` (the render with the selected item recolored). Returns how many were marked.
+fn highlight_changes(
+    shown: &mut ratatui::buffer::Buffer,
+    marked: &ratatui::buffer::Buffer,
+) -> usize {
+    use ratatui::style::Modifier;
+    let mut n = 0;
+    for (c, m) in shown.content.iter_mut().zip(marked.content.iter()) {
+        if (c.fg, c.bg, c.modifier) != (m.fg, m.bg, m.modifier) {
+            c.modifier.toggle(Modifier::REVERSED);
+            n += 1;
         }
     }
+    n
 }
 
 /// Sample help and shell modals in the bottom-right corner of the preview.
@@ -1547,6 +1765,63 @@ fn draw_modal_samples(f: &mut Frame) {
             .block(theme::block(&theme::help_frame()).title(theme::help_title().span(" Help "))),
         r,
     );
+    draw_more_samples(f, r);
+}
+
+/// Parts the live app may not be showing right now (chat entries in an empty chat, the
+/// shell modal's frames): small samples left of and above the help sample.
+fn draw_more_samples(f: &mut Frame, help: Rect) {
+    use crate::app::EntryKind;
+    let a = f.area();
+    // Chat entries, left of the help sample.
+    let w = 30u16;
+    if help.x >= a.x + w + 2 {
+        let r = Rect::new(help.x - w - 1, help.y, w, help.height);
+        let row = |k: EntryKind, label: &'static str, text: &'static str| {
+            Line::from(vec![
+                theme::entry_label(k).span(label),
+                theme::entry(k).span(text),
+            ])
+        };
+        f.render_widget(Clear, r);
+        f.render_widget(
+            Paragraph::new(vec![
+                row(EntryKind::User, "you: ", "sample message"),
+                row(EntryKind::Bot, "bot: ", "sample reply"),
+                Line::from(
+                    [
+                        row(EntryKind::System, "· ", "notice  ").spans,
+                        row(EntryKind::Error, "! ", "error").spans,
+                    ]
+                    .concat(),
+                ),
+            ])
+            .block(theme::block(&theme::chat_panel()).title(" Sample chat ")),
+            r,
+        );
+    }
+    // Shell modal frames, above the help sample.
+    if help.y >= a.y + 4 && help.width >= 30 {
+        let w = help.width / 3;
+        for (i, (running, failed, label)) in [
+            (false, false, " ✓ ok "),
+            (true, false, " … run "),
+            (false, true, " ✗ fail "),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let r = Rect::new(help.x + i as u16 * w, help.y - 3, w, 3);
+            f.render_widget(Clear, r);
+            f.render_widget(
+                Paragraph::new("shell").style(theme::modal_text()).block(
+                    theme::block(&theme::shell_frame(running, failed))
+                        .title(theme::shell_title(running, failed).span(label)),
+                ),
+                r,
+            );
+        }
+    }
 }
 
 fn draw_palette(f: &mut Frame, ed: &mut ThemeEditor, area: Rect, cursor: u8) {
@@ -1747,9 +2022,9 @@ mod tests {
     }
 
     #[test]
-    fn startup_seeds_and_loads_the_shipped_default() {
+    fn startup_loads_the_selected_theme_from_the_user_dir() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let (app, _d) = test_app(&rt);
+        let (mut app, _d) = test_app(&rt);
         assert!(
             app.themes_dir().starts_with(&app.store.dir),
             "temp data dir only"
@@ -1757,7 +2032,13 @@ mod tests {
         assert_eq!(themes::list(&app.themes_dir()), vec!["default"]);
         assert_eq!(app.theme.name, "Default");
         assert_eq!(app.theme_problem, None);
-        assert!(notices(&app).contains("Copied the shipped theme default.toml"));
+        assert!(!app.theme_downloading, "themes present: no download");
+        // Only the user dir counts: a theme anywhere else isn't seen.
+        let elsewhere = app.store.dir.join("share/grokbot-tui/themes");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("solar.toml"), "[dark]").unwrap();
+        type_line(&mut app, "/theme use solar");
+        assert_eq!(app.config.theme, "default");
     }
 
     #[test]
@@ -1767,7 +2048,6 @@ mod tests {
         let dir = app.themes_dir();
         // Missing.
         std::fs::remove_file(themes::path(&dir, "default")).unwrap();
-        app.theme_sources.clear();
         app.load_theme();
         assert_eq!(app.theme_problem, Some("missing"));
         assert_eq!(*app.theme, Theme::unstyled("default"));
@@ -1809,7 +2089,6 @@ mod tests {
         let (mut app, _d) = test_app(&rt);
         let dir = app.themes_dir();
         std::fs::remove_file(themes::path(&dir, "default")).unwrap();
-        app.theme_sources.clear();
         app.reload_themes();
         assert_eq!(app.theme_problem, Some("missing"));
         type_line(&mut app, "/theme init");
@@ -2205,5 +2484,254 @@ mod tests {
         // Wheel moves the selection.
         app.editor_scroll(1);
         assert_eq!(app.editor.as_ref().unwrap().cursor, color::ACCENT + 1);
+    }
+
+    /// An app whose data dir has no themes and no shipped dir, downloading from `srv`.
+    fn bare_app(rt: &tokio::runtime::Runtime, url: Option<String>) -> (App, tempfile::TempDir) {
+        let (mut app, d) = test_app(rt);
+        std::fs::remove_file(themes::path(&app.themes_dir(), "default")).unwrap();
+        app.theme_download_url = url;
+        (app, d)
+    }
+
+    fn serve(rt: &tokio::runtime::Runtime, status: u16, body: &str) -> wiremock::MockServer {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
+        rt.block_on(async {
+            let srv = MockServer::start().await;
+            Mock::given(path("/default.toml"))
+                .respond_with(ResponseTemplate::new(status).set_body_string(body.to_string()))
+                .mount(&srv)
+                .await;
+            srv
+        })
+    }
+
+    fn shipped() -> String {
+        std::fs::read_to_string(crate::app::tests::repo_themes().join("default.toml")).unwrap()
+    }
+
+    #[test]
+    fn downloads_are_off_in_tests_mock_mode_and_by_opt_out() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        assert_eq!(app.theme_download_url, None, "mock mode never downloads");
+        app.theme_download_url = Some("http://127.0.0.1:9/default.toml".into());
+        assert!(app.download_url().is_some());
+        type_line(&mut app, "/prefs set ui.theme_download false");
+        assert_eq!(app.download_url(), None);
+    }
+
+    #[test]
+    fn startup_with_no_themes_downloads_the_default_in_the_background() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let srv = serve(&rt, 200, &shipped());
+        let url = format!("{}/default.toml", srv.uri());
+        let (mut app, _d) = bare_app(&rt, Some(url.clone()));
+        app.init_themes();
+        // Startup doesn't wait: plain colors and a notice first.
+        assert_eq!(app.theme_problem, Some("downloading"));
+        assert!(notices(&app).contains(&format!("Downloading the default theme from {url}")));
+        assert!(notices(&app).contains("GROKBOT_TUI_NO_THEME_DOWNLOAD=1"));
+        app.wait_idle(std::time::Duration::from_secs(10));
+        assert_eq!(app.theme_problem, None, "{}", notices(&app));
+        assert_eq!(app.theme.name, "Default");
+        let p = themes::path(&app.themes_dir(), "default");
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            shipped(),
+            "written verbatim"
+        );
+        assert!(notices(&app).contains(&format!("Downloaded the default theme from {url}")));
+    }
+
+    #[test]
+    fn a_failed_download_keeps_plain_colors_and_explains() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let srv = serve(&rt, 404, "nope");
+        let (mut app, _d) = bare_app(&rt, Some(format!("{}/default.toml", srv.uri())));
+        app.init_themes();
+        app.wait_idle(std::time::Duration::from_secs(10));
+        assert_eq!(app.theme_problem, Some("missing"));
+        let n = notices(&app);
+        assert!(n.contains("Couldn't download the default theme"), "{n}");
+        assert!(n.contains("HTTP 404"), "{n}");
+        assert!(n.contains("default.toml is missing"), "{n}");
+        assert!(themes::list(&app.themes_dir()).is_empty());
+        // Opted out: no download, straight to the notice.
+        let (mut app, _d) = bare_app(&rt, None);
+        app.init_themes();
+        assert_eq!(app.theme_problem, Some("missing"));
+        assert!(!app.theme_downloading);
+    }
+
+    #[test]
+    fn theme_init_downloads_when_it_can_else_writes_the_starter() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let srv = serve(&rt, 200, &shipped());
+        let (mut app, _d) = bare_app(&rt, Some(format!("{}/default.toml", srv.uri())));
+        app.theme_download_url = None;
+        app.init_themes();
+        assert_eq!(app.theme_problem, Some("missing"));
+        app.theme_download_url = Some(format!("{}/default.toml", srv.uri()));
+        app.open_theme_picker();
+        assert!(
+            app.picker.as_ref().unwrap().items[0]
+                .label
+                .contains("Download the default")
+        );
+        app.picker_cancel();
+        type_line(&mut app, "/theme init");
+        app.wait_idle(std::time::Duration::from_secs(10));
+        assert_eq!(app.theme_problem, None, "{}", notices(&app));
+        let dir = app.themes_dir();
+        assert_eq!(
+            std::fs::read_to_string(themes::path(&dir, "default")).unwrap(),
+            shipped()
+        );
+        // Another name: same colors, its own display name.
+        type_line(&mut app, "/theme init mine");
+        app.wait_idle(std::time::Duration::from_secs(10));
+        let (mine, _) = themes::load(&dir, "mine").unwrap();
+        assert_eq!(mine.name, "mine");
+        assert_eq!(mine.dark, app.theme.dark);
+        // Download fails: the starter is written instead.
+        let bad = serve(&rt, 500, "");
+        app.theme_download_url = Some(format!("{}/default.toml", bad.uri()));
+        type_line(&mut app, "/theme init other");
+        app.wait_idle(std::time::Duration::from_secs(10));
+        assert!(notices(&app).contains("Writing the minimal starter instead"));
+        assert_eq!(
+            themes::load(&dir, "other").unwrap().0.dark,
+            Theme::unstyled("x").dark
+        );
+        // /theme starter never downloads.
+        type_line(&mut app, "/theme starter plain");
+        assert!(!app.theme_downloading);
+        assert_eq!(
+            themes::load(&dir, "plain").unwrap().0.dark,
+            Theme::unstyled("x").dark
+        );
+    }
+
+    fn screen(app: &mut App) -> ratatui::buffer::Buffer {
+        let mut term = Terminal::new(TestBackend::new(160, 45)).unwrap();
+        term.draw(|f| crate::ui::draw(f, app)).unwrap();
+        term.backend().buffer().clone()
+    }
+
+    fn text(b: &ratatui::buffer::Buffer) -> String {
+        b.content().iter().map(|c| c.symbol()).collect()
+    }
+
+    #[test]
+    fn preview_highlights_the_selected_color_or_part() {
+        use ratatui::style::Modifier;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        crate::app::tests::mock_login(&mut app, "t");
+        app.detected_variant = Some(Variant::Dark);
+        app.open_theme_editor(None);
+        // A color nothing else on screen uses, so its cells are only in the preview.
+        let probe = Color::Rgb(9, 9, 9);
+        let ed = app.editor.as_mut().unwrap();
+        ed.theme.dark.colors[color::ACCENT] = probe;
+        ed.cursor = color::ACCENT;
+        ed.highlight = false;
+        let plain = screen(&mut app);
+        assert!(text(&plain).contains("Preview (dark) · h: highlight"));
+        let pa = app.editor.as_ref().unwrap().preview_area;
+        let inside = |i: usize| {
+            let (x, y) = ((i % 160) as u16, (i / 160) as u16);
+            x > pa.x && x + 1 < pa.right() && y > pa.y && y + 1 < pa.bottom()
+        };
+        let painted: Vec<usize> = (0..plain.content.len())
+            .filter(|&i| inside(i))
+            .filter(|&i| plain.content[i].fg == probe || plain.content[i].bg == probe)
+            .collect();
+        assert!(painted.len() > 20, "accent is used in the preview");
+        key(&mut app, KeyCode::Char('h'));
+        let lit = screen(&mut app);
+        assert!(
+            text(&lit).contains("‹accent› highlighted (h)"),
+            "{}",
+            text(&lit)
+        );
+        for &i in &painted {
+            let (a, b) = (&plain.content[i], &lit.content[i]);
+            assert_ne!(
+                a.modifier.contains(Modifier::REVERSED),
+                b.modifier.contains(Modifier::REVERSED),
+                "accent cell {i} is marked"
+            );
+        }
+        // Cells outside the preview (editor chrome, list) aren't touched.
+        assert!(
+            (0..plain.content.len())
+                .filter(|&i| !inside(i) && i / 160 != pa.y as usize)
+                .all(|i| plain.content[i] == lit.content[i])
+        );
+        // A part: its box is marked; the highlight follows the selection.
+        app.editor.as_mut().unwrap().cursor = N_COLORS + theme::slot::PANEL_FOCUSED;
+        let part = screen(&mut app);
+        assert!(text(&part).contains("‹panel_focused› highlighted (h)"));
+        assert_ne!(
+            (0..part.content.len())
+                .filter(|&i| part.content[i].modifier.contains(Modifier::REVERSED))
+                .count(),
+            (0..lit.content.len())
+                .filter(|&i| lit.content[i].modifier.contains(Modifier::REVERSED))
+                .count()
+        );
+        // Highlighting is display only: nothing changed in the theme being edited.
+        assert!(
+            app.editor.as_ref().unwrap().theme.dark.styles[theme::slot::PANEL_FOCUSED] != {
+                app.editor.as_ref().unwrap().marked_theme().dark.styles[theme::slot::PANEL_FOCUSED]
+            }
+        );
+        assert_eq!(
+            app.editor.as_ref().unwrap().theme.dark.colors[color::ACCENT],
+            probe
+        );
+        // Parts the preview doesn't draw say so.
+        let shown = |app: &mut App, s: usize| {
+            app.editor.as_mut().unwrap().cursor = N_COLORS + s;
+            !text(&screen(app)).contains("isn't in the preview")
+        };
+        assert!(shown(&mut app, theme::slot::ENTRY_USER), "sample chat");
+        assert!(
+            shown(&mut app, theme::slot::SHELL_FRAME_FAILED),
+            "sample shell frames"
+        );
+        let hidden: Vec<&str> = (0..N_STYLES)
+            .filter(|&s| !shown(&mut app, s))
+            .map(|s| STYLE_SLOTS[s].key)
+            .collect();
+        // Only parts that depend on the app's state: the compact header, mouse capture off,
+        // the sidebar focused.
+        assert_eq!(hidden, ["brand", "mouse_off", "cursor_row"]);
+    }
+
+    #[test]
+    fn highlight_changes_marks_only_differing_cells() {
+        use ratatui::buffer::Buffer;
+        use ratatui::style::{Modifier, Style};
+        let r = Rect::new(0, 0, 4, 1);
+        let mut a = Buffer::empty(r);
+        let mut b = Buffer::empty(r);
+        a.set_string(0, 0, "abcd", Style::new().fg(Color::Red));
+        b.set_string(0, 0, "abcd", Style::new().fg(Color::Red));
+        b[(1, 0)].set_fg(Color::Rgb(1, 2, 3));
+        b[(3, 0)].set_bg(Color::Rgb(1, 2, 3));
+        a[(3, 0)].modifier.insert(Modifier::REVERSED);
+        b[(3, 0)].modifier.insert(Modifier::REVERSED);
+        assert_eq!(highlight_changes(&mut a, &b), 2);
+        let rev: Vec<bool> = (0..4)
+            .map(|x| a[(x, 0)].modifier.contains(Modifier::REVERSED))
+            .collect();
+        assert_eq!(
+            rev,
+            [false, true, false, false],
+            "an already reversed cell flips back"
+        );
     }
 }

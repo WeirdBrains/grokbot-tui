@@ -372,6 +372,12 @@ pub enum Event {
         epoch: u64,
         choices: Vec<(String, String)>,
     },
+    /// A download of the shipped default theme finished (see `theme_editor`).
+    ThemeDownload {
+        purpose: crate::theme_editor::DownloadFor,
+        url: String,
+        result: std::result::Result<String, String>,
+    },
     /// `/shell` finished (shown in the shell modal; never chat or gateway).
     Shell {
         id: u64,
@@ -456,8 +462,11 @@ pub struct App {
     pub theme: Arc<crate::theme::Theme>,
     /// Why the selected theme couldn't be loaded ("missing" / "broken"), if it couldn't.
     pub theme_problem: Option<&'static str>,
-    /// Shared dirs the packaged themes are copied from when the user has none.
-    pub theme_sources: Vec<std::path::PathBuf>,
+    /// Where to download the shipped default theme when no theme files are found: the
+    /// release tag matching this build. None = never (mock mode, GROKBOT_TUI_NO_THEME_DOWNLOAD).
+    pub theme_download_url: Option<String>,
+    /// A theme download is in flight.
+    pub theme_downloading: bool,
     /// The `‹theme› ▾` switcher in the header (click opens the theme picker).
     pub theme_switch_area: Rect,
     /// The full-screen theme editor (Shift-F5), when open.
@@ -583,7 +592,14 @@ impl App {
             detected_variant: None,
             theme: Arc::new(crate::theme::Theme::unstyled(crate::themes::DEFAULT_ID)),
             theme_problem: None,
-            theme_sources: crate::themes::shared_dirs(),
+            theme_download_url: (!mock
+                && !crate::themes::opted_out(
+                    std::env::var(crate::themes::NO_DOWNLOAD_ENV)
+                        .ok()
+                        .as_deref(),
+                ))
+            .then(crate::themes::default_url),
+            theme_downloading: false,
             theme_switch_area: Rect::default(),
             editor: None,
             pending_remove: None,
@@ -622,7 +638,7 @@ impl App {
 
     // ------------------------------------------------------------ tasks & events
 
-    fn spawn<F: Future<Output = Event> + Send + 'static>(&mut self, fut: F) {
+    pub(crate) fn spawn<F: Future<Output = Event> + Send + 'static>(&mut self, fut: F) {
         self.inflight += 1;
         let tx = self.tx.clone();
         self.rt.spawn(async move {
@@ -1013,6 +1029,11 @@ impl App {
                     Err(_) => self.check_acceptance(bot, nonce, 1, Duration::ZERO),
                 }
             }
+            Event::ThemeDownload {
+                purpose,
+                url,
+                result,
+            } => self.on_theme_download(purpose, &url, result),
             Event::DesktopChoices { epoch, choices } => {
                 if epoch != self.epoch {
                     return;
@@ -2138,9 +2159,11 @@ pub mod tests {
         let d = tempfile::tempdir().unwrap();
         let store = Store::open(d.path().join("gb"), None).unwrap();
         let mut app = App::new(store, rt.handle().clone(), true).unwrap();
-        // Themes come from the repo's themes/ dir (copied into the temp data dir), never
-        // from the real ~/.grokbot-tui or system dirs.
-        app.theme_sources = vec![repo_themes()];
+        // The repo's default.toml, copied into the temp data dir (never the real
+        // ~/.grokbot-tui, never a download).
+        let dir = app.themes_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::copy(repo_themes().join("default.toml"), dir.join("default.toml")).unwrap();
         app.init_themes();
         // Never touch the real desktop app from tests.
         app.desktop_lister = Arc::new(|| {

@@ -65,6 +65,9 @@ unicode-width = "0.2"
 rusqlite = { version = "0.37", features = ["bundled"] }
 tui-big-text = "0.8"
 toml = "0.9"
+# Already in the tree via grokbot_api (same version and TLS backend): downloading the
+# shipped default theme when no theme files are installed.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 
 [target."cfg(unix)".dependencies]
 # Terminal background query (OSC 11) for the "system" theme mode.

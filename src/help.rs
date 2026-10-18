@@ -257,13 +257,15 @@ Commands
   /theme use <name>     Switch theme (also /theme <name>; no name: pick list)
   /theme list           List theme files (* = in use)
   /theme edit [name]    Open the editor (default: the theme in use)
-  /theme init [name]    Write a minimal starter theme (never overwrites)
+  /theme init [name]    Download the default theme (else write the starter; never overwrites)
+  /theme starter [name] Write a minimal starter theme (no download; never overwrites)
   /theme delete <name>  Delete a theme file (asks first)
   /theme reload         Re-read theme files after editing them by hand
 
 Theme editor (Shift-F5)
   Left: every palette color and every part of the screen. Right: a live preview of
-  the app in the edited theme, before you save.
+  the app in the edited theme, before you save, with the selected item highlighted
+  and samples of the chat entries and modals.
   ↑ ↓ / j k, PgUp PgDn, Home End  Select      Tab  Flip dark / light variant
   Enter / e   Edit: a color takes hex (#ff8800), 0-255 or a name (cyan); a part
               opens its fields (fg, bg, border for boxes, bold italic underline
@@ -274,6 +276,9 @@ Theme editor (Shift-F5)
   d / n       Duplicate this theme / new starter theme (asks for a name)
   x, Delete   Delete this theme (asks first)
   t           Edit another theme      Esc / q  Close (asks if there are unsaved changes)
+  h           Highlight on/off: the selected color or part is marked in reverse video
+              in the preview (the preview title says when it isn't on screen, e.g. the
+              compact header or a focused sidebar)
   Parts' colors can point at palette colors (@accent), so a palette change restyles
   every part that uses it. A low-contrast warning appears when text and its
   background are hard to tell apart (WCAG ratio below 3:1).
@@ -286,27 +291,33 @@ Theme files: see /help theme-files.",
         title: "Theme files",
         body: "\
 Every theme, including default, is a TOML file in ~/.grokbot-tui/themes/<name>.toml
-(or <data dir>/themes with --data-dir). Nothing is built into
-the program. Names: lowercase letters, digits, - and _ (up to 32).
+(or <data dir>/themes with --data-dir). Themes are read only from there: nothing is
+built into the program and no system folder is searched. Names: lowercase letters,
+digits, - and _ (up to 32).
 
 Where default.toml comes from
-  The packages install shipped themes to a share directory (deb/rpm/AUR:
-  /usr/share/grokbot-tui/themes, Homebrew: <prefix>/share/grokbot-tui/themes,
-  Windows MSI: next to the program; release archives: the themes/ folder). At
-  startup, if your themes folder is empty, they are copied into it. Your files are
-  never overwritten. Installed with the shell or PowerShell script? Download
-  https://github.com/WeirdBrains/grokbot-tui/raw/main/themes/default.toml into
-  your themes folder, or run /theme init.
+  On first run, when your themes folder has no themes, grokbot-tui downloads the
+  default theme for its own version in the background:
+    https://raw.githubusercontent.com/WeirdBrains/grokbot-tui/v<version>/themes/default.toml
+  checks that it's a valid theme, saves it as default.toml and says so. Startup never
+  waits for it (plain colors until it arrives; it gives up after 5 s). Offline or
+  failed: plain terminal colors and a notice; run /theme init later to try again.
+  Existing files are never overwritten.
+  Turn the download off with GROKBOT_TUI_NO_THEME_DOWNLOAD=1 or
+  /prefs set ui.theme_download false (then use /theme starter, or save the file
+  yourself and /theme reload).
 
 When a theme can't be used
   If the selected file is missing or broken (invalid TOML, newer schema, over 64 KiB),
   grokbot-tui uses your terminal's own colors and says why. Highlights still show
   (reverse video). Fix the file and /theme reload, pick another theme (F5), or
-  /theme init for a starter. A broken file is never overwritten without asking.
+  /theme init. A broken file is never overwritten without asking.
 
-/theme init writes a minimal starter: every part mapped to a palette role (title →
-@accent, errors → @danger, …) but every color set to your terminal's default.
-Set the colors in the editor to make it yours.
+/theme init [name] downloads the default theme as <name>.toml (default: default.toml);
+if downloading is off or fails, it writes the minimal starter instead.
+/theme starter [name] always writes the minimal starter: every part mapped to a palette
+role (title → @accent, errors → @danger, …) but every color set to your terminal's
+default. Set the colors in the editor to make it yours.
 
 Format
   schema = 1
@@ -371,6 +382,8 @@ Per-account keys
 Global keys
   ui.sidebar_width       Sidebar width, 10–80. Default: 24.
   ui.theme               Theme name (a file in <data dir>/themes). Default: default.
+  ui.theme_download      true/false — download the default theme when the themes folder
+                         is empty, and for /theme init. Default: true.
                          Also F5, /theme use, or clicking the header (see /help theme).
   ui.theme_mode          dark, light or system (follow the terminal). Default: system.
                          Also F4, /theme, or clicking the header (see /help theme).
@@ -413,6 +426,8 @@ Other
       Allow http(s) loopback gateways (development).
   GROKBOT_TUI_APP_DIR
       Grok Bot install dir for version detection.
+  GROKBOT_TUI_NO_THEME_DOWNLOAD=1
+      Never download the default theme (see /help theme-files).
   The library's own names GROKBOT_ALLOW_LOCAL_GATEWAY and GROKBOT_APP_DIR work too.
 
 Older names: every GB_* variable (e.g. GB_GROKBOT_TOKEN) still works when its
@@ -608,7 +623,7 @@ fn command_extra(
             &["accounts"],
         ),
         "theme" => (
-            "Switch, list and edit themes, or the dark/light mode. Bare /theme cycles dark → light → system (also F4); system follows the terminal background, else dark. /theme use <name> (or F5) picks a theme file, /theme edit (or Shift-F5) opens the editor, /theme list lists them, /theme init [name] writes a minimal starter, /theme delete <name> deletes one (asks first), /theme reload re-reads the files. Saved in the global prefs ui.theme and ui.theme_mode.",
+            "Switch, list and edit themes, or the dark/light mode. Bare /theme cycles dark → light → system (also F4); system follows the terminal background, else dark. /theme use <name> (or F5) picks a theme file, /theme edit (or Shift-F5) opens the editor, /theme list lists them, /theme init [name] downloads the default theme (else writes the minimal starter), /theme starter [name] always writes the starter, /theme delete <name> deletes one (asks first), /theme reload re-reads the files. Saved in the global prefs ui.theme and ui.theme_mode.",
             &[
                 "/theme",
                 "/theme light",
@@ -900,7 +915,7 @@ mod tests {
             page(&r, "theme-files")
                 .unwrap()
                 .body
-                .contains("/usr/share/grokbot-tui/themes")
+                .contains("GROKBOT_TUI_NO_THEME_DOWNLOAD")
         );
         assert_eq!(page(&r, "/bot").unwrap().id, "cmd-bot");
         assert_eq!(page(&r, "").unwrap().id, "overview");

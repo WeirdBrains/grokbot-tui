@@ -1,10 +1,10 @@
 //! Theme files: `<data dir>/themes/<id>.toml`.
 //!
-//! There is no theme inside the binary. Packages ship `default.toml` in a shared data dir
-//! (`/usr/share/grokbot-tui/themes`, Homebrew's `share/grokbot-tui/themes`, next to the
-//! Windows exe, …); on startup, when the user's themes dir has no themes, [`seed`] copies
-//! the shipped files there. If the selected theme is missing or broken, the app falls back
-//! to plain terminal colors ([`Theme::unstyled`]) and tells the user what to fix.
+//! Themes are read only from the user's themes dir; there is no theme inside the binary and
+//! no system-wide theme dir. When that dir has no themes, the app downloads the repo's
+//! `themes/default.toml` from the git tag matching its version ([`download`]) and writes it
+//! there. If the selected theme is missing or broken, the app falls back to plain terminal
+//! colors ([`Theme::unstyled`]) and tells the user what to fix.
 //!
 //! Format (schema 1), see also README "Themes":
 //!
@@ -37,9 +37,75 @@ pub const MAX_BYTES: usize = 64 * 1024;
 pub const DIR_NAME: &str = "themes";
 /// The theme selected when the `ui.theme` pref is unset.
 pub const DEFAULT_ID: &str = "default";
-/// Where users can get the default theme by hand (shown in the "missing" notice).
-pub const DEFAULT_URL: &str =
-    "https://github.com/WeirdBrains/grokbot-tui/raw/main/themes/default.toml";
+/// Env var that turns off downloading the default theme (also pref `ui.theme_download`).
+pub const NO_DOWNLOAD_ENV: &str = "GROKBOT_TUI_NO_THEME_DOWNLOAD";
+/// Give up on a theme download after this long (startup never waits for it).
+pub const DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The shipped `default.toml` at the git tag of a release, e.g. `v1.6.0`.
+pub fn release_url(version: &str) -> String {
+    format!(
+        "https://raw.githubusercontent.com/WeirdBrains/grokbot-tui/v{version}/themes/default.toml"
+    )
+}
+
+/// The shipped `default.toml` matching this build.
+pub fn default_url() -> String {
+    release_url(env!("CARGO_PKG_VERSION"))
+}
+
+/// Whether an env value turns the download off (`1`, `true`, `yes`, `on`; empty / `0` /
+/// `false` / `no` / `off` don't).
+pub fn opted_out(env_value: Option<&str>) -> bool {
+    env_value.is_some_and(|v| {
+        !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "" | "0" | "false" | "no" | "off"
+        )
+    })
+}
+
+/// Fetch a theme file over HTTPS (with `DOWNLOAD_TIMEOUT`), refusing anything larger than
+/// `MAX_BYTES` or that doesn't parse as a theme. Returns the file's exact text.
+pub async fn download(url: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(DOWNLOAD_TIMEOUT)
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .user_agent(concat!("grokbot-tui/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut resp = client.get(url).send().await.map_err(|e| describe(&e))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    if resp.content_length().is_some_and(|n| n > MAX_BYTES as u64) {
+        return Err(format!("larger than {} KiB", MAX_BYTES / 1024));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| describe(&e))? {
+        body.extend_from_slice(&chunk);
+        if body.len() > MAX_BYTES {
+            return Err(format!("larger than {} KiB", MAX_BYTES / 1024));
+        }
+    }
+    let text = String::from_utf8(body).map_err(|_| "not UTF-8 text".to_string())?;
+    parse(DEFAULT_ID, &text).map_err(|e| format!("not a usable theme: {e}"))?;
+    Ok(text)
+}
+
+fn describe(e: &reqwest::Error) -> String {
+    if e.is_timeout() {
+        format!("timed out after {}s", DOWNLOAD_TIMEOUT.as_secs())
+    } else if e.is_connect() {
+        "couldn't connect (offline?)".into()
+    } else {
+        // Without the URL (it's shown separately) and without the error chain's noise.
+        e.to_string().replace(
+            &format!(" for url ({})", e.url().map(|u| u.as_str()).unwrap_or("")),
+            "",
+        )
+    }
+}
 
 // ---------------------------------------------------------------- colors
 
@@ -464,36 +530,6 @@ pub fn user_dir(data_dir: &Path) -> PathBuf {
     data_dir.join(DIR_NAME)
 }
 
-/// Shared dirs packages install themes into, most specific first.
-pub fn shared_dirs() -> Vec<PathBuf> {
-    let mut v = vec![];
-    if let Some(exe_dir) = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.canonicalize().ok())
-        .and_then(|p| p.parent().map(Path::to_path_buf))
-    {
-        // Homebrew (bin/../share), /usr/bin → /usr/share, the Windows MSI (bin\..\share).
-        v.push(exe_dir.join("../share/grokbot-tui").join(DIR_NAME));
-        // An unpacked release archive, or a portable copy.
-        v.push(exe_dir.join(DIR_NAME));
-    }
-    if cfg!(unix) {
-        let xdg = std::env::var("XDG_DATA_DIRS")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
-        for d in xdg.split(':').filter(|d| !d.is_empty()) {
-            v.push(Path::new(d).join("grokbot-tui").join(DIR_NAME));
-        }
-        for d in ["/usr/share", "/usr/local/share", "/opt/homebrew/share"] {
-            v.push(Path::new(d).join("grokbot-tui").join(DIR_NAME));
-        }
-    }
-    let mut seen = std::collections::HashSet::new();
-    v.retain(|p| seen.insert(p.canonicalize().unwrap_or_else(|_| p.clone())));
-    v
-}
-
 pub fn path(dir: &Path, id: &str) -> PathBuf {
     dir.join(format!("{id}.toml"))
 }
@@ -531,34 +567,6 @@ fn ensure_dir(dir: &Path) -> std::io::Result<()> {
         let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
     }
     Ok(())
-}
-
-/// When `dir` has no themes, copy the `*.toml` themes from `sources` into it (the first
-/// source with a given name wins). Returns the copied files' sources. Nothing is ever
-/// overwritten.
-pub fn seed(dir: &Path, sources: &[PathBuf]) -> std::io::Result<Vec<PathBuf>> {
-    if !list(dir).is_empty() {
-        return Ok(vec![]);
-    }
-    let mut copied = vec![];
-    for src in sources {
-        for id in list(src) {
-            let from = path(src, &id);
-            let to = path(dir, &id);
-            if to.exists()
-                || std::fs::metadata(&from)
-                    .map(|m| m.len() as usize > MAX_BYTES)
-                    .unwrap_or(true)
-            {
-                continue;
-            }
-            ensure_dir(dir)?;
-            std::fs::copy(&from, &to)?;
-            private(&to);
-            copied.push(from);
-        }
-    }
-    Ok(copied)
 }
 
 /// Why a theme couldn't be loaded.
@@ -618,6 +626,36 @@ pub fn save(dir: &Path, t: &Theme) -> std::io::Result<PathBuf> {
     }
     std::fs::rename(&tmp, &p)?;
     Ok(p)
+}
+
+/// Write a theme file's exact text as `<id>.toml`, atomically and 0600, but only if no
+/// such file exists (never overwrites).
+pub fn write_new(dir: &Path, id: &str, text: &str) -> std::io::Result<PathBuf> {
+    if !valid_id(id) {
+        return Err(std::io::Error::other(format!(
+            "'{id}' is not a valid theme name"
+        )));
+    }
+    ensure_dir(dir)?;
+    let p = path(dir, id);
+    if p.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("{} already exists", p.display()),
+        ));
+    }
+    let tmp = dir.join(format!(".{id}.toml.tmp"));
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp)?;
+        private(&tmp);
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+    }
+    // hard_link fails if the target appeared meanwhile, so a racing file is never replaced.
+    let r = std::fs::hard_link(&tmp, &p);
+    let _ = std::fs::remove_file(&tmp);
+    r.map(|_| p)
 }
 
 pub fn delete(dir: &Path, id: &str) -> std::io::Result<()> {
@@ -775,46 +813,6 @@ mod tests {
     }
 
     #[test]
-    fn seed_copies_shipped_themes_only_into_an_empty_dir() {
-        let d = tempfile::tempdir().unwrap();
-        let user = d.path().join("data/themes");
-        let other = d.path().join("other");
-        std::fs::create_dir_all(&other).unwrap();
-        std::fs::write(other.join("default.toml"), "# not this one\n[dark]").unwrap();
-        std::fs::write(other.join("extra.toml"), "[dark]").unwrap();
-        std::fs::write(other.join("Bad Name.toml"), "[dark]").unwrap();
-        let copied = seed(
-            &user,
-            &[repo_dir(), d.path().join("missing"), other.clone()],
-        )
-        .unwrap();
-        assert_eq!(copied.len(), 2, "{copied:?}");
-        assert_eq!(list(&user), vec!["default", "extra"]);
-        // First source wins for a name.
-        assert_eq!(
-            std::fs::read_to_string(path(&user, "default")).unwrap(),
-            std::fs::read_to_string(repo_dir().join("default.toml")).unwrap()
-        );
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(path(&user, "default"))
-                .unwrap()
-                .permissions()
-                .mode();
-            assert_eq!(mode & 0o777, 0o600);
-        }
-        // Not empty any more: nothing is copied or overwritten.
-        std::fs::write(path(&user, "default"), "# mine\n[dark]").unwrap();
-        std::fs::remove_file(path(&user, "extra")).unwrap();
-        assert!(seed(&user, &[repo_dir(), other]).unwrap().is_empty());
-        assert_eq!(
-            std::fs::read_to_string(path(&user, "default")).unwrap(),
-            "# mine\n[dark]"
-        );
-    }
-
-    #[test]
     fn load_save_delete() {
         let d = tempfile::tempdir().unwrap();
         let dir = d.path().join("themes");
@@ -835,5 +833,115 @@ mod tests {
         assert_eq!(list(&dir), vec!["broken"]);
         assert!(delete(&dir, "../etc").is_err());
         assert!(save(&dir, &Theme::unstyled("Bad")).is_err());
+    }
+
+    #[test]
+    fn download_urls_and_opt_out() {
+        assert_eq!(
+            release_url("1.6.0"),
+            "https://raw.githubusercontent.com/WeirdBrains/grokbot-tui/v1.6.0/themes/default.toml"
+        );
+        assert!(default_url().contains(&format!("/v{}/", env!("CARGO_PKG_VERSION"))));
+        for on in ["1", "true", "YES", "on", "x"] {
+            assert!(opted_out(Some(on)), "{on}");
+        }
+        for off in ["", "0", "false", "No", " off "] {
+            assert!(!opted_out(Some(off)), "{off}");
+        }
+        assert!(!opted_out(None));
+    }
+
+    #[test]
+    fn download_validates_what_it_fetches() {
+        use wiremock::matchers::path as at;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let good = std::fs::read_to_string(repo_dir().join("default.toml")).unwrap();
+        rt.block_on(async {
+            let srv = MockServer::start().await;
+            let serve =
+                |p: &str, r: ResponseTemplate| Mock::given(at(p.to_string())).respond_with(r);
+            serve(
+                "/ok",
+                ResponseTemplate::new(200).set_body_string(good.clone()),
+            )
+            .mount(&srv)
+            .await;
+            serve("/bad", ResponseTemplate::new(200).set_body_string("<html>"))
+                .mount(&srv)
+                .await;
+            serve(
+                "/big",
+                ResponseTemplate::new(200).set_body_string("#".repeat(MAX_BYTES + 1)),
+            )
+            .mount(&srv)
+            .await;
+            serve(
+                "/bin",
+                ResponseTemplate::new(200).set_body_bytes(vec![0xff, 0xfe, 0x00]),
+            )
+            .mount(&srv)
+            .await;
+            let url = |p: &str| format!("{}{p}", srv.uri());
+            assert_eq!(download(&url("/ok")).await.unwrap(), good, "exact text");
+            assert_eq!(
+                download(&url("/missing")).await.unwrap_err(),
+                "HTTP 404 Not Found"
+            );
+            assert!(
+                download(&url("/bad"))
+                    .await
+                    .unwrap_err()
+                    .contains("not a usable theme")
+            );
+            assert!(
+                download(&url("/big"))
+                    .await
+                    .unwrap_err()
+                    .contains("larger than 64 KiB")
+            );
+            assert_eq!(download(&url("/bin")).await.unwrap_err(), "not UTF-8 text");
+        });
+        // Nothing listening: a connection error, quickly.
+        let t = std::time::Instant::now();
+        let e = rt
+            .block_on(download("http://127.0.0.1:9/default.toml"))
+            .unwrap_err();
+        assert!(e.contains("connect"), "{e}");
+        assert!(t.elapsed() < DOWNLOAD_TIMEOUT + std::time::Duration::from_secs(1));
+    }
+
+    /// Real network: `cargo test -- --ignored download_from_github`.
+    #[test]
+    #[ignore = "needs the network"]
+    fn download_from_github_release_tag() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let text = rt.block_on(download(&release_url("1.5.0"))).unwrap();
+        let (t, w) = parse(DEFAULT_ID, &text).unwrap();
+        assert!(w.is_empty());
+        assert_eq!(t.name, "Default");
+        let e = rt.block_on(download(&release_url("0.0.0"))).unwrap_err();
+        assert!(e.starts_with("HTTP 404"), "{e}");
+    }
+
+    #[test]
+    fn write_new_never_overwrites() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("themes");
+        let p = write_new(&dir, "default", "# one\n[dark]").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "# one\n[dark]");
+        let e = write_new(&dir, "default", "# two\n[dark]").unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "# one\n[dark]");
+        assert!(write_new(&dir, "../x", "").is_err());
+        assert_eq!(list(&dir), vec!["default"], "no temp files left behind");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
     }
 }
