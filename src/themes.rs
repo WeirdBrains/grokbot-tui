@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 pub const SCHEMA: i64 = 1;
 /// Theme files larger than this are refused.
 pub const MAX_BYTES: usize = 64 * 1024;
-/// Theme directory name inside the data dir and inside shared `…/grokbot-tui/` dirs.
+/// Theme directory name inside the data dir.
 pub const DIR_NAME: &str = "themes";
 /// The theme selected when the `ui.theme` pref is unset.
 pub const DEFAULT_ID: &str = "default";
@@ -424,7 +424,7 @@ pub fn parse(id: &str, text: &str) -> Result<(Theme, Vec<String>), String> {
     })?;
     let mut w = vec![];
     match table.get("schema") {
-        None => {}
+        None => w.push(format!("no schema; reading it as schema {SCHEMA}")),
         Some(toml::Value::Integer(n)) if *n == SCHEMA => {}
         Some(toml::Value::Integer(n)) if *n > SCHEMA => {
             return Err(format!(
@@ -551,22 +551,93 @@ pub fn list(dir: &Path) -> Vec<String> {
     v
 }
 
-#[cfg(unix)]
-fn private(p: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600));
-}
-#[cfg(not(unix))]
-fn private(_: &Path) {}
-
+/// Create the themes dir (0700 on Unix) if it doesn't exist. An existing dir's mode is
+/// left alone.
 fn ensure_dir(dir: &Path) -> std::io::Result<()> {
+    if dir.is_dir() {
+        return Ok(());
+    }
     std::fs::create_dir_all(dir)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
     }
     Ok(())
+}
+
+/// Write `bytes` to a new temp file next to `target` (`.<name>.<pid>.tmp`), created with
+/// mode 0600 on Unix (no mode on Windows), synced to disk. The caller renames or links it.
+fn write_tmp(target: &Path, bytes: &[u8]) -> std::io::Result<PathBuf> {
+    use std::io::Write;
+    let dir = target
+        .parent()
+        .ok_or_else(|| std::io::Error::other("no parent folder"))?;
+    ensure_dir(dir)?;
+    let name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    let r = (|| {
+        let mut f = o.open(&tmp)?;
+        #[cfg(unix)]
+        {
+            // In case the temp file already existed with another mode.
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        f.write_all(bytes)?;
+        f.sync_all()
+    })();
+    match r {
+        Ok(()) => Ok(tmp),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
+/// Replace `target` with `bytes` atomically: a 0600 temp file in the same folder, renamed
+/// over it, so readers see the old or the new file, never half of one.
+pub fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp = write_tmp(target, bytes)?;
+    std::fs::rename(&tmp, target).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+/// Like [`atomic_write`], but never replaces an existing file (`AlreadyExists`), even one
+/// that appears while writing.
+pub fn atomic_write_new(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let exists = || {
+        std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("{} already exists", target.display()),
+        )
+    };
+    if target.exists() {
+        return Err(exists());
+    }
+    let tmp = write_tmp(target, bytes)?;
+    // A hard link fails when the target exists. Filesystems without hard links get a
+    // rename after a last check.
+    let r = match std::fs::hard_link(&tmp, target) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(exists()),
+        Err(_) if !target.exists() => std::fs::rename(&tmp, target),
+        Err(e) => Err(e),
+    };
+    let _ = std::fs::remove_file(&tmp);
+    r
 }
 
 /// Why a theme couldn't be loaded.
@@ -593,12 +664,162 @@ pub fn load(dir: &Path, id: &str) -> Result<(Theme, Vec<String>), LoadError> {
             format!("'{id}' is not a valid theme name"),
         ));
     }
-    let text = match std::fs::read_to_string(&p) {
-        Ok(t) => t,
+    let meta = match std::fs::metadata(&p) {
+        Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(LoadError::Missing(p)),
         Err(e) => return Err(LoadError::Broken(p, e.to_string())),
     };
+    // Checked before reading, so a huge file is never read into memory.
+    if meta.len() > MAX_BYTES as u64 {
+        return Err(LoadError::Broken(
+            p,
+            format!(
+                "it is {} bytes; theme files are at most {} KiB",
+                meta.len(),
+                MAX_BYTES / 1024
+            ),
+        ));
+    }
+    let text = match std::fs::read_to_string(&p) {
+        Ok(t) => t,
+        Err(e) => return Err(LoadError::Broken(p, e.to_string())),
+    };
     parse(id, &text).map_err(|e| LoadError::Broken(p, e))
+}
+
+/// One theme file, for `/theme list`, `--list-themes` and the picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Entry {
+    pub id: String,
+    /// Display name and description from the file (empty when it can't be read).
+    pub name: String,
+    pub description: String,
+    /// How many keys were skipped or defaulted.
+    pub warnings: usize,
+    /// Why it can't be used, if so.
+    pub error: Option<String>,
+}
+
+/// Every theme in `dir`, sorted by id, with what's wrong with it.
+pub fn entries(dir: &Path) -> Vec<Entry> {
+    list(dir)
+        .into_iter()
+        .map(|id| match load(dir, &id) {
+            Ok((t, w)) => Entry {
+                id,
+                name: t.name,
+                description: t.description,
+                warnings: w.len(),
+                error: None,
+            },
+            Err(e) => Entry {
+                id,
+                name: String::new(),
+                description: String::new(),
+                warnings: 0,
+                error: Some(match e {
+                    LoadError::Broken(_, why) => why,
+                    other => other.to_string(),
+                }),
+            },
+        })
+        .collect()
+}
+
+/// Copy theme `id` (its exact text, comments included) out of the themes dir.
+/// `dest`: a file path, or an existing folder (it gets `<id>.toml`); default
+/// `<data dir>/exports/<id>-<UTC stamp>.toml`. Only a usable theme is exported, and an
+/// existing file is never overwritten.
+pub fn export(
+    dir: &Path,
+    id: &str,
+    dest: Option<&Path>,
+    data_dir: &Path,
+) -> Result<PathBuf, String> {
+    match load(dir, id) {
+        Ok(_) => {}
+        Err(LoadError::Missing(p)) => {
+            return Err(format!("no theme '{id}' ({} doesn't exist)", p.display()));
+        }
+        Err(LoadError::Broken(p, e)) => return Err(format!("{} can't be used: {e}", p.display())),
+    }
+    let text = std::fs::read(path(dir, id)).map_err(|e| e.to_string())?;
+    let target = match dest {
+        Some(d) if d.is_dir() => d.join(format!("{id}.toml")),
+        Some(d) => d.to_path_buf(),
+        None => data_dir.join("exports").join(format!(
+            "{id}-{}.toml",
+            utc_stamp(std::time::SystemTime::now())
+        )),
+    };
+    atomic_write_new(&target, &text).map_err(|e| match e.kind() {
+        std::io::ErrorKind::AlreadyExists => {
+            format!("{} already exists; not overwritten", target.display())
+        }
+        _ => format!("couldn't write {}: {e}", target.display()),
+    })?;
+    Ok(target)
+}
+
+/// The theme list shared by `/theme list` and `--list-themes`: one line per file
+/// (● = `current`), with its name and description, its warning count or why it's broken.
+pub fn list_text(dir: &Path, current: &str) -> String {
+    let all = entries(dir);
+    let mut out = vec![format!("Themes in {}:", dir.display())];
+    if all.is_empty() {
+        out.push("  (none)".into());
+    }
+    for e in &all {
+        let mark = if e.id == current { "●" } else { " " };
+        out.push(match &e.error {
+            Some(err) => format!("{mark} {:<16} BROKEN: {err}", e.id),
+            None => {
+                let mut l = format!("{mark} {:<16} {}", e.id, e.name);
+                if !e.description.is_empty() {
+                    l += &format!(" — {}", e.description);
+                }
+                if e.warnings > 0 {
+                    l += &format!(
+                        " ({} warning{})",
+                        e.warnings,
+                        if e.warnings == 1 { "" } else { "s" }
+                    );
+                }
+                l
+            }
+        });
+    }
+    if !all.iter().any(|e| e.id == current) {
+        out.push(format!(
+            "(the selected theme '{current}' is missing: plain terminal colors are used)"
+        ));
+    }
+    out.join("\n")
+}
+
+/// `YYYYmmdd-HHMMSSZ` in UTC (no date crate needed).
+pub fn utc_stamp(t: std::time::SystemTime) -> String {
+    let secs = t
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Civil from days (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}{m:02}{d:02}-{:02}{:02}{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }
 
 /// The file's current text (for "changed on disk" checks).
@@ -614,17 +835,8 @@ pub fn save(dir: &Path, t: &Theme) -> std::io::Result<PathBuf> {
             t.id
         )));
     }
-    ensure_dir(dir)?;
     let p = path(dir, &t.id);
-    let tmp = dir.join(format!(".{}.toml.tmp", t.id));
-    {
-        use std::io::Write;
-        let mut f = std::fs::File::create(&tmp)?;
-        private(&tmp);
-        f.write_all(serialize(t).as_bytes())?;
-        f.sync_all()?;
-    }
-    std::fs::rename(&tmp, &p)?;
+    atomic_write(&p, serialize(t).as_bytes())?;
     Ok(p)
 }
 
@@ -636,26 +848,9 @@ pub fn write_new(dir: &Path, id: &str, text: &str) -> std::io::Result<PathBuf> {
             "'{id}' is not a valid theme name"
         )));
     }
-    ensure_dir(dir)?;
     let p = path(dir, id);
-    if p.exists() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            format!("{} already exists", p.display()),
-        ));
-    }
-    let tmp = dir.join(format!(".{id}.toml.tmp"));
-    {
-        use std::io::Write;
-        let mut f = std::fs::File::create(&tmp)?;
-        private(&tmp);
-        f.write_all(text.as_bytes())?;
-        f.sync_all()?;
-    }
-    // hard_link fails if the target appeared meanwhile, so a racing file is never replaced.
-    let r = std::fs::hard_link(&tmp, &p);
-    let _ = std::fs::remove_file(&tmp);
-    r.map(|_| p)
+    atomic_write_new(&p, text.as_bytes())?;
+    Ok(p)
 }
 
 pub fn delete(dir: &Path, id: &str) -> std::io::Result<()> {
@@ -674,6 +869,156 @@ mod tests {
 
     fn repo_dir() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("themes")
+    }
+
+    #[cfg(unix)]
+    fn mode(p: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+    }
+
+    fn tmp_files(dir: &Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.ends_with(".tmp"))
+            .collect()
+    }
+
+    #[test]
+    fn writes_are_atomic_private_and_leave_no_temp_files() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("themes");
+        let (t, _) = parse(
+            "x",
+            &std::fs::read_to_string(repo_dir().join("default.toml")).unwrap(),
+        )
+        .unwrap();
+        let mut t = t;
+        t.id = "mine".into();
+        let p = save(&dir, &t).unwrap();
+        assert!(tmp_files(&dir).is_empty());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(mode(&p), 0o600);
+            assert_eq!(mode(&dir), 0o700, "created private");
+            // An existing file with looser permissions is replaced by a private one, and an
+            // existing folder keeps the mode the user gave it.
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o750)).unwrap();
+            save(&dir, &t).unwrap();
+            assert_eq!(mode(&p), 0o600);
+            assert_eq!(mode(&dir), 0o750);
+        }
+        // write_new never replaces.
+        let e = write_new(&dir, "mine", "schema = 1").unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(load(&dir, "mine").unwrap().0.id, "mine");
+        let q = write_new(&dir, "fresh", "schema = 1\n[dark.colors]\n").unwrap();
+        #[cfg(unix)]
+        assert_eq!(mode(&q), 0o600);
+        let _ = q;
+        assert!(tmp_files(&dir).is_empty());
+        // A failed write (the target is a folder) cleans up its temp file.
+        std::fs::create_dir(dir.join("blocked.toml")).unwrap();
+        assert!(atomic_write(&dir.join("blocked.toml"), b"x").is_err());
+        assert!(tmp_files(&dir).is_empty());
+    }
+
+    #[test]
+    fn oversized_files_are_refused_before_reading() {
+        let d = tempfile::tempdir().unwrap();
+        let mut text = String::from("schema = 1\n[dark.colors]\n");
+        text += &"# padding\n".repeat(MAX_BYTES / 10 + 1);
+        std::fs::write(path(d.path(), "big"), &text).unwrap();
+        match load(d.path(), "big") {
+            Err(LoadError::Broken(_, e)) => {
+                assert!(
+                    e.contains(&format!("{} bytes", text.len())) && e.contains("64 KiB"),
+                    "{e}"
+                )
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_missing_schema_line_is_a_warning() {
+        let (_, w) = parse("x", "[dark.colors]\ntext = 1\n").unwrap();
+        assert!(w.iter().any(|w| w.contains("no schema")), "{w:?}");
+        let (_, w) = parse("x", "schema = 1\n[dark.colors]\ntext = 1\n").unwrap();
+        assert!(!w.iter().any(|w| w.contains("schema")), "{w:?}");
+    }
+
+    #[test]
+    fn entries_and_list_text_describe_every_file() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path();
+        std::fs::copy(repo_dir().join("default.toml"), path(dir, "default")).unwrap();
+        std::fs::write(
+            path(dir, "odd"),
+            "schema = 1\nname = \"Odd\"\nwat = 1\n[dark.colors]\n",
+        )
+        .unwrap();
+        std::fs::write(path(dir, "bad"), "schema = 99\n").unwrap();
+        let e = entries(dir);
+        assert_eq!(
+            e.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            ["bad", "default", "odd"]
+        );
+        assert!(e[0].error.as_ref().unwrap().contains("newer"));
+        assert!(e[1].error.is_none() && !e[1].description.is_empty());
+        assert!(e[2].warnings >= 1);
+        let t = list_text(dir, "odd");
+        assert!(
+            t.starts_with(&format!("Themes in {}:", dir.display())),
+            "{t}"
+        );
+        assert!(t.contains("● odd"), "{t}");
+        assert!(t.contains("bad              BROKEN: "), "{t}");
+        assert!(t.contains(" — "), "{t}");
+        assert!(t.contains("warning"), "{t}");
+        assert!(!t.contains("is missing"), "{t}");
+        assert!(list_text(dir, "gone").contains("'gone' is missing"));
+        let empty = tempfile::tempdir().unwrap();
+        assert!(list_text(empty.path(), "default").contains("(none)"));
+    }
+
+    #[test]
+    fn export_goes_to_exports_or_the_given_path() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("themes");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::copy(repo_dir().join("default.toml"), path(&dir, "default")).unwrap();
+        let src = std::fs::read(path(&dir, "default")).unwrap();
+        let p = export(&dir, "default", None, d.path()).unwrap();
+        assert_eq!(p.parent().unwrap(), d.path().join("exports"));
+        assert_eq!(std::fs::read(&p).unwrap(), src);
+        let f = d.path().join("copy.toml");
+        assert_eq!(export(&dir, "default", Some(&f), d.path()).unwrap(), f);
+        assert!(
+            export(&dir, "default", Some(&f), d.path())
+                .unwrap_err()
+                .contains("not overwritten")
+        );
+        assert!(
+            export(&dir, "nope", None, d.path())
+                .unwrap_err()
+                .contains("no theme")
+        );
+        assert!(export(&dir, "../x", None, d.path()).is_err());
+    }
+
+    #[test]
+    fn utc_stamps_are_civil_dates() {
+        use std::time::{Duration, UNIX_EPOCH};
+        let at = |s| utc_stamp(UNIX_EPOCH + Duration::from_secs(s));
+        assert_eq!(at(0), "19700101-000000Z");
+        assert_eq!(at(951_782_400), "20000229-000000Z");
+        assert_eq!(at(1_700_000_000), "20231114-221320Z");
+        assert_eq!(at(4_107_542_399), "21000228-235959Z");
     }
 
     #[test]

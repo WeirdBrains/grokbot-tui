@@ -241,7 +241,8 @@ Account switcher
 
 Theme switcher
   '‹default› ▾' — the theme in use. Click it or press F5 to pick another theme
-  (or /theme use <name>). The list ends with 'Edit themes…'. A theme that can't be
+  (or /theme use <name>). Moving through the list previews each theme; Enter keeps
+  it, Esc goes back to the one you had. The list ends with 'Edit themes…'. A theme that can't be
   loaded shows as '‹name: missing›' or '‹name: broken›' (see below).
 
 Mode: dark · light · system
@@ -252,14 +253,19 @@ Mode: dark · light · system
   changing the terminal's colors.
 
 Both choices are global prefs (ui.theme, ui.theme_mode), used for every account.
+grokbot-tui --theme <name> uses a theme for that run only (nothing is saved; picking
+a theme in the app saves it as usual). grokbot-tui --list-themes lists them and exits.
 
 Commands
   /theme use <name>     Switch theme (also /theme <name>; no name: pick list)
-  /theme list           List theme files (* = in use)
+  /theme list           List theme files (● = in use; broken files say why)
   /theme edit [name]    Open the editor (default: the theme in use)
   /theme init [name]    Download the default theme (else write the starter; never overwrites)
   /theme starter [name] Write a minimal starter theme (no download; never overwrites)
   /theme delete <name>  Delete a theme file (asks first)
+  /theme export <name> [path]
+                        Copy a theme file out (default <data dir>/exports/<name>-<UTC time>.toml;
+                        a folder gets <name>.toml; never overwrites)
   /theme reload         Re-read theme files after editing them by hand
 
 Theme editor (Shift-F5)
@@ -274,14 +280,17 @@ Theme editor (Shift-F5)
   r / R       Revert this item / everything since the last save
   s, Ctrl-S   Save (applied right away if it's the theme in use)
   d / n       Duplicate this theme / new starter theme (asks for a name)
+  d n x with Ctrl work too (Ctrl-D, Ctrl-N, Ctrl-X)
   x, Delete   Delete this theme (asks first)
-  t           Edit another theme      Esc / q  Close (asks if there are unsaved changes)
+  t           Edit another theme      [ / ]  Previous / next theme file
+  Esc / q     Close (asks if there are unsaved changes; also Shift-F5 / F17)
   h           Highlight on/off: the selected color or part is marked in reverse video
               in the preview (the preview title says when it isn't on screen, e.g. the
               compact header or a focused sidebar)
   Parts' colors can point at palette colors (@accent), so a palette change restyles
   every part that uses it. A low-contrast warning appears when text and its
-  background are hard to tell apart (WCAG ratio below 3:1).
+  background are hard to tell apart (WCAG ratio below 3:1), and ⚠ marks such items
+  in the list.
 
 Theme files: see /help theme-files.",
         related: &["theme-files", "keys", "prefs", "accounts"],
@@ -308,7 +317,8 @@ Where default.toml comes from
   yourself and /theme reload).
 
 When a theme can't be used
-  If the selected file is missing or broken (invalid TOML, newer schema, over 64 KiB),
+  If the selected file is missing or broken (invalid TOML, newer schema, over 64 KiB:
+  the size is checked before reading),
   grokbot-tui uses your terminal's own colors and says why. Highlights still show
   (reverse video). Fix the file and /theme reload, pick another theme (F5), or
   /theme init. A broken file is never overwritten without asking.
@@ -337,7 +347,19 @@ Format
   Style fields: fg, bg, border (boxes only), bold, italic, underline, reverse, dim.
   Colors: a literal or @palette-name. Missing colors use the terminal default,
   missing parts use the starter rule, a missing variant copies the other one;
-  each is reported once as a warning. Layout (borders, padding) isn't themeable.
+  each is reported once as a warning, as are unknown keys and a missing schema line.
+  Layout (borders, padding) isn't themeable.
+
+Saving
+  Theme files are written atomically (a temp file in the same folder, then renamed)
+  and readable only by you (0600; the themes folder is created 0700). Windows keeps
+  its default permissions.
+
+Command line
+  grokbot-tui --theme <name>   use <name> for this run only (not saved); a missing or
+                               broken theme stops before the UI starts
+  grokbot-tui --list-themes    list the themes (● = in use) and exit
+  /theme export <name> [path]  copy a theme file out (never overwrites)
 
 Palette colors
   text background accent subtle muted header warn danger ok on_accent
@@ -623,7 +645,7 @@ fn command_extra(
             &["accounts"],
         ),
         "theme" => (
-            "Switch, list and edit themes, or the dark/light mode. Bare /theme cycles dark → light → system (also F4); system follows the terminal background, else dark. /theme use <name> (or F5) picks a theme file, /theme edit (or Shift-F5) opens the editor, /theme list lists them, /theme init [name] downloads the default theme (else writes the minimal starter), /theme starter [name] always writes the starter, /theme delete <name> deletes one (asks first), /theme reload re-reads the files. Saved in the global prefs ui.theme and ui.theme_mode.",
+            "Switch, list and edit themes, or the dark/light mode. Bare /theme cycles dark → light → system (also F4); system follows the terminal background, else dark. /theme use <name> (or F5) picks a theme file, /theme edit (or Shift-F5) opens the editor, /theme list lists them, /theme init [name] downloads the default theme (else writes the minimal starter), /theme starter [name] always writes the starter, /theme delete <name> deletes one (asks first), /theme export <name> [path] copies one out, /theme reload re-reads the files. Saved in the global prefs ui.theme and ui.theme_mode.",
             &[
                 "/theme",
                 "/theme light",

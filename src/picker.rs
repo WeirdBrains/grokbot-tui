@@ -42,6 +42,8 @@ pub struct Picker {
     pub on_pick: OnPick,
     /// Optional: called when the user cancels (Esc / click outside).
     pub on_cancel: Option<fn(&mut App)>,
+    /// Optional: called after the highlight moves (keys, wheel, hover).
+    pub on_move: Option<fn(&mut App)>,
     /// Where the list rows were last drawn (set by the renderer; used for mouse hits).
     pub list_area: Rect,
     /// The whole popup, for "click outside cancels".
@@ -65,6 +67,7 @@ impl Picker {
             offset: 0,
             on_pick,
             on_cancel: None,
+            on_move: None,
             list_area: Rect::default(),
             popup_area: Rect::default(),
         }
@@ -73,6 +76,12 @@ impl Picker {
     /// Run `f` if the user cancels instead of picking.
     pub fn on_cancel(mut self, f: fn(&mut App)) -> Self {
         self.on_cancel = Some(f);
+        self
+    }
+
+    /// Run `f` whenever the highlight moves.
+    pub fn on_move(mut self, f: fn(&mut App)) -> Self {
+        self.on_move = Some(f);
         self
     }
 

@@ -36,6 +36,14 @@ struct Cli {
     /// Data directory holding context.db (default ~/.grokbot-tui; a pre-1.2 ~/.gb is moved there).
     #[arg(long, value_name = "DIR")]
     data_dir: Option<std::path::PathBuf>,
+    /// Use this theme (a file in <data dir>/themes, without .toml) for this run only; the
+    /// ui.theme pref, F5 or /theme use set it for good.
+    #[arg(long, value_name = "NAME")]
+    theme: Option<String>,
+    /// List the themes in <data dir>/themes (● marks the one in use; broken files say why)
+    /// and exit.
+    #[arg(long)]
+    list_themes: bool,
 }
 
 /// Environment variable renames applied at startup, in order: `(old name, new name)`.
@@ -99,10 +107,27 @@ fn main() -> Result<()> {
         eprintln!("grokbot-tui: {n}");
     }
     let store = Store::open(dir, cli.account.as_deref())?;
+    let themes_dir = themes::user_dir(&store.dir);
+    if cli.list_themes {
+        let current = cli.theme.clone().unwrap_or(store.load_config()?.theme);
+        println!("{}", themes::list_text(&themes_dir, &current));
+        return Ok(());
+    }
+    if let Some(t) = &cli.theme {
+        check_theme_flag(&themes_dir, t)?;
+    }
     let rt = tokio::runtime::Runtime::new()?;
     let mut app = App::new(store, rt.handle().clone(), cli.mock)?;
     app.init();
-    // Copy the packaged themes in if the user has none, then load the selected theme.
+    if let Some(t) = cli.theme {
+        app.info(format!(
+            "Theme '{t}' for this run (--theme); the saved choice (ui.theme = {}) is unchanged.",
+            app.config.theme
+        ));
+        app.config.theme = t.clone();
+        app.theme_override = Some(t);
+    }
+    // Download the default theme if the user has none, then load the selected theme.
     app.init_themes();
     if let Some(n) = notice {
         app.info(n);
@@ -119,6 +144,38 @@ fn main() -> Result<()> {
     let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     res
+}
+
+/// `--theme <name>`: refuse a bad name, or a theme that doesn't exist or can't be used,
+/// before the terminal UI starts. `default` may be missing from an empty themes folder:
+/// the first-run download fetches it.
+fn check_theme_flag(dir: &std::path::Path, name: &str) -> Result<()> {
+    if !themes::valid_id(name) {
+        anyhow::bail!("--theme {name:?}: theme names are 1-32 of a-z, 0-9, - and _");
+    }
+    match themes::load(dir, name) {
+        Ok(_) => Ok(()),
+        Err(themes::LoadError::Missing(_))
+            if name == themes::DEFAULT_ID && themes::list(dir).is_empty() =>
+        {
+            Ok(())
+        }
+        Err(themes::LoadError::Missing(p)) => {
+            let have = themes::list(dir);
+            anyhow::bail!(
+                "--theme {name}: {} doesn't exist (themes: {})",
+                p.display(),
+                if have.is_empty() {
+                    "none".into()
+                } else {
+                    have.join(", ")
+                }
+            )
+        }
+        Err(themes::LoadError::Broken(p, e)) => {
+            anyhow::bail!("--theme {name}: {} can't be used: {e}", p.display())
+        }
+    }
 }
 
 fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
@@ -152,6 +209,7 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     continue;
                 }
                 if let Some(p) = app.picker.as_mut() {
+                    let before = p.cursor;
                     match k.code {
                         KeyCode::Esc | KeyCode::Char('q') => app.picker_cancel(),
                         KeyCode::Enter => app.picker_confirm(),
@@ -163,6 +221,7 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                         KeyCode::End => p.last(),
                         _ => {}
                     }
+                    app.picker_moved(before);
                     continue;
                 }
                 if app.editor.is_some() {
@@ -311,6 +370,7 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             Event::Paste(s) => app.input_insert(s.trim_end_matches(['\r', '\n'])),
             Event::Mouse(m) if app.picker.is_some() => {
                 let p = app.picker.as_mut().unwrap();
+                let before = p.cursor;
                 match m.kind {
                     MouseEventKind::Moved => p.hover(m.column, m.row),
                     MouseEventKind::ScrollUp => p.move_by(-1),
@@ -322,6 +382,7 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     },
                     _ => {}
                 }
+                app.picker_moved(before);
             }
             Event::Mouse(m) if app.editor.is_some() => match m.kind {
                 MouseEventKind::Down(MouseButton::Left) => app.editor_click(m.column, m.row),
@@ -536,5 +597,54 @@ mod legacy_env_tests {
     fn empty_or_missing_old_values_are_ignored() {
         assert!(updates(&[("GB_GROKBOT_APP_DIR", "")]).is_empty());
         assert!(updates(&[]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod theme_flag_tests {
+    use super::*;
+
+    #[test]
+    fn theme_flags_parse() {
+        let c = Cli::try_parse_from(["grokbot-tui", "--theme", "solar"]).unwrap();
+        assert_eq!(c.theme.as_deref(), Some("solar"));
+        assert!(!c.list_themes);
+        let c = Cli::try_parse_from(["grokbot-tui", "--list-themes"]).unwrap();
+        assert!(c.list_themes && c.theme.is_none());
+    }
+
+    #[test]
+    fn theme_flag_is_checked_before_the_ui() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path();
+        // Empty folder: only `default` is allowed (the first-run download brings it).
+        assert!(check_theme_flag(dir, "default").is_ok());
+        assert!(
+            check_theme_flag(dir, "solar")
+                .unwrap_err()
+                .to_string()
+                .contains("themes: none")
+        );
+        assert!(
+            check_theme_flag(dir, "Bad Name")
+                .unwrap_err()
+                .to_string()
+                .contains("theme names")
+        );
+        std::fs::copy(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("themes/default.toml"),
+            themes::path(dir, "default"),
+        )
+        .unwrap();
+        std::fs::write(themes::path(dir, "bad"), "schema = 99\n").unwrap();
+        assert!(check_theme_flag(dir, "default").is_ok());
+        let e = check_theme_flag(dir, "solar").unwrap_err().to_string();
+        assert!(e.contains("themes: bad, default"), "{e}");
+        assert!(
+            check_theme_flag(dir, "bad")
+                .unwrap_err()
+                .to_string()
+                .contains("can't be used")
+        );
     }
 }

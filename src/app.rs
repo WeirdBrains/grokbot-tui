@@ -467,6 +467,11 @@ pub struct App {
     pub theme_download_url: Option<String>,
     /// A theme download is in flight.
     pub theme_downloading: bool,
+    /// `--theme <name>`: the theme for this run only (never saved; survives config reloads
+    /// until a theme is picked in the app).
+    pub theme_override: Option<String>,
+    /// While the theme picker is open: the theme (and its problem) to put back on Esc.
+    pub theme_preview: Option<(Arc<crate::theme::Theme>, Option<&'static str>)>,
     /// The `‹theme› ▾` switcher in the header (click opens the theme picker).
     pub theme_switch_area: Rect,
     /// The full-screen theme editor (Shift-F5), when open.
@@ -600,6 +605,8 @@ impl App {
                 ))
             .then(crate::themes::default_url),
             theme_downloading: false,
+            theme_override: None,
+            theme_preview: None,
             theme_switch_area: Rect::default(),
             editor: None,
             pending_remove: None,
@@ -1202,6 +1209,9 @@ impl App {
     pub fn reload_config(&mut self) -> Result<()> {
         let old_theme = self.config.theme.clone();
         self.config = self.store.load_config()?;
+        if let Some(t) = &self.theme_override {
+            self.config.theme = t.clone();
+        }
         if self.config.theme != old_theme {
             self.load_theme();
         }
@@ -1649,6 +1659,16 @@ impl App {
             && let Some(item) = p.selected().cloned()
         {
             (p.on_pick)(self, item);
+        }
+    }
+
+    /// Call the open picker's `on_move` hook if its highlight left `before`.
+    pub fn picker_moved(&mut self, before: usize) {
+        if let Some(p) = &self.picker
+            && p.cursor != before
+            && let Some(f) = p.on_move
+        {
+            f(self);
         }
     }
 

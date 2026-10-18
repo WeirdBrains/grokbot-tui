@@ -234,6 +234,8 @@ impl App {
                     self.error(format!("{e:#}"));
                     return false;
                 }
+                // An explicit choice is saved and ends a --theme override.
+                self.theme_override = None;
                 self.config.theme = id.to_string();
                 let name = t.name.clone();
                 self.apply_theme(t);
@@ -283,36 +285,49 @@ impl App {
         }
         items.push(PickItem::new("Edit themes…", EDIT_ITEM));
         let current = self.config.theme.clone();
-        self.open_picker(Picker::new("Theme", items, on_theme_pick).with_selected(&current));
+        // Moving the highlight previews a theme; Esc (or a non-theme item) puts this back.
+        self.theme_preview = Some((self.theme.clone(), self.theme_problem));
+        self.open_picker(
+            Picker::new(
+                "Theme · ↑↓ preview · Enter uses · Esc keeps",
+                items,
+                on_theme_pick,
+            )
+            .with_selected(&current)
+            .on_move(preview_theme_pick)
+            .on_cancel(cancel_theme_pick),
+        );
+    }
+
+    /// Put back the theme that was in use when the picker opened.
+    fn end_theme_preview(&mut self) {
+        if let Some((t, problem)) = self.theme_preview.take() {
+            self.theme = t;
+            self.theme_problem = problem;
+        }
     }
 
     /// `/theme list`.
     pub fn theme_list_text(&self) -> String {
         let dir = self.themes_dir();
-        let ids = themes::list(&dir);
-        if ids.is_empty() {
-            return format!(
-                "No themes in {}. /theme init writes a starter theme; packages ship \
-                 default.toml (see /help theme-files).",
-                dir.display()
-            );
+        let mut out = themes::list_text(&dir, &self.config.theme);
+        if themes::list(&dir).is_empty() {
+            out += "\n/theme init downloads the default theme (see /help theme-files).";
+        } else {
+            out += "\n/theme use <name> · F5 pick · Shift-F5 edit · /theme export <name> [path]";
         }
-        let mut out = format!("Themes in {}:\n", dir.display());
-        for id in &ids {
-            let mark = if *id == self.config.theme { "*" } else { " " };
-            let desc = match themes::load(&dir, id) {
-                Ok((t, w)) if w.is_empty() => t.name,
-                Ok((t, w)) => format!("{} ({} warning(s))", t.name, w.len()),
-                Err(LoadError::Broken(_, e)) => format!("broken: {e}"),
-                Err(e) => e.to_string(),
-            };
-            out += &format!("  {mark} {id:<16} {desc}\n");
-        }
-        out += "/theme use <name> · F5 pick · Shift-F5 edit · /theme delete <name>";
         out
     }
 
-    /// `/theme init [name]`: write the minimal starter theme (every color `reset`).
+    /// `/theme export <name> [path]`: copy a theme file out of the themes folder.
+    pub fn export_theme(&mut self, id: &str, dest: Option<&str>) {
+        let dest = dest.map(expand_tilde);
+        match themes::export(&self.themes_dir(), id, dest.as_deref(), &self.store.dir) {
+            Ok(p) => self.info(format!("Exported theme '{id}' to {}.", p.display())),
+            Err(e) => self.error(format!("Couldn't export theme '{id}': {e}.")),
+        }
+    }
+
     /// `/theme init [name]`: download the shipped default theme for this version (when
     /// downloading is allowed), else write the minimal starter. Never overwrites.
     pub fn theme_init(&mut self, name: Option<&str>) {
@@ -595,6 +610,29 @@ impl App {
                     ed.status = Some(("Nothing to revert.".into(), false));
                 }
             }
+            Action::Step(by) => {
+                if ed.dirty() {
+                    ed.status = Some(("Save (s) or revert (R) first.".into(), true));
+                    return;
+                }
+                let ids = themes::list(&dir);
+                let here = ids.iter().position(|id| *id == ed.theme.id);
+                let next = match (here, ids.len() as i32) {
+                    (_, 0) => None,
+                    (Some(i), n) => Some((i as i32 + by).rem_euclid(n) as usize),
+                    (None, n) => Some(if by > 0 { 0 } else { n as usize - 1 }),
+                };
+                match next.map(|i| ids[i].clone()) {
+                    Some(id) if id != ed.theme.id => {
+                        let variant = ed.variant;
+                        self.open_theme_editor(Some(&id));
+                        if let Some(ed) = self.editor.as_mut() {
+                            ed.variant = variant;
+                        }
+                    }
+                    _ => ed.status = Some(("No other themes; n creates one.".into(), true)),
+                }
+            }
             Action::OpenOther => {
                 if ed.dirty() {
                     ed.status = Some(("Save (s) or revert (R) first.".into(), true));
@@ -727,7 +765,41 @@ fn starter(id: &str) -> Theme {
     t
 }
 
+/// Draw with the highlighted theme while the picker is open (nothing is saved).
+fn preview_theme_pick(app: &mut App) {
+    let Some((orig, problem)) = app.theme_preview.clone() else {
+        return;
+    };
+    let id = app
+        .picker
+        .as_ref()
+        .and_then(|p| p.selected())
+        .map(|i| i.value.clone())
+        .unwrap_or_default();
+    match themes::load(&app.themes_dir(), &id) {
+        Ok((t, _)) => app.theme = Arc::new(t),
+        Err(_) => {
+            app.theme = orig;
+            app.theme_problem = problem;
+        }
+    }
+}
+
+fn cancel_theme_pick(app: &mut App) {
+    app.end_theme_preview();
+}
+
+/// `~/x` → the home folder (paths typed in the app aren't expanded by a shell).
+fn expand_tilde(p: &str) -> PathBuf {
+    match (p.strip_prefix("~/"), dirs::home_dir()) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ if p == "~" => dirs::home_dir().unwrap_or_else(|| PathBuf::from(p)),
+        _ => PathBuf::from(p),
+    }
+}
+
 fn on_theme_pick(app: &mut App, it: PickItem) {
+    app.end_theme_preview();
     match it.value.as_str() {
         EDIT_ITEM => app.open_theme_editor(None),
         INIT_ITEM => app.theme_init(None),
@@ -849,10 +921,15 @@ pub enum Action {
     None,
     Save,
     Close,
-    Create { name: String, duplicate: bool },
+    Create {
+        name: String,
+        duplicate: bool,
+    },
     Delete,
     RevertAll,
     OpenOther,
+    /// `[` / `]`: the previous / next theme file.
+    Step(i32),
 }
 
 pub struct ThemeEditor {
@@ -1173,9 +1250,19 @@ impl ThemeEditor {
 
     /// Contrast of the selected row: ratio and what it's measured against.
     pub fn contrast(&self) -> Option<(f64, String)> {
+        self.contrast_of(self.cursor)
+    }
+
+    /// Row `i` is readable on its own background by less than 3:1 (⚠ in the list).
+    pub fn low_contrast(&self, i: usize) -> bool {
+        self.contrast_of(i).is_some_and(|(r, _)| r < 3.0)
+    }
+
+    /// Contrast of row `i`: ratio and what it's measured against.
+    pub fn contrast_of(&self, i: usize) -> Option<(f64, String)> {
         let v = self.var();
         let c = |i: usize| v.colors[i];
-        let (a, b, what) = match self.row() {
+        let (a, b, what) = match row_at(i) {
             Row::Color(i) => {
                 let (other, what) = match i {
                     color::TEXT => (color::BACKGROUND, "background"),
@@ -1359,7 +1446,19 @@ impl ThemeEditor {
             Edit::None => match k.code {
                 KeyCode::Char('s') if ctrl => Action::Save,
                 KeyCode::Char('r') if ctrl => Action::RevertAll,
-                KeyCode::Esc | KeyCode::Char('q') => Action::Close,
+                KeyCode::Char('x') if ctrl => Action::Delete,
+                KeyCode::Char('n' | 'd') if ctrl => {
+                    self.edit = Edit::Name {
+                        duplicate: k.code == KeyCode::Char('d'),
+                        buf: String::new(),
+                        err: None,
+                    };
+                    Action::None
+                }
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::F(17) => Action::Close,
+                KeyCode::F(5) if k.modifiers.contains(KeyModifiers::SHIFT) => Action::Close,
+                KeyCode::Char('[') => Action::Step(-1),
+                KeyCode::Char(']') => Action::Step(1),
                 KeyCode::Up | KeyCode::Char('k') => {
                     self.move_by(-1);
                     Action::None
@@ -1540,7 +1639,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let keys = match &ed.edit {
         Edit::None => [
             "↑↓ select · Enter edit · p palette · Tab dark/light · r revert part · R revert all · s save",
-            "d duplicate · n new · x delete · t other theme · h highlight in preview · Esc close",
+            "d duplicate · n new · x delete · t / [ ] other theme · h highlight · ⚠ low contrast · Esc close",
         ],
         Edit::Form { .. } => [
             "←→ field · Enter/Space edit or toggle · p palette · Del clear color · ↑↓ other part",
@@ -1572,9 +1671,10 @@ fn draw_list(f: &mut Frame, ed: &mut ThemeEditor, area: Rect) {
     for (i, name) in COLOR_SLOTS.iter().enumerate() {
         let sel = i == ed.cursor;
         let lead = format!(
-            "{}{}{name:<17}",
+            "{}{}{name:<17}{}",
             if sel { "›" } else { " " },
-            if ed.changed(i) { "●" } else { " " }
+            if ed.changed(i) { "●" } else { " " },
+            if ed.low_contrast(i) { "⚠" } else { " " }
         );
         let lead_style = if sel {
             theme::selected()
@@ -1600,10 +1700,11 @@ fn draw_list(f: &mut Frame, ed: &mut ThemeEditor, area: Rect) {
         let i = N_COLORS + s;
         let sel = i == ed.cursor;
         let lead = format!(
-            "{}{}{:<19}",
+            "{}{}{:<19}{}",
             if sel { "›" } else { " " },
             if ed.changed(i) { "●" } else { " " },
-            info.key
+            info.key,
+            if ed.low_contrast(i) { "⚠" } else { " " }
         );
         let lead_style = if sel {
             theme::selected()
@@ -2118,7 +2219,8 @@ mod tests {
         assert_eq!(app.config.theme, "solar", "a missing theme isn't selected");
         type_line(&mut app, "/theme list");
         let n = notices(&app);
-        assert!(n.contains("* solar"), "{n}");
+        assert!(n.contains("● solar"), "{n}");
+        assert!(n.contains("/theme export"), "{n}");
         assert!(n.contains("default"), "{n}");
         // F5 / header picker: themes, then "Edit themes…".
         app.open_theme_picker();
@@ -2136,6 +2238,209 @@ mod tests {
         assert_eq!(app.config.theme_mode, theme::Mode::Light);
     }
 
+    fn solar(app: &App) -> Theme {
+        let mut t = app.theme.as_ref().clone();
+        t.id = "solar".into();
+        t.name = "Solar".into();
+        t.dark.colors[color::ACCENT] = Color::Indexed(136);
+        t.light.colors[color::ACCENT] = Color::Indexed(136);
+        themes::save(&app.themes_dir(), &t).unwrap();
+        t
+    }
+
+    /// Move the open picker's highlight to `value` the way a key press does.
+    fn highlight(app: &mut App, value: &str) {
+        let p = app.picker.as_mut().expect("a picker is open");
+        let before = p.cursor;
+        p.cursor = p.items.iter().position(|i| i.value == value).unwrap();
+        app.picker_moved(before);
+    }
+
+    #[test]
+    fn the_theme_picker_previews_the_highlighted_theme_and_esc_restores() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        solar(&app);
+        let orig = app.theme.clone();
+        app.open_theme_picker();
+        highlight(&mut app, "solar");
+        assert_eq!(app.theme.id, "solar", "previewed while highlighted");
+        assert_eq!(app.config.theme, "default", "nothing saved by a preview");
+        highlight(&mut app, EDIT_ITEM);
+        assert_eq!(
+            app.theme.id, "default",
+            "a non-theme item shows the original"
+        );
+        highlight(&mut app, "solar");
+        app.picker_cancel();
+        assert!(
+            Arc::ptr_eq(&app.theme, &orig),
+            "Esc puts the old theme back"
+        );
+        assert_eq!(app.config.theme, "default");
+        assert!(app.theme_preview.is_none());
+        // Enter keeps (and saves) the highlighted one.
+        app.open_theme_picker();
+        highlight(&mut app, "solar");
+        app.picker_confirm();
+        assert_eq!(app.theme.id, "solar");
+        app.reload_config().unwrap();
+        assert_eq!(app.config.theme, "solar");
+        assert!(app.theme_preview.is_none());
+    }
+
+    #[test]
+    fn a_theme_override_is_not_saved_and_survives_config_reloads() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        solar(&app);
+        // What main does for --theme solar.
+        app.config.theme = "solar".into();
+        app.theme_override = Some("solar".into());
+        app.load_theme();
+        assert_eq!(app.theme.id, "solar");
+        app.reload_config().unwrap();
+        assert_eq!(app.config.theme, "solar", "kept across a reload");
+        let saved = app.store.load_config().unwrap().theme;
+        assert_eq!(saved, "default", "the pref is untouched");
+        assert!(themes::list_text(&app.themes_dir(), &app.config.theme).contains("● solar"));
+        // Picking a theme in the app saves it and ends the override.
+        app.set_theme("default");
+        assert!(app.theme_override.is_none());
+        app.reload_config().unwrap();
+        assert_eq!(app.config.theme, "default");
+    }
+
+    #[test]
+    fn theme_export_copies_the_file_and_never_overwrites() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, d) = test_app(&rt);
+        let src = std::fs::read_to_string(themes::path(&app.themes_dir(), "default")).unwrap();
+        // Default destination: <data dir>/exports/<name>-<stamp>.toml.
+        type_line(&mut app, "/theme export default");
+        let exports = app.store.dir.join("exports");
+        let files: Vec<_> = std::fs::read_dir(&exports).unwrap().flatten().collect();
+        assert_eq!(files.len(), 1);
+        let name = files[0].file_name().to_string_lossy().to_string();
+        assert!(
+            name.starts_with("default-") && name.ends_with("Z.toml"),
+            "{name}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(files[0].path()).unwrap(),
+            src,
+            "exact text"
+        );
+        // A path with a space; a folder gets <name>.toml.
+        let out = d.path().join("my themes");
+        std::fs::create_dir_all(&out).unwrap();
+        type_line(
+            &mut app,
+            &format!("/theme export default {}", out.display()),
+        );
+        assert_eq!(
+            std::fs::read_to_string(out.join("default.toml")).unwrap(),
+            src
+        );
+        // Again: refused, the file is kept.
+        std::fs::write(out.join("default.toml"), "mine").unwrap();
+        type_line(
+            &mut app,
+            &format!("/theme export default {}", out.display()),
+        );
+        assert_eq!(
+            std::fs::read_to_string(out.join("default.toml")).unwrap(),
+            "mine"
+        );
+        let n = notices(&app);
+        assert!(n.contains("not overwritten"), "{n}");
+        // Missing and broken themes aren't exported.
+        type_line(&mut app, "/theme export nope");
+        std::fs::write(themes::path(&app.themes_dir(), "bad"), "not = [toml").unwrap();
+        type_line(&mut app, &format!("/theme export bad {}", out.display()));
+        assert!(!out.join("bad.toml").exists());
+        let n = notices(&app);
+        assert!(n.contains("Couldn't export theme 'nope'"), "{n}");
+        assert!(n.contains("Couldn't export theme 'bad'"), "{n}");
+    }
+
+    #[test]
+    fn editor_steps_through_themes_and_closes_with_shift_f5() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        solar(&app);
+        app.open_theme_editor(Some("default"));
+        key(&mut app, KeyCode::Tab);
+        let variant = app.editor.as_ref().unwrap().variant;
+        key(&mut app, KeyCode::Char(']'));
+        assert_eq!(app.editor.as_ref().unwrap().theme.id, "solar");
+        assert_eq!(
+            app.editor.as_ref().unwrap().variant,
+            variant,
+            "same variant"
+        );
+        key(&mut app, KeyCode::Char(']'));
+        assert_eq!(app.editor.as_ref().unwrap().theme.id, "default", "wraps");
+        key(&mut app, KeyCode::Char('['));
+        assert_eq!(app.editor.as_ref().unwrap().theme.id, "solar");
+        // Unsaved changes: stays put and says why.
+        app.editor.as_mut().unwrap().theme.dark.colors[color::ACCENT] = Color::Indexed(1);
+        app.editor.as_mut().unwrap().theme.light.colors[color::ACCENT] = Color::Indexed(1);
+        key(&mut app, KeyCode::Char('['));
+        let ed = app.editor.as_ref().unwrap();
+        assert_eq!(ed.theme.id, "solar");
+        assert!(ed.status.as_ref().unwrap().0.contains("Save"));
+        app.open_theme_editor(Some("default"));
+        app.editor_key(KeyEvent::new(KeyCode::F(5), KeyModifiers::SHIFT));
+        assert!(app.editor.is_none(), "Shift-F5 closes");
+        app.open_theme_editor(Some("default"));
+        key(&mut app, KeyCode::F(17));
+        assert!(app.editor.is_none(), "F17 closes");
+    }
+
+    #[test]
+    fn low_contrast_items_are_marked_in_the_list() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        app.open_theme_editor(Some("default"));
+        let ed = app.editor.as_mut().unwrap();
+        let v = ed.variant;
+        let var = if v == Variant::Dark {
+            &mut ed.theme.dark
+        } else {
+            &mut ed.theme.light
+        };
+        var.colors[color::TEXT] = Color::Rgb(10, 10, 10);
+        var.colors[color::BACKGROUND] = Color::Rgb(12, 12, 12);
+        assert!(ed.low_contrast(color::TEXT));
+        var_ok(ed);
+        let mut term = Terminal::new(TestBackend::new(140, 45)).unwrap();
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let ed = app.editor.as_ref().unwrap();
+        let line = (ed.list_area.y..ed.list_area.bottom())
+            .map(|y| {
+                (ed.list_area.x..ed.list_area.right())
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
+            .find(|l| l.contains("text ") && !l.contains("modal_text"))
+            .expect("text row shown");
+        assert!(line.contains('⚠'), "{line}");
+    }
+
+    fn var_ok(ed: &ThemeEditor) {
+        // Text on a clearly different background isn't flagged.
+        let mut t = ed.theme.clone();
+        t.dark.colors[color::TEXT] = Color::Rgb(250, 250, 250);
+        t.dark.colors[color::BACKGROUND] = Color::Rgb(0, 0, 0);
+        t.light.colors[color::TEXT] = Color::Rgb(0, 0, 0);
+        t.light.colors[color::BACKGROUND] = Color::Rgb(250, 250, 250);
+        let mut e2 = ThemeEditor::new(t, None, None, None, ed.variant);
+        e2.cursor = color::TEXT;
+        assert!(!e2.low_contrast(color::TEXT));
+    }
+
     #[test]
     fn header_switcher_opens_the_theme_picker() {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -2146,7 +2451,7 @@ mod tests {
             let r = app.theme_switch_area;
             assert!(r.width > 0, "{w}x{h}");
             app.click(r.x + 1, r.y);
-            assert_eq!(app.picker.as_ref().unwrap().title, "Theme");
+            assert!(app.picker.as_ref().unwrap().title.starts_with("Theme"));
             app.picker_cancel();
         }
     }

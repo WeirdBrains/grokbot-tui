@@ -31,6 +31,8 @@ cargo run                                  # real gateway
 cargo install --path .                     # installs the `grokbot-tui` binary
 grokbot-tui --data-dir /tmp/gbtest         # different data directory (holds context.db)
 grokbot-tui --account work                 # start in an account (or GROKBOT_TUI_ACCOUNT=work)
+grokbot-tui --theme solar                  # use a theme for this run only (not saved)
+grokbot-tui --list-themes                  # list the theme files (● = in use) and exit
 ```
 
 In mock mode any token logs in except `bad`. Sending `reject` simulates a 4xx and `unknown` simulates a 5xx after the prompt has landed.
@@ -110,7 +112,16 @@ panel_focused = { fg = "@text", border = "@accent" }
   via reverse video), shows a notice saying why, and marks the header `‹name: missing›` /
   `‹name: broken›`. A broken file is never overwritten without asking. Partial files are fine:
   missing colors use the terminal default, missing parts use the starter rule, a missing variant
-  copies the other, and each problem is listed once.
+  copies the other, and each problem is listed once (as are unknown keys and a missing `schema`
+  line). Files over 64 KiB are refused before they're read, and a newer `schema` is refused.
+- **Saving** is atomic (a temp file in the same folder, then a rename) and private: theme files are
+  `0600` and a new themes folder is `0700` (Windows keeps its default permissions).
+- **Picking (`F5`):** moving through the list previews each theme live; `Enter` keeps it, `Esc`
+  goes back. `--theme <name>` picks one for a single run without saving it (a missing or broken
+  theme stops before the UI starts); `--list-themes` prints the list and exits.
+- **`/theme export <name> [path]`** copies a theme file (exact text) to
+  `<data dir>/exports/<name>-<UTC time>.toml`, or to the path given (a folder gets `<name>.toml`).
+  It never overwrites.
 - **`/theme init [name]`** downloads the default theme the same way and saves it as `<name>.toml`
   (default `default.toml`). If downloading is off or fails, it writes the minimal starter instead.
 - **`/theme starter [name]`** always writes the minimal starter: every part is mapped to a palette
@@ -122,9 +133,10 @@ panel_focused = { fg = "@text", border = "@accent" }
   (`h` toggles; the preview title says when the part isn't on screen). `Tab` flips
   dark/light, `Enter`/`e` edits (hex, 0-255, a name or `@palette`), `p` opens the 256-color palette,
   `r`/`R` revert the item/everything, `s` saves (applied immediately if it's the theme in use),
-  `d` duplicates, `n` creates a starter theme, `x` deletes (asks first), `t` opens another theme,
-  `Esc` closes (asks about unsaved changes). Text/background pairs below a 3:1 WCAG contrast ratio
-  get a warning. Mouse clicks work on the list, tabs, fields and palette.
+  `d` duplicates, `n` creates a starter theme, `x` deletes (asks first; `Ctrl-D`/`Ctrl-N`/`Ctrl-X`
+  work too), `t` opens another theme and `[`/`]` step to the previous/next one, `Esc` (or
+  `Shift-F5`) closes (asks about unsaved changes). Text/background pairs below a 3:1 WCAG contrast
+  ratio get a warning, and `⚠` marks them in the list. Mouse clicks work on the list, tabs, fields and palette.
 
 ### Responsiveness
 
@@ -156,11 +168,12 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 100 entries):
 | `/prefs` (`/pref`) | List preferences; `/prefs get <key>`, `/prefs set <key> <value>` |
 | `/theme [dark\|light\|system]` (`/mode`) | Switch dark/light mode; bare `/theme` cycles (also `F4` or a header click) |
 | `/theme use [name]` | Switch theme (also `/theme <name>`); no name: pick list (also `F5`) |
-| `/theme list` · `/theme reload` | List theme files (`*` = in use) · re-read them after editing by hand |
+| `/theme list` · `/theme reload` | List theme files (`●` = in use; broken files say why) · re-read them after editing by hand |
 | `/theme edit [name]` | Open the theme editor (also `Shift-F5`) |
 | `/theme init [name]` | Download the default theme (else write the minimal starter; never overwrites) |
 | `/theme starter [name]` | Write a minimal starter theme (no download; never overwrites) |
 | `/theme delete <name>` | Delete a theme file (confirm in a pick list) |
+| `/theme export <name> [path]` | Copy a theme file out (default `<data dir>/exports/<name>-<UTC time>.toml`; never overwrites) |
 | `/memory` (`/mem`) | The active bot's local memory notes; `/memory add <key> <value>`, `/memory clear [key]` |
 | `/quit` (`/q`, `/exit`) | Exit |
 

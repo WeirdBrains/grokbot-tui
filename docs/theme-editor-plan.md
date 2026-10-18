@@ -1,9 +1,10 @@
-# Theme editor (shipped in 1.5.0, revised in 1.6.0)
+# Theme editor (shipped in 1.5.0, revised in 1.6.0 and 1.7.0)
 
 Status: implemented in 1.5.0. This document started as the 1.4.0 plan and was revised when the
 design changed to **no built-in theme**. It was revised again in 1.6.0, when themes became
 **user-level only**: system theme folders were dropped in favor of downloading the default
-theme. It now describes what was built and why. Before 1.5.0,
+theme. In 1.7.0 it was brought in line with the theme system of acp-rs-scraper (see section 10).
+It now describes what was built and why. Before 1.5.0,
 `src/theme.rs` had two hard-coded palettes and a `Mode` (dark / light / system, global pref
 `ui.theme_mode`).
 
@@ -126,7 +127,11 @@ the file is missing, so restoring the file brings it back.
 - `/theme` (alias `/mode`): bare cycles the mode, `dark|light|system`, `use [name]` (or
   `/theme <name>`), `list` (`ls`), `edit [name]`, `init [name]` (download the default theme as
   `<name>.toml`, else the starter), `starter [name]` (always the minimal starter), `delete <name>`
-  (`rm`, asks first), `reload`.
+  (`rm`, asks first), `export <name> [path]` (1.7.0), `reload`.
+- The pick list previews the highlighted theme live (1.7.0); Esc restores the previous one.
+- Command line (1.7.0): `--theme <name>` for one run (an in-memory override, not saved, kept
+  across config reloads until a theme is picked in the app; checked before the UI starts) and
+  `--list-themes` (prints and exits; never downloads).
 
 ## 7. Editor
 
@@ -147,7 +152,10 @@ the edited theme into an off-screen `TestBackend` and copied in. A detail pane a
 - `d` duplicate, `n` new starter theme (both ask for a name), `x` / Delete: delete (asks; any
   theme, including default; deleting the active theme switches to default or the first theme
   left, else falls back).
-- `t` edits another theme. Esc / `q` close (Save / Discard / Cancel if there are unsaved changes).
+- `t` edits another theme; `[` / `]` step to the previous / next file (1.7.0; refused while there
+  are unsaved changes). Esc / `q` / Shift-F5 / F17 close (Save / Discard / Cancel if there are
+  unsaved changes). Ctrl-D / Ctrl-N / Ctrl-X alias `d` / `n` / `x`.
+- `⚠` in the list marks items below 3:1 contrast (1.7.0).
 - **Preview highlight (1.6.0):** the selected palette color or part is marked in reverse video in
   the preview (`h` toggles). It works by rendering the preview a second time with that item set to
   colors the variant doesn't use, and marking every cell that differs. So it follows the real
@@ -155,8 +163,8 @@ the edited theme into an off-screen `TestBackend` and copied in. A detail pane a
   chat entries and shell frames, so those parts can be seen even in an empty chat. The title says
   when the selected part isn't on screen (the compact header's `brand`, `mouse_off`, `cursor_row`).
 
-Removed from the 1.4.0 plan: "Reset to built-in" (there's no built-in) and `/theme export`
-(themes are already files). Highlighting the selected part, deferred in 1.5.0, shipped in 1.6.0.
+Removed from the 1.4.0 plan: "Reset to built-in" (there's no built-in). `/theme export` was dropped
+too, then added in 1.7.0 to match acp-rs-scraper. Highlighting the selected part, deferred in 1.5.0, shipped in 1.6.0.
 
 ## 8. The starter trade-off
 
@@ -185,3 +193,20 @@ selection stays visible. Every color is the terminal default.
   click, editor text/palette/form edits, revert, save-and-apply, close prompt, duplicate/new/
   delete, conflict and broken-file prompts, contrast warning, preview reflects unsaved edits,
   mouse.
+
+## 10. Keeping in step with acp-rs-scraper (1.7.0)
+
+grokbot-tui's theme system is kept in sync with the one in acp-rs-scraper. In 1.7.0 it took over:
+`--theme` / `--list-themes`, `/theme export`, live preview in the pick list, atomic `0600` writes
+(PID-named temp file created with the mode, removed on failure; folder `0700` only when created;
+no mode on Windows), the size check before reading (64 KiB), a warning for a missing `schema`,
+and the editor's `[` / `]`, Shift-F5 close, Ctrl-D/N/X and `⚠` contrast markers.
+
+Deliberately different:
+- Files live only in `<data dir>/themes`; the default is downloaded from the release tag (no
+  system or next-to-binary folders, nothing copied from them).
+- Schema: `schema = 1` with 14 fixed palette colors and 38 parts, `@name` palette references (one
+  level), and a missing variant copying the other. acp-rs-scraper uses `version = 1`, free-form
+  palette names with `@` chains, light inheriting dark per key, and optional style overrides.
+- A non-integer `schema` is a warning here (acp-rs-scraper refuses the file).
+- No legacy `[theme]` migration (grokbot-tui never had that format).

@@ -265,7 +265,7 @@ fn whoami(app: &mut App, _: &str) -> Result<()> {
     Ok(())
 }
 
-const THEME_USAGE: &str = "Usage: /theme [dark|light|system] · /theme use|edit|delete <name> · /theme list · /theme init|starter [name] · /theme reload";
+const THEME_USAGE: &str = "Usage: /theme [dark|light|system] · /theme use|edit|delete <name> · /theme list · /theme init|starter [name] · /theme export <name> [path] · /theme reload";
 
 fn theme(app: &mut App, args: &str) -> Result<()> {
     let mut it = args.split_whitespace();
@@ -285,6 +285,17 @@ fn theme(app: &mut App, args: &str) -> Result<()> {
         ("starter", name) => app.theme_starter(name),
         ("reload", _) => app.reload_themes(),
         ("delete" | "rm", Some(id)) => app.confirm_delete_theme(id),
+        ("export", Some(id)) => {
+            // The path is everything after the name (it may contain spaces).
+            let path = args
+                .trim()
+                .strip_prefix("export")
+                .map(str::trim_start)
+                .and_then(|r| r.strip_prefix(id))
+                .map(str::trim)
+                .filter(|p| !p.is_empty());
+            app.export_theme(id, path);
+        }
         (a, None) => match crate::theme::Mode::parse(a) {
             Some(m) => app.set_theme_mode(m),
             None if crate::themes::path(&app.themes_dir(), a).exists() => {

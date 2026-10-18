@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-17
+
+The theme system now matches acp-rs-scraper's.
+
+### Added
+
+- **`--theme <name>`** uses a theme for this run only; nothing is saved. A bad name, or a theme
+  that is missing or can't be used, stops with an error before the UI starts. The error lists the
+  themes you have. `default` may be missing from an empty themes folder, because the first-run
+  download fetches it. Picking a theme in the app saves it as usual and ends the override.
+- **`--list-themes`** prints the theme files and exits. `●` marks the one in use; each line shows
+  the name, the description and any warnings, and broken files show why. It also says when the
+  selected theme is missing. It never downloads.
+- **`/theme export <name> [path]`** copies a theme file, with its exact text, out of the themes
+  folder. By default it goes to `<data dir>/exports/<name>-<UTC time>.toml`; a folder argument
+  gets `<name>.toml`, and `~/` is expanded. Only usable themes are exported, and an existing
+  file is never overwritten.
+- **Live preview in the theme pick list (`F5`):** moving through the list applies each theme as
+  you go. `Enter` keeps it and `Esc` puts the old one back.
+- **Theme editor:**
+  - `[` and `]` step to the previous or next theme file. The dark/light tab is kept, and the
+    step is refused while there are unsaved changes.
+  - `Shift-F5` (or `F17`) closes the editor.
+  - `Ctrl-D`, `Ctrl-N` and `Ctrl-X` work like `d`, `n` and `x`.
+  - `⚠` in the list marks colors and parts below 3:1 contrast.
+
+### Changed
+
+- **Theme files are written atomically and privately.** The temp file is named with the process
+  ID and created `0600`, then renamed into place; it is removed if the write fails. A new themes
+  folder is created `0700`, and an existing folder's mode is left alone. Windows keeps its
+  default permissions. Downloads and `/theme init` still never replace an existing file.
+- **Theme files are size-checked before reading.** A file over 64 KiB is refused with its size,
+  without being read into memory.
+- **A theme file without a `schema` line now gets a warning.** It is still read as schema 1.
+- **`/theme list`** shows each theme's description, uses `●` for the one in use, shows
+  `BROKEN: <reason>` for broken files and says when the selected theme is missing.
+
+
 ## [1.6.0] - 2026-10-17
 
 ### Added
@@ -382,7 +421,8 @@ First release.
   handled like 401, re-reading or re-exchanging the credential.
 - A build break caused by quotes inside the delivery help text.
 
-[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.3.2...v1.4.0
