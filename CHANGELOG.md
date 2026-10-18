@@ -6,7 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
-From acp-rs-scraper 2.14.0. These changes missed the 1.7.0 tag, which was already published.
+## [1.7.1] - 2026-10-18
+
+Completes the 1.7.0 sync with acp-rs-scraper (its 2.14.0). These changes missed the 1.7.0 tag,
+which was already published.
 
 ### Added
 
@@ -447,7 +450,8 @@ First release.
   handled like 401, re-reading or re-exchanging the credential.
 - A build break caused by quotes inside the delivery help text.
 
-[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.4.0...v1.5.0
