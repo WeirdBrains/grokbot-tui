@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-17
+
+### Added
+
+- **Theme editor: the selected color or part is highlighted in the live preview** (reverse
+  video; `h` toggles). The preview title says when the selected part isn't on screen (the
+  compact header, mouse capture off, a focused sidebar). The preview also shows sample chat
+  entries and shell modal frames, so every part can be inspected even in an empty chat.
+- **The default theme is downloaded on first run.** When `~/.grokbot-tui/themes` (or
+  `<data dir>/themes`) has no themes, grokbot-tui fetches `themes/default.toml` from the git
+  tag of the running version
+  (`https://raw.githubusercontent.com/WeirdBrains/grokbot-tui/v<version>/themes/default.toml`)
+  in the background. It checks that the file is a valid theme, saves it and shows a notice.
+  Startup never waits (5 s timeout). Offline or on failure, plain terminal colors and a notice
+  are kept. This works for every install method, including the macOS `.pkg`, the shell and
+  PowerShell installers, and `cargo install`.
+- **Opt-out:** `GROKBOT_TUI_NO_THEME_DOWNLOAD=1` or the new global pref `ui.theme_download`
+  (`true` by default).
+- **`/theme starter [name]`** writes the minimal starter theme (what `/theme init` used to do).
+
+### Changed
+
+- **Themes are user-level only:** they are read from `<data dir>/themes` and nowhere else.
+- **`/theme init [name]`** now downloads the default theme for this version as `<name>.toml`.
+  If downloading is off or fails, it writes the minimal starter instead.
+
+### Removed
+
+- **System-wide theme folders.** grokbot-tui no longer reads `/usr/share/grokbot-tui/themes`,
+  `/usr/local/share/…`, Homebrew's `share/grokbot-tui/themes`, `$XDG_DATA_DIRS`, or a `themes/`
+  folder next to the binary. It no longer copies themes from them on first run.
+- The deb, rpm, AUR, MSI and Homebrew packages and the release archives no longer install
+  `themes/default.toml`. The repo file stays as the download source. Copies already in your
+  themes folder are kept, and files that 1.5.0 packages installed under
+  `/usr/share/grokbot-tui/themes` are removed when the package is upgraded.
+
 ## [1.5.0] - 2026-10-17
 
 ### Added
@@ -346,7 +382,8 @@ First release.
   handled like 401, re-reading or re-exchanging the credential.
 - A build break caused by quotes inside the delivery help text.
 
-[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.3.2...v1.4.0
 [1.3.2]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.3.1...v1.3.2
