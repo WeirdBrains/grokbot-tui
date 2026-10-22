@@ -32,6 +32,10 @@ account_switch = { fg = "@warn", bold = true, underline = true }
 theme_switch = { fg = "@accent", bold = true, underline = true }
 mode_active = { fg = "@on_accent", bg = "@accent", bold = true }
 mode_inactive = { fg = "@subtle" }
+mode_normal = { fg = "@on_accent", bg = "@accent", bold = true }
+mode_insert = { fg = "@on_accent", bg = "@ok", bold = true }
+mode_command = { fg = "@on_accent", bg = "@warn", bold = true }
+mode_visual = { fg = "@on_accent", bg = "@danger", bold = true }
 key_hint = { fg = "@muted" }
 mouse_on = { fg = "@subtle" }
 mouse_off = { fg = "@on_accent", bg = "@warn" }
@@ -89,6 +93,10 @@ account_switch = { fg = "@warn", bold = true, underline = true }
 theme_switch = { fg = "@accent", bold = true, underline = true }
 mode_active = { fg = "@on_accent", bg = "@accent", bold = true }
 mode_inactive = { fg = "@subtle" }
+mode_normal = { fg = "@on_accent", bg = "@accent", bold = true }
+mode_insert = { fg = "@on_accent", bg = "@ok", bold = true }
+mode_command = { fg = "@on_accent", bg = "@warn", bold = true }
+mode_visual = { fg = "@on_accent", bg = "@danger", bold = true }
 key_hint = { fg = "@muted" }
 mouse_on = { fg = "@subtle" }
 mouse_off = { fg = "@on_accent", bg = "@warn" }

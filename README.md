@@ -73,7 +73,13 @@ the input, close an overlay, or ask before quitting; `Ctrl-Shift-C` never quits)
 `F1` help · `F2` pick a bot · `F3` pick an account · `F4` cycle dark/light/system · `F5` pick a theme ·
 `Shift-F5` theme editor · `F6` mouse capture on/off.
 
-### Prompt history and completion
+### Vim-like keys (opt-in)
+
+`/keymap vim` (or pref `ui.keys=vim`) enables NORMAL / INSERT / COMMAND / VISUAL modes
+with a mode badge on the input. Bindings live in `~/.grokbot-tui/keymap.toml`
+(`/keymap reload` after editing). Default stays classic. See `docs/vim-mode-plan.md`.
+
+## Prompt history and completion
 
 Up/Down in the input walk lines, then the last ~500 prompts for the active account
 (stored in `context.db`). Ctrl-R opens a fuzzy history search (Ctrl-S reverse; Esc keeps

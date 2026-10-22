@@ -499,6 +499,12 @@ pub struct App {
     /// Wrapped-row scroll offset of the chat body (for click→offset mapping).
     pub body_row_off: usize,
     pub body_wrap: usize,
+    /// Vim-like editor mode (only when `ui.keys = vim`).
+    pub vim_mode: crate::keymap::Mode,
+    /// Loaded keymap (vim scheme).
+    pub keymap: crate::keymap::Keymap,
+    /// Pending `:` command line (without the leading colon).
+    pub vim_command: Option<String>,
     /// The chat body and the input box, as last drawn.
     pub body_area: Rect,
     pub input_area: Rect,
@@ -602,6 +608,8 @@ impl App {
         let client_version_source = apply_client_identity(&mut opts, &config, true);
         let (tx, rx) = mpsc::unbounded_channel();
         let mouse_capture = config.mouse_capture;
+        let keymap_path = crate::keymap::user_path(&store.dir);
+        let (keymap, _keymap_err) = crate::keymap::load(&keymap_path, None);
         Ok(Self {
             store,
             config,
@@ -656,6 +664,9 @@ impl App {
             body_plain: String::new(),
             body_row_off: 0,
             body_wrap: 1,
+            vim_mode: crate::keymap::Mode::Insert,
+            keymap,
+            vim_command: None,
             body_area: Rect::default(),
             input_area: Rect::default(),
             theme_switch_area: Rect::default(),
@@ -1285,6 +1296,16 @@ impl App {
             "Welcome to grokbot-tui{}. Type /help for commands.",
             if self.mock { " (mock mode)" } else { "" }
         ));
+        if self.config.keys == crate::config::KeysScheme::Vim {
+            self.vim_mode = crate::keymap::Mode::Insert;
+            self.info("Keys: vim (ui.keys=vim). Esc → NORMAL, i → INSERT, : → command. /keymap".into());
+        }
+        let path = crate::keymap::user_path(&self.store.dir);
+        let (km, err) = crate::keymap::load(&path, Some(&self.keymap));
+        self.keymap = km;
+        if let Some(e) = err {
+            self.error(format!("Keymap: {e} (kept previous / default)."));
+        }
         self.connect();
     }
 
@@ -2158,6 +2179,224 @@ impl App {
             if !t.is_empty() {
                 self.copy_text(t);
             }
+        }
+    }
+
+    pub fn keys_are_vim(&self) -> bool {
+        self.config.keys == crate::config::KeysScheme::Vim
+    }
+
+    pub fn set_keys_scheme(&mut self, scheme: crate::config::KeysScheme) -> anyhow::Result<()> {
+        self.store.set_pref(crate::config::PREF_KEYS, scheme.as_str())?;
+        self.config.keys = scheme;
+        if scheme == crate::config::KeysScheme::Vim {
+            self.vim_mode = crate::keymap::Mode::Insert;
+            self.info("Keys: vim. Esc → NORMAL, i → INSERT, : → command. See /keymap.".into());
+        } else {
+            self.vim_mode = crate::keymap::Mode::Insert;
+            self.vim_command = None;
+            self.info("Keys: default (classic bindings).".into());
+        }
+        Ok(())
+    }
+
+    pub fn reload_keymap(&mut self) {
+        let path = crate::keymap::user_path(&self.store.dir);
+        let (km, err) = crate::keymap::load(&path, Some(&self.keymap));
+        self.keymap = km;
+        if let Some(e) = err {
+            self.error(format!("Keymap reload failed: {e} (kept previous)."));
+        } else {
+            self.info(format!("Keymap reloaded from {}.", path.display()));
+        }
+    }
+
+    /// Run a keymap action id. Returns true if handled.
+    pub fn vim_action(&mut self, action: &str) -> bool {
+        use crate::keymap::Mode;
+        match action {
+            "app.quit" => {
+                self.should_quit = true;
+                true
+            }
+            "app.ctrl_c" => {
+                self.ctrl_c(false, std::time::Instant::now());
+                true
+            }
+            "app.ctrl_c_copy" => {
+                self.ctrl_c(true, std::time::Instant::now());
+                true
+            }
+            "help.open" => {
+                self.open_help("keys");
+                true
+            }
+            "mouse.toggle" => {
+                self.toggle_mouse_capture();
+                true
+            }
+            "mode.insert" => {
+                self.vim_mode = Mode::Insert;
+                self.focus = Focus::Input;
+                self.vim_command = None;
+                true
+            }
+            "mode.insert_end" => {
+                self.vim_mode = Mode::Insert;
+                self.focus = Focus::Input;
+                self.input_cursor = self.input.len();
+                self.vim_command = None;
+                true
+            }
+            "mode.normal" => {
+                self.vim_mode = Mode::Normal;
+                self.vim_command = None;
+                self.completion = None;
+                true
+            }
+            "mode.visual" => {
+                self.vim_mode = Mode::Visual;
+                if self.body_sel.is_none() {
+                    let off = self.body_plain.len().saturating_sub(1);
+                    self.body_sel = Some(crate::select::Selection {
+                        anchor: off,
+                        cursor: off,
+                    });
+                }
+                true
+            }
+            "mode.command" => {
+                self.vim_mode = Mode::Command;
+                self.vim_command = Some(String::new());
+                self.focus = Focus::Input;
+                true
+            }
+            "move.left" => {
+                if self.vim_mode == Mode::Visual {
+                    if let Some(sel) = self.body_sel.as_mut() {
+                        sel.cursor = sel.cursor.saturating_sub(1);
+                    }
+                } else if self.focus == Focus::Input {
+                    self.input_left();
+                } else {
+                    self.scroll_up(1);
+                }
+                true
+            }
+            "move.right" => {
+                if self.vim_mode == Mode::Visual {
+                    if let Some(sel) = self.body_sel.as_mut() {
+                        sel.cursor = (sel.cursor + 1).min(self.body_plain.len());
+                    }
+                } else if self.focus == Focus::Input {
+                    self.input_right();
+                } else {
+                    self.scroll_down(1);
+                }
+                true
+            }
+            "move.up" | "move.down" => {
+                let up = action == "move.up";
+                if self.vim_mode == Mode::Visual || self.focus == Focus::Sidebar {
+                    if up {
+                        self.scroll_up(1);
+                    } else {
+                        self.scroll_down(1);
+                    }
+                } else if up {
+                    let _ = self.history_up();
+                } else {
+                    let _ = self.history_down();
+                }
+                true
+            }
+            "move.top" => {
+                self.scroll = 0;
+                true
+            }
+            "move.bottom" => {
+                self.scroll = u16::MAX / 2;
+                true
+            }
+            "focus.next" => {
+                self.focus = if self.focus == Focus::Input {
+                    Focus::Sidebar
+                } else {
+                    Focus::Input
+                };
+                true
+            }
+            "focus.prev" => {
+                self.focus = if self.focus == Focus::Sidebar {
+                    Focus::Input
+                } else {
+                    Focus::Sidebar
+                };
+                true
+            }
+            "input.history_search" => {
+                self.open_history_search();
+                true
+            }
+            "input.undo_clear" => {
+                self.input_undo_clear();
+                true
+            }
+            "selection.select_all" => {
+                self.ctrl_a();
+                true
+            }
+            "selection.copy" | "selection.copy_line" => {
+                if let Some(sel) = &self.body_sel {
+                    let t = crate::select::selected_text(&self.body_plain, sel);
+                    if !t.is_empty() {
+                        self.copy_text(t);
+                    }
+                }
+                if action == "selection.copy" {
+                    self.vim_mode = Mode::Normal;
+                }
+                true
+            }
+            "selection.clear" => {
+                self.body_sel = None;
+                self.vim_mode = Mode::Normal;
+                true
+            }
+            "command.run" => {
+                if let Some(cmd) = self.vim_command.take() {
+                    self.vim_mode = Mode::Normal;
+                    let line = if cmd.starts_with('/') {
+                        cmd
+                    } else {
+                        format!("/{cmd}")
+                    };
+                    self.input = line;
+                    self.input_cursor = self.input.len();
+                    self.submit();
+                }
+                true
+            }
+            "command.complete" => {
+                if let Some(cmd) = &self.vim_command {
+                    self.input = if cmd.starts_with('/') {
+                        cmd.clone()
+                    } else {
+                        format!("/{cmd}")
+                    };
+                    self.input_cursor = self.input.len();
+                    crate::complete::tab(self, false);
+                    let text = self.input.clone();
+                    self.vim_command = Some(text.trim_start_matches('/').to_string());
+                }
+                true
+            }
+            "keymap.reload" => {
+                self.reload_keymap();
+                true
+            }
+            "input.paste" => true, // terminal paste still works via bracketed paste
+            _ => false,
         }
     }
 

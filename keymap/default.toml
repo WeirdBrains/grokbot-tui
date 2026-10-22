@@ -1,0 +1,47 @@
+# grokbot-tui keymap (used when ui.keys = "vim").
+# One key, one action, in each table. Reload with /keymap reload.
+
+[global]
+"ctrl-q" = "app.quit"
+"ctrl-c" = "app.ctrl_c"
+"ctrl-shift-c" = "app.ctrl_c_copy"
+"ctrl-r" = "input.history_search"
+"ctrl-a" = "selection.select_all"
+"ctrl-z" = "input.undo_clear"
+"f1" = "help.open"
+"f6" = "mouse.toggle"
+
+[mode.normal]
+"i" = "mode.insert"
+"a" = "mode.insert_end"
+"v" = "mode.visual"
+":" = "mode.command"
+"h" = "move.left"
+"j" = "move.down"
+"k" = "move.up"
+"l" = "move.right"
+"g" = "move.top"
+"shift-g" = "move.bottom"
+"tab" = "focus.next"
+"shift-tab" = "focus.prev"
+"ctrl-w" = "focus.next"
+"p" = "input.paste"
+"/" = "input.history_search"
+
+[mode.insert]
+"esc" = "mode.normal"
+"ctrl-r" = "input.history_search"
+
+[mode.command]
+"esc" = "mode.normal"
+"enter" = "command.run"
+"tab" = "command.complete"
+
+[mode.visual]
+"esc" = "mode.normal"
+"h" = "move.left"
+"j" = "move.down"
+"k" = "move.up"
+"l" = "move.right"
+"y" = "selection.copy"
+"d" = "selection.clear"

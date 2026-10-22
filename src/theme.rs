@@ -201,6 +201,10 @@ style_slots! {
     THEME_SWITCH = "theme_switch", "Screen and header", false, "The ‹theme› ▾ switcher";
     MODE_ACTIVE = "mode_active", "Screen and header", false, "The selected dark/light/system choice";
     MODE_INACTIVE = "mode_inactive", "Screen and header", false, "The other dark/light/system choices";
+    MODE_NORMAL = "mode_normal", "Screen and header", false, "Vim NORMAL mode indicator";
+    MODE_INSERT = "mode_insert", "Screen and header", false, "Vim INSERT mode indicator";
+    MODE_COMMAND = "mode_command", "Screen and header", false, "Vim COMMAND (:) mode indicator";
+    MODE_VISUAL = "mode_visual", "Screen and header", false, "Vim VISUAL mode indicator";
     KEY_HINT = "key_hint", "Screen and header", false, "Key hints (F3, F4) and notes";
     MOUSE_ON = "mouse_on", "Screen and header", false, "'mouse: on'";
     MOUSE_OFF = "mouse_off", "Screen and header", false, "'mouse: OFF' (stands out)";
@@ -331,7 +335,8 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
             bg: Some(r(c::HEADER)),
             ..fg(c::TEXT)
         },
-        s::BRAND | s::MODE_ACTIVE | s::SELECTED | s::SELECTION => bold(reverse),
+        s::BRAND | s::MODE_ACTIVE | s::MODE_NORMAL | s::MODE_INSERT | s::SELECTED | s::SELECTION => bold(reverse),
+        s::MODE_COMMAND | s::MODE_VISUAL => bold(StyleSpec { bg: Some(r(c::WARN)), fg: Some(r(c::ON_ACCENT)), ..StyleSpec::default() }),
         s::CURSOR_ROW | s::MOUSE_OFF | s::LINK_SELECTED => reverse,
         // Not bold: some terminals draw bold block glyphs from another font.
         s::TITLE => fg(c::ACCENT),
@@ -583,6 +588,16 @@ pub fn logo_colors() -> (Color, Color) {
 }
 
 /// The active bot in the sidebar and the selected row of a pick list.
+pub fn vim_mode_style(mode: crate::keymap::Mode) -> Style {
+    use crate::keymap::Mode;
+    st(match mode {
+        Mode::Normal => slot::MODE_NORMAL,
+        Mode::Insert => slot::MODE_INSERT,
+        Mode::Command => slot::MODE_COMMAND,
+        Mode::Visual => slot::MODE_VISUAL,
+    })
+}
+
 pub fn selected() -> Style {
     st(slot::SELECTED)
 }
@@ -809,8 +824,13 @@ mod tests {
         for v in [Variant::Dark, Variant::Light] {
             let spec = t.variant(v);
             for (i, s) in STYLE_SLOTS.iter().enumerate() {
-                if s.key == "theme_switch" {
-                    continue; // new in 1.5.0
+                if s.key == "theme_switch"
+                    || s.key.starts_with("mode_n")
+                    || s.key.starts_with("mode_i")
+                    || s.key.starts_with("mode_c")
+                    || s.key.starts_with("mode_v")
+                {
+                    continue; // theme_switch 1.5; vim mode_* 1.9
                 }
                 assert_eq!(spec.resolve(i), golden(v, s.key), "{v:?} {}", s.key);
             }

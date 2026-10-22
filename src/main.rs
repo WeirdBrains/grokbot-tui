@@ -11,6 +11,7 @@ mod history;
 mod fuzzy;
 mod input;
 mod keyctx;
+mod keymap;
 mod picker;
 mod select;
 mod storage;
@@ -377,6 +378,56 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
             // Anything else done in between disarms "press Ctrl-C again".
             app.quit_armed = None;
+
+            // Vim keymap (opt-in via ui.keys=vim). Overlays keep their own keys.
+            if app.keys_are_vim()
+                && app.editor.is_none()
+                && app.picker.is_none()
+                && app.help.is_none()
+                && app.shell.is_none()
+                && app.history_search.is_none()
+            {
+                use crate::keymap::{self, Mode};
+                if app.vim_mode == Mode::Command {
+                    if let Some(action) = keymap::encode_key(k.code, k.modifiers)
+                        .and_then(|key| app.keymap.lookup(Mode::Command, &key).map(str::to_string))
+                    {
+                        app.vim_action(&action);
+                        return true;
+                    }
+                    match k.code {
+                        KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => {
+                            if let Some(cmd) = app.vim_command.as_mut() {
+                                cmd.push(c);
+                            }
+                            return true;
+                        }
+                        KeyCode::Backspace => {
+                            if let Some(cmd) = app.vim_command.as_mut() {
+                                cmd.pop();
+                            }
+                            return true;
+                        }
+                        _ => {}
+                    }
+                } else if app.vim_mode != Mode::Insert {
+                    if let Some(action) = keymap::encode_key(k.code, k.modifiers)
+                        .and_then(|key| app.keymap.lookup(app.vim_mode, &key).map(str::to_string))
+                    {
+                        app.vim_action(&action);
+                        return true;
+                    }
+                } else if let Some(action) = keymap::encode_key(k.code, k.modifiers)
+                    .filter(|key| {
+                        key == "esc" || key.starts_with("ctrl-") || key.starts_with("alt-")
+                    })
+                    .and_then(|key| app.keymap.lookup(Mode::Insert, &key).map(str::to_string))
+                {
+                    app.vim_action(&action);
+                    return true;
+                }
+            }
+
             if let Some(p) = app.picker.as_mut() {
                 let before = p.cursor;
                 match k.code {

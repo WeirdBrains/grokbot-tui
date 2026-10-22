@@ -152,6 +152,14 @@ pub fn registry() -> Registry {
             },
 
             Command {
+                name: "keymap",
+                aliases: &["keys"],
+                usage: "/keymap [reload|list|vim|default]",
+                help: "Show or reload the vim keymap; switch ui.keys between vim and default",
+                complete: keymap_complete,
+                run: keymap_cmd,
+            },
+            Command {
                 name: "switch",
                 aliases: &[],
                 usage: "/switch [alias]",
@@ -631,6 +639,33 @@ fn aliases(app: &App) -> Vec<crate::complete::Candidate> {
         Ok(list) => crate::complete::names(list.into_iter().map(|a| a.alias)),
         Err(_) => vec![],
     }
+}
+
+fn keymap_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(["reload", "list", "vim", "default"])
+    } else {
+        vec![]
+    }
+}
+
+fn keymap_cmd(app: &mut App, args: &str) -> Result<()> {
+    match args.trim() {
+        "" | "list" => {
+            let lines = app.keymap.list_lines();
+            app.info(format!(
+                "ui.keys={}  mode={}\n{}",
+                app.config.keys.as_str(),
+                app.vim_mode.label(),
+                lines.join("\n")
+            ));
+        }
+        "reload" => app.reload_keymap(),
+        "vim" => app.set_keys_scheme(crate::config::KeysScheme::Vim)?,
+        "default" => app.set_keys_scheme(crate::config::KeysScheme::Default)?,
+        other => bail!("Usage: /keymap [reload|list|vim|default] (got {other})"),
+    }
+    Ok(())
 }
 
 fn switch_account(app: &mut App, args: &str) -> Result<()> {

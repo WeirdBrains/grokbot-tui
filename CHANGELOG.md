@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-21
+
+### Added
+- **Opt-in vim-like modes** (`ui.keys = default|vim`, `/keymap vim|default`). Modes:
+  INSERT / NORMAL / COMMAND / VISUAL with a styled indicator on the input title
+  (theme parts `mode_normal`, `mode_insert`, `mode_command`, `mode_visual` with
+  starter fallbacks so existing themes keep working).
+- **TOML keymap** at `~/.grokbot-tui/keymap.toml` (shipped default in
+  `keymap/default.toml`). Validation, conflict detection, graceful fallback + notice.
+  `/keymap` (`/keys`) lists or reloads. `:` maps onto slash commands and reuses Tab
+  fuzzy completion from 1.8.0. Visual mode integrates with in-app selection and the
+  Ctrl-C resolver.
+- **`docs/vim-mode-plan.md`** citing Lenin's `architecture/PLAN-MODES-KEYMAP.md` at
+  commit `3c84eb2` and documenting deviations.
+
 ## [1.8.0] - 2026-10-21
 
 ### Added

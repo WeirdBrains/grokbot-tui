@@ -49,6 +49,8 @@ pub const PREF_THEME: &str = "ui.theme";
 pub const PREF_THEME_DOWNLOAD: &str = "ui.theme_download";
 /// Capture the mouse for clicks/wheel (`true`) or leave it to the terminal (`false`).
 pub const PREF_MOUSE_CAPTURE: &str = "ui.mouse_capture";
+/// Keybinding scheme: "default" or "vim".
+pub const PREF_KEYS: &str = "ui.keys";
 
 /// Pref key for the big header title's glyphs: `auto`, `quadrant` or `half` (global).
 pub const PREF_TITLE_GLYPHS: &str = "ui.title_glyphs";
@@ -62,6 +64,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_THEME,
     PREF_THEME_DOWNLOAD,
     PREF_MOUSE_CAPTURE,
+    PREF_KEYS,
 ];
 
 /// Which block glyphs draw the big header title (pref `ui.title_glyphs`).
@@ -114,6 +117,29 @@ pub fn is_global(key: &str) -> bool {
     GLOBAL_KEYS.contains(&key)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KeysScheme {
+    #[default]
+    Default,
+    Vim,
+}
+
+impl KeysScheme {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "default" => Some(Self::Default),
+            "vim" => Some(Self::Vim),
+            _ => None,
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Vim => "vim",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub default_bot: Option<String>,
@@ -136,6 +162,8 @@ pub struct Config {
     pub theme_download: bool,
     /// Capture the mouse for the TUI (F6 / `/mouse`).
     pub mouse_capture: bool,
+    /// Keybinding scheme (`default` or `vim`).
+    pub keys: KeysScheme,
 }
 
 impl Default for Config {
@@ -153,6 +181,7 @@ impl Default for Config {
             theme: crate::themes::DEFAULT_ID.to_string(),
             theme_download: true,
             mouse_capture: true,
+            keys: KeysScheme::Default,
         }
     }
 }
@@ -173,6 +202,7 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_THEME, c.theme.clone()),
         (PREF_THEME_DOWNLOAD, c.theme_download.to_string()),
         (PREF_MOUSE_CAPTURE, c.mouse_capture.to_string()),
+        (PREF_KEYS, c.keys.as_str().to_string()),
     ]
 }
 
@@ -208,6 +238,9 @@ impl Config {
             mouse_capture: o(PREF_MOUSE_CAPTURE)
                 .map(|v| !matches!(v.trim(), "false" | "0" | "no" | "off"))
                 .unwrap_or(d.mouse_capture),
+            keys: o(PREF_KEYS)
+                .and_then(|v| KeysScheme::parse(&v))
+                .unwrap_or(d.keys),
         }
     }
 }

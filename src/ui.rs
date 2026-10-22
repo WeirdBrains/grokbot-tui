@@ -494,10 +494,22 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
 
     // Bottom input bar
     let title = match app.mode {
-        InputMode::GatewayToken => " Gateway token (masked, Esc cancels) ",
-        InputMode::CursorToken => " Cursor access token (masked, Esc cancels) ",
-        InputMode::GatewayUrl => " Gateway URL (Esc cancels) ",
-        InputMode::Normal => " message or /command · Shift/Alt-Enter newline · F1 help ",
+        InputMode::GatewayToken => " Gateway token (masked, Esc cancels) ".to_string(),
+        InputMode::CursorToken => " Cursor access token (masked, Esc cancels) ".to_string(),
+        InputMode::GatewayUrl => " Gateway URL (Esc cancels) ".to_string(),
+        InputMode::Normal if app.keys_are_vim() && app.vim_mode == crate::keymap::Mode::Command => {
+            format!(
+                " :{}▏ · Enter runs · Esc cancels ",
+                app.vim_command.as_deref().unwrap_or("")
+            )
+        }
+        InputMode::Normal if app.keys_are_vim() => {
+            format!(
+                " {} · Esc NORMAL · i INSERT · : command · /keymap ",
+                app.vim_mode.label()
+            )
+        }
+        InputMode::Normal => " message or /command · Shift/Alt-Enter newline · F1 help ".to_string(),
     };
     let scroll = app.input_scroll;
     // The selected range in char indices (masked prompts never select).
@@ -541,10 +553,18 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     } else {
         String::new()
     };
+    let title_line = if app.keys_are_vim() && matches!(app.mode, InputMode::Normal) {
+        Line::from(vec![
+            theme::vim_mode_style(app.vim_mode).span(format!(" {} ", app.vim_mode.label())),
+            theme::key_hint().span(title.trim_start_matches(&format!(" {} ", app.vim_mode.label())).to_string()),
+        ])
+    } else {
+        Line::from(title)
+    };
     f.render_widget(
         Paragraph::new(input_lines).block(
             theme::block(&theme::panel(app.focus == Focus::Input))
-                .title(title)
+                .title(title_line)
                 .title_bottom(Line::from(more).right_aligned()),
         ),
         bottom,

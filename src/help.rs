@@ -195,6 +195,7 @@ in between quits.
   PgUp / PgDn, mouse wheel     Scroll the chat (not the prompt history)
   Esc                          Clear an in-app selection; cancel a prompt; return focus to input
   /switch [alias]              Switch account (bare opens the picker)
+  /keymap [vim|default|reload|list]  Opt-in vim keys (ui.keys); list/reload keymap.toml
 
 Input focused (multi-line)
   Enter                     Send message or run /command

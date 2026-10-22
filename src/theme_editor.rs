@@ -3346,7 +3346,7 @@ mod tests {
             .collect();
         // Only parts that depend on the app's state: the compact header, mouse capture off,
         // the sidebar focused.
-        assert_eq!(hidden, ["brand", "mouse_off", "cursor_row", "selection"]);
+        assert_eq!(hidden, ["brand", "mode_normal", "mode_insert", "mode_command", "mode_visual", "mouse_off", "cursor_row", "selection"]);
     }
 
     #[test]
