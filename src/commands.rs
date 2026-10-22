@@ -5,13 +5,22 @@ use anyhow::{Context, Result, bail};
 
 pub type Handler = fn(&mut App, &str) -> Result<()>;
 
+/// Completes the `arg_index`-th argument (0-based) given the typed `query`.
+pub type ArgCompleter = fn(&App, usize, &str) -> Vec<crate::complete::Candidate>;
+
 pub struct Command {
     pub name: &'static str,
     pub aliases: &'static [&'static str],
     pub usage: &'static str,
     pub help: &'static str,
     pub run: Handler,
+    pub complete: ArgCompleter,
 }
+
+fn no_complete(_: &App, _: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    vec![]
+}
+
 
 pub struct Registry {
     pub commands: Vec<Command>,
@@ -34,6 +43,7 @@ pub fn registry() -> Registry {
                 aliases: &["h", "?"],
                 usage: "/help [command]",
                 help: "Show commands",
+                complete: help_complete,
                 run: help,
             },
             Command {
@@ -41,6 +51,7 @@ pub fn registry() -> Registry {
                 aliases: &[],
                 usage: "/login gateway [url] | cursor | desktop [entry]",
                 help: "Log in the active account: gateway URL + token, or a Cursor access token",
+                complete: no_complete,
                 run: login,
             },
             Command {
@@ -48,6 +59,7 @@ pub fn registry() -> Registry {
                 aliases: &[],
                 usage: "/logout",
                 help: "Log out of the active account (keeps chats and memory)",
+                complete: login_complete,
                 run: logout,
             },
             Command {
@@ -55,6 +67,7 @@ pub fn registry() -> Registry {
                 aliases: &[],
                 usage: "/whoami",
                 help: "Show the active account's login details",
+                complete: no_complete,
                 run: whoami,
             },
             Command {
@@ -62,6 +75,7 @@ pub fn registry() -> Registry {
                 aliases: &[],
                 usage: "/mouse [on|off]",
                 help: "Toggle mouse capture (off = select/copy text with your terminal; also F6)",
+                complete: mouse_complete,
                 run: mouse,
             },
             Command {
@@ -69,6 +83,7 @@ pub fn registry() -> Registry {
                 aliases: &["mode"],
                 usage: "/theme [dark|light|system] | use|edit|delete <name> | list | init [name] | reload",
                 help: "Themes and dark/light/system: bare /theme cycles the mode (F4); use/list/edit pick and edit theme files (F5, Shift-F5)",
+                complete: no_complete,
                 run: theme,
             },
             Command {
@@ -76,6 +91,7 @@ pub fn registry() -> Registry {
                 aliases: &[],
                 usage: "/copy",
                 help: "Copy the last bot message to the clipboard (OSC 52)",
+                complete: theme_complete,
                 run: copy,
             },
             Command {
@@ -83,6 +99,7 @@ pub fn registry() -> Registry {
                 aliases: &[],
                 usage: "/bots",
                 help: "Refresh and list bots",
+                complete: no_complete,
                 run: bots,
             },
             Command {
@@ -90,6 +107,7 @@ pub fn registry() -> Registry {
                 aliases: &["use"],
                 usage: "/bot [name|id] | /bot new <name> | /bot delete [name]",
                 help: "Switch to, create, or delete a bot",
+                complete: bot_complete,
                 run: bot,
             },
             Command {
@@ -97,6 +115,7 @@ pub fn registry() -> Registry {
                 aliases: &["sh"],
                 usage: "/shell <command>",
                 help: "Run a local shell command and show its output (not sent to the bot)",
+                complete: no_complete,
                 run: shell,
             },
             Command {
@@ -104,6 +123,7 @@ pub fn registry() -> Registry {
                 aliases: &[],
                 usage: "/history",
                 help: "Reload the active bot's chat history",
+                complete: no_complete,
                 run: history,
             },
             Command {
@@ -111,6 +131,7 @@ pub fn registry() -> Registry {
                 aliases: &["acct"],
                 usage: "/account [add|use|rename|remove]",
                 help: "List accounts; add <alias>, use <alias>, rename <old> <new>, remove <alias>",
+                complete: no_complete,
                 run: account,
             },
             Command {
@@ -118,6 +139,7 @@ pub fn registry() -> Registry {
                 aliases: &["pref"],
                 usage: "/prefs [get <k>|set <k> <v>]",
                 help: "List, get, or set preferences",
+                complete: account_complete,
                 run: prefs,
             },
             Command {
@@ -125,13 +147,24 @@ pub fn registry() -> Registry {
                 aliases: &["mem"],
                 usage: "/memory [add <k> <v>|clear [k]]",
                 help: "Per-bot memory notes for the active bot",
+                complete: no_complete,
                 run: memory,
+            },
+
+            Command {
+                name: "switch",
+                aliases: &[],
+                usage: "/switch [alias]",
+                help: "Switch account (bare: pick list; alias: prefix or fuzzy match)",
+                complete: switch_complete,
+                run: switch_account,
             },
             Command {
                 name: "quit",
                 aliases: &["q", "exit"],
                 usage: "/quit",
                 help: "Exit grokbot-tui",
+                complete: no_complete,
                 run: quit,
             },
         ],
@@ -549,6 +582,87 @@ fn quit(app: &mut App, _: &str) -> Result<()> {
     app.should_quit = true;
     Ok(())
 }
+
+fn theme_complete(app: &App, idx: usize, _q: &str) -> Vec<crate::complete::Candidate> {
+    match idx {
+        0 => crate::complete::names(["dark", "light", "system", "use", "list", "edit", "init", "starter", "delete", "export", "reload"]),
+        1 => {
+            let ids = crate::themes::list(&app.themes_dir());
+            crate::complete::names(ids)
+        }
+        _ => vec![],
+    }
+}
+fn account_complete(app: &App, idx: usize, _q: &str) -> Vec<crate::complete::Candidate> {
+    match idx {
+        0 => crate::complete::names(["list", "add", "use", "rename", "remove"]),
+        1 | 2 => aliases(app),
+        _ => vec![],
+    }
+}
+fn switch_complete(app: &App, idx: usize, _q: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 { aliases(app) } else { vec![] }
+}
+fn help_complete(app: &App, idx: usize, _q: &str) -> Vec<crate::complete::Candidate> {
+    if idx != 0 {
+        return vec![];
+    }
+    crate::complete::names(crate::help::all_names(&app.registry))
+}
+fn bot_complete(app: &App, idx: usize, _q: &str) -> Vec<crate::complete::Candidate> {
+    match idx {
+        0 => {
+            let mut v = crate::complete::names(["new", "delete"]);
+            v.extend(crate::complete::names(app.bots.iter().map(|b| b.name.clone())));
+            v
+        }
+        1 => crate::complete::names(app.bots.iter().map(|b| b.name.clone())),
+        _ => vec![],
+    }
+}
+fn mouse_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 { crate::complete::names(["on", "off", "toggle"]) } else { vec![] }
+}
+fn login_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 { crate::complete::names(["gateway", "cursor", "desktop"]) } else { vec![] }
+}
+fn aliases(app: &App) -> Vec<crate::complete::Candidate> {
+    match app.store.accounts() {
+        Ok(list) => crate::complete::names(list.into_iter().map(|a| a.alias)),
+        Err(_) => vec![],
+    }
+}
+
+fn switch_account(app: &mut App, args: &str) -> Result<()> {
+    let alias = args.trim();
+    if alias.is_empty() {
+        app.open_account_picker();
+        return Ok(());
+    }
+    let list = app.store.accounts()?;
+    let names: Vec<String> = list.iter().map(|a| a.alias.clone()).collect();
+    // Exact, then unique prefix, then unique fuzzy.
+    if let Some(a) = list.iter().find(|a| a.alias.eq_ignore_ascii_case(alias)) {
+        return app.switch_account(&a.alias);
+    }
+    let prefixes: Vec<_> = names.iter().filter(|n| n.to_lowercase().starts_with(&alias.to_lowercase())).collect();
+    if prefixes.len() == 1 {
+        return app.switch_account(prefixes[0]);
+    }
+    let ranked = crate::fuzzy::rank(alias, &names);
+    if ranked.len() == 1 {
+        return app.switch_account(&names[ranked[0].0]);
+    }
+    // Ambiguous or unknown: open the picker (pre-filtered by setting a notice).
+    app.info(format!(
+        "No unique account matching '{alias}' ({}).",
+        if ranked.is_empty() { "none".into() } else { ranked.iter().take(5).map(|(i,_)| names[*i].as_str()).collect::<Vec<_>>().join(", ") }
+    ));
+    app.open_account_picker();
+    Ok(())
+}
+
+
 
 #[cfg(test)]
 mod tests {

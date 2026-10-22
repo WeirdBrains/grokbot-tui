@@ -73,7 +73,20 @@ the input, close an overlay, or ask before quitting; `Ctrl-Shift-C` never quits)
 `F1` help · `F2` pick a bot · `F3` pick an account · `F4` cycle dark/light/system · `F5` pick a theme ·
 `Shift-F5` theme editor · `F6` mouse capture on/off.
 
-### Themes
+### Prompt history and completion
+
+Up/Down in the input walk lines, then the last ~500 prompts for the active account
+(stored in `context.db`). Ctrl-R opens a fuzzy history search (Ctrl-S reverse; Esc keeps
+the draft). Tab after `/` fuzzy-completes slash commands and arguments; Shift-Tab cycles.
+
+## Selecting text
+
+With mouse capture on (the default; F6 / `/mouse` toggles and persists as `ui.mouse_capture`),
+drag in the chat to select. The selection is copied on mouse-up (OSC 52). Ctrl-C /
+Ctrl-Shift-C also copy a selection. Esc clears it. Shift-drag or Option-drag usually
+bypasses mouse capture so the terminal can select instead.
+
+## Themes
 
 Every theme, including `default`, is a TOML file in `~/.grokbot-tui/themes/<name>.toml` (it follows
 `--data-dir`), and themes are read only from that folder: nothing is built into the binary and no
@@ -353,3 +366,25 @@ separate "notices (not saved)" section below the chat, and never written to the 
 ## License
 
 BSD 3-Clause. See [LICENSE](LICENSE).
+
+## Troubleshooting
+
+### `grokbot-tui: command not found` after install
+
+The binary lands in `$CARGO_HOME/bin` (usually `~/.cargo/bin`). Put that directory on
+`PATH`, then refresh the shell's command cache:
+
+```bash
+# zsh
+rehash
+# bash
+hash -r
+```
+
+Optional (zsh): auto-rehash when a command is not found —
+
+```zsh
+zstyle ':completion:*' rehash true
+```
+
+Or run `./install.sh` from a checkout, which installs and reminds you to rehash.

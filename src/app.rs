@@ -482,6 +482,23 @@ pub struct App {
     pub cleared_input: Option<(String, usize)>,
     /// Last mouse position reported by the terminal (for "the pane under the mouse").
     pub mouse_pos: Option<(u16, u16)>,
+    /// Newest-first prompts for the active account (Up/Down, Ctrl-R).
+    pub prompt_history: Vec<String>,
+    /// Position in [`prompt_history`] while browsing (`None` = at the draft).
+    pub history_idx: Option<usize>,
+    /// The input text before browsing history.
+    pub history_draft: Option<String>,
+    /// Ctrl-R fuzzy history search overlay.
+    pub history_search: Option<crate::history::Search>,
+    /// Tab-completion popup for slash commands.
+    pub completion: Option<crate::complete::Popup>,
+    /// In-app selection in the chat body.
+    pub body_sel: Option<crate::select::Selection>,
+    /// Plain text of the feed matching the current layout (for selection offsets).
+    pub body_plain: String,
+    /// Wrapped-row scroll offset of the chat body (for click→offset mapping).
+    pub body_row_off: usize,
+    pub body_wrap: usize,
     /// The chat body and the input box, as last drawn.
     pub body_area: Rect,
     pub input_area: Rect,
@@ -584,6 +601,7 @@ impl App {
         };
         let client_version_source = apply_client_identity(&mut opts, &config, true);
         let (tx, rx) = mpsc::unbounded_channel();
+        let mouse_capture = config.mouse_capture;
         Ok(Self {
             store,
             config,
@@ -629,6 +647,15 @@ impl App {
             input_anchor: None,
             cleared_input: None,
             mouse_pos: None,
+            prompt_history: Vec::new(),
+            history_idx: None,
+            history_draft: None,
+            history_search: None,
+            completion: None,
+            body_sel: None,
+            body_plain: String::new(),
+            body_row_off: 0,
+            body_wrap: 1,
             body_area: Rect::default(),
             input_area: Rect::default(),
             theme_switch_area: Rect::default(),
@@ -658,7 +685,7 @@ impl App {
             tx,
             rx,
             should_quit: false,
-            mouse_capture: true,
+            mouse_capture,
             pending_clipboard: None,
         })
     }
@@ -1246,12 +1273,14 @@ impl App {
         self.store.use_account(alias)?;
         self.reset_session();
         self.reload_config()?;
+        self.reload_history();
         self.info(format!("Switched to account '{}'.", self.account().alias));
         self.connect();
         Ok(())
     }
 
     pub fn init(&mut self) {
+        self.reload_history();
         self.info(format!(
             "Welcome to grokbot-tui{}. Type /help for commands.",
             if self.mock { " (mock mode)" } else { "" }
@@ -2008,6 +2037,136 @@ impl App {
             || self.editor.is_some()
             || self.help.is_some()
             || self.shell.is_some()
+            || self.history_search.is_some()
+            || self.completion.is_some()
+    }
+
+    /// Load prompt history for the active account.
+    pub fn reload_history(&mut self) {
+        self.prompt_history = self
+            .store
+            .prompt_history(crate::history::MAX)
+            .unwrap_or_default();
+        self.history_idx = None;
+        self.history_draft = None;
+    }
+
+    /// Up in the input: previous line, else older prompt.
+    pub fn history_up(&mut self) -> bool {
+        if crate::input::up(&self.input, &mut self.input_cursor) {
+            return true;
+        }
+        if self.prompt_history.is_empty() {
+            return false;
+        }
+        let next = match self.history_idx {
+            None => {
+                self.history_draft = Some(self.input.clone());
+                0
+            }
+            Some(i) if i + 1 < self.prompt_history.len() => i + 1,
+            Some(_) => return true,
+        };
+        self.history_idx = Some(next);
+        self.input = self.prompt_history[next].clone();
+        self.input_cursor = self.input.len();
+        self.input_anchor = None;
+        true
+    }
+
+    /// Down in the input: next line, else newer prompt / the draft.
+    pub fn history_down(&mut self) -> bool {
+        if crate::input::down(&self.input, &mut self.input_cursor) {
+            return true;
+        }
+        match self.history_idx {
+            None => false,
+            Some(0) => {
+                self.history_idx = None;
+                self.input = self.history_draft.take().unwrap_or_default();
+                self.input_cursor = self.input.len();
+                self.input_anchor = None;
+                true
+            }
+            Some(i) => {
+                self.history_idx = Some(i - 1);
+                self.input = self.prompt_history[i - 1].clone();
+                self.input_cursor = self.input.len();
+                self.input_anchor = None;
+                true
+            }
+        }
+    }
+
+    pub fn open_history_search(&mut self) {
+        self.completion = None;
+        self.history_search = Some(crate::history::Search::new(
+            &self.prompt_history,
+            self.input.clone(),
+            self.input_cursor,
+        ));
+    }
+
+    pub fn history_search_key(&mut self, k: ratatui::crossterm::event::KeyEvent) {
+        let Some(mut search) = self.history_search.take() else {
+            return;
+        };
+        match crate::history::key(&mut search, &self.prompt_history, k) {
+            crate::history::Outcome::Take(text) => {
+                self.input = text;
+                self.input_cursor = self.input.len();
+                self.input_anchor = None;
+                self.history_idx = None;
+                self.history_draft = None;
+            }
+            crate::history::Outcome::Cancel => {
+                self.input = search.draft;
+                self.input_cursor = search.draft_cursor.min(self.input.len());
+            }
+            crate::history::Outcome::None => self.history_search = Some(search),
+        }
+    }
+
+    /// Remember a sent prompt (slash commands included).
+    pub fn body_drag(&mut self, col: u16, row: u16) {
+        let Some(sel) = self.body_sel.as_mut() else {
+            return;
+        };
+        if let Some(off) = crate::select::offset_at(
+            &self.body_plain,
+            self.body_area,
+            col,
+            row,
+            self.body_wrap,
+            self.body_row_off,
+        ) {
+            sel.cursor = off;
+            // Scroll when dragging past the edge.
+            if row <= self.body_area.y {
+                self.scroll_up(1);
+            } else if row + 1 >= self.body_area.bottom() {
+                self.scroll_down(1);
+            }
+        }
+    }
+
+    pub fn body_mouse_up(&mut self) {
+        if let Some(sel) = &self.body_sel
+            && !sel.is_empty()
+        {
+            let t = crate::select::selected_text(&self.body_plain, sel);
+            if !t.is_empty() {
+                self.copy_text(t);
+            }
+        }
+    }
+
+    pub fn remember_prompt(&mut self, text: &str) {
+        if let Err(e) = self.store.push_prompt(text, crate::history::MAX) {
+            self.error(format!("Couldn't save prompt history: {e:#}"));
+            return;
+        }
+        self.reload_history();
     }
 
     /// What Ctrl-C / Ctrl-A look at (see [`crate::keyctx`]).
@@ -2027,7 +2186,7 @@ impl App {
                 .flatten()
                 .map(|(c, r)| self.pane_at(c, r))
                 .unwrap_or_default(),
-            body_selection: false,
+            body_selection: self.body_sel.as_ref().is_some_and(|s| !s.is_empty()),
             input_selection: self.input_selection().is_some(),
             input_has_text: !self.input.is_empty(),
             in_flight: self.is_typing(),
@@ -2048,8 +2207,14 @@ impl App {
             self.quit_armed = None;
         }
         match act {
-            // In-app chat selection arrives with 1.8.0.
-            CtrlC::CopyBodySelection => {}
+            CtrlC::CopyBodySelection => {
+                if let Some(sel) = &self.body_sel {
+                    let t = crate::select::selected_text(&self.body_plain, sel);
+                    if !t.is_empty() {
+                        self.copy_text(t);
+                    }
+                }
+            }
             CtrlC::CopyInputSelection => {
                 let (a, b) = self.input_selection().unwrap_or_default();
                 self.copy_text(self.input[a..b].to_string());
@@ -2112,8 +2277,15 @@ impl App {
     pub fn ctrl_a(&mut self) {
         match crate::keyctx::ctrl_a(&self.key_ctx(Instant::now())) {
             crate::keyctx::CtrlA::Input => self.input_select_all(),
-            // Selecting chat text in the app arrives with 1.8.0.
-            crate::keyctx::CtrlA::BodyMessage | crate::keyctx::CtrlA::None => {}
+            crate::keyctx::CtrlA::BodyMessage => {
+                if !self.body_plain.is_empty() {
+                    self.body_sel = Some(crate::select::Selection {
+                        anchor: 0,
+                        cursor: self.body_plain.len(),
+                    });
+                }
+            }
+            crate::keyctx::CtrlA::None => {}
         }
     }
 
@@ -2222,7 +2394,13 @@ impl App {
         self.input_cursor = 0;
         self.input_scroll = 0;
         self.input_anchor = None;
+        self.history_idx = None;
+        self.history_draft = None;
+        self.completion = None;
         let trimmed = line.trim().to_string();
+        if !trimmed.is_empty() && self.mode == InputMode::Normal {
+            self.remember_prompt(&trimmed);
+        }
         match self.mode {
             InputMode::GatewayUrl | InputMode::GatewayToken | InputMode::CursorToken
                 if trimmed.is_empty() =>
@@ -2334,6 +2512,24 @@ impl App {
 
     pub fn click(&mut self, col: u16, row: u16) {
         let at = ratatui::layout::Position::new(col, row);
+        if self.body_area.contains(at) && self.help.is_none() && self.shell.is_none() {
+            if let Some(off) = crate::select::offset_at(
+                &self.body_plain,
+                self.body_area,
+                col,
+                row,
+                self.body_wrap,
+                self.body_row_off,
+            ) {
+                self.body_sel = Some(crate::select::Selection {
+                    anchor: off,
+                    cursor: off,
+                });
+                return;
+            }
+        } else {
+            self.body_sel = None;
+        }
         if self.theme_switch_area.contains(at) {
             self.open_theme_picker();
             return;

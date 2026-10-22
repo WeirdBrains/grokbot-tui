@@ -3,12 +3,16 @@ mod api;
 mod app;
 mod appearance;
 mod commands;
+mod complete;
 mod config;
 mod datadir;
 mod help;
+mod history;
+mod fuzzy;
 mod input;
 mod keyctx;
 mod picker;
+mod select;
 mod storage;
 mod theme;
 mod theme_editor;
@@ -302,16 +306,18 @@ fn read_batch(first: Event, mut more: impl FnMut() -> Result<Option<Event>>) -> 
     Ok(v)
 }
 
-/// Drop pointer motion nobody needs: drags are unused, and of the moves only the last one
-/// matters (pick-list hover). Everything else keeps its order.
+/// Drop pointer motion nobody needs: of the moves and of the drags only the last one
+/// matters (pick-list hover / selection). Everything else keeps its order.
 fn coalesce(batch: Vec<Event>) -> Vec<Event> {
     let is_move = |e: &Event| matches!(e, Event::Mouse(m) if m.kind == MouseEventKind::Moved);
+    let is_drag = |e: &Event| matches!(e, Event::Mouse(m) if matches!(m.kind, MouseEventKind::Drag(_)));
     let last_move = batch.iter().rposition(is_move);
+    let last_drag = batch.iter().rposition(is_drag);
     batch
         .into_iter()
         .enumerate()
         .filter(|(i, e)| match e {
-            Event::Mouse(m) if matches!(m.kind, MouseEventKind::Drag(_)) => false,
+            e if is_drag(e) => Some(*i) == last_drag,
             e if is_move(e) => Some(*i) == last_move,
             _ => true,
         })
@@ -330,9 +336,22 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
     }
     match ev {
         Event::Mouse(m)
-            if (m.kind == MouseEventKind::Moved && app.picker.is_none())
-                || matches!(m.kind, MouseEventKind::Up(_) | MouseEventKind::Drag(_)) =>
+            if m.kind == MouseEventKind::Moved && app.picker.is_none() && app.body_sel.is_none() =>
         {
+            return false;
+        }
+        Event::Mouse(m) if matches!(m.kind, MouseEventKind::Drag(_)) && app.body_sel.is_some() => {
+            app.body_drag(m.column, m.row);
+            return true;
+        }
+        Event::Mouse(m) if matches!(m.kind, MouseEventKind::Drag(_)) => {
+            return false;
+        }
+        Event::Mouse(m) if matches!(m.kind, MouseEventKind::Up(_)) => {
+            if app.body_sel.as_ref().is_some_and(|s| !s.is_empty()) {
+                app.body_mouse_up();
+                return true;
+            }
             return false;
         }
         Event::Key(k) if k.kind == KeyEventKind::Press => {
@@ -376,6 +395,14 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
             if app.editor.is_some() {
                 app.editor_key(k);
+                return true;
+            }
+            if app.history_search.is_some() {
+                app.history_search_key(k);
+                return true;
+            }
+            if app.completion.is_some() {
+                crate::complete::key(app, k);
                 return true;
             }
             if k.code == KeyCode::F(6) {
@@ -457,7 +484,7 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 return true;
             }
             match k.code {
-                KeyCode::Tab => {
+                KeyCode::Tab if !(app.focus == Focus::Input && app.input.starts_with('/')) => {
                     app.focus = if app.focus == Focus::Input {
                         Focus::Sidebar
                     } else {
@@ -470,6 +497,9 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 KeyCode::PageUp => app.scroll_up(10),
                 KeyCode::PageDown => app.scroll_down(10),
                 KeyCode::Esc => {
+                    if app.body_sel.take().is_some() {
+                        return true;
+                    }
                     app.focus = Focus::Input;
                     app.cancel_input_mode();
                 }
@@ -513,7 +543,17 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                         _ => app.input_end(),
                     }
                 }
-                // Move between input lines; at the top/bottom line, scroll the chat.
+                // Lines first; at the first/last line, prompt history. PageUp/Down scroll the chat.
+                KeyCode::Up if app.focus == Focus::Input && app.mode == app::InputMode::Normal => {
+                    app.input_anchor = None;
+                    app.completion = None;
+                    let _ = app.history_up();
+                }
+                KeyCode::Down if app.focus == Focus::Input && app.mode == app::InputMode::Normal => {
+                    app.input_anchor = None;
+                    app.completion = None;
+                    let _ = app.history_down();
+                }
                 KeyCode::Up => {
                     app.input_anchor = None;
                     if !app.input_up() {
@@ -526,7 +566,26 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                         app.scroll_down(1)
                     }
                 }
-                KeyCode::Char(c) => app.input_insert(&c.to_string()),
+                KeyCode::Char('r')
+                    if k.modifiers.contains(KeyModifiers::CONTROL)
+                        && app.focus == Focus::Input
+                        && app.mode == app::InputMode::Normal
+                        && app.editor.is_none() =>
+                {
+                    app.open_history_search();
+                }
+                KeyCode::Tab if app.focus == Focus::Input && app.input.starts_with('/') => {
+                    crate::complete::tab(app, false);
+                }
+                KeyCode::BackTab if app.focus == Focus::Input && app.completion.is_some() => {
+                    crate::complete::tab(app, true);
+                }
+                KeyCode::Char(c) => {
+                    app.input_insert(&c.to_string());
+                    if app.completion.is_some() {
+                        crate::complete::refilter(app);
+                    }
+                }
                 _ => {}
             }
         }
@@ -830,13 +889,14 @@ mod event_batch_tests {
     }
 
     #[test]
-    fn coalesce_keeps_only_the_last_move_and_drops_drags() {
+    fn coalesce_keeps_only_the_last_move_and_the_last_drag() {
         let batch = vec![
             mouse(MouseEventKind::Moved, 1, 1),
             mouse(MouseEventKind::Drag(MouseButton::Left), 2, 2),
             Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
             mouse(MouseEventKind::Moved, 3, 3),
             mouse(MouseEventKind::Down(MouseButton::Left), 4, 4),
+            mouse(MouseEventKind::Drag(MouseButton::Left), 4, 5),
             mouse(MouseEventKind::Moved, 5, 5),
         ];
         let out = coalesce(batch);
@@ -845,6 +905,7 @@ mod event_batch_tests {
             vec![
                 Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
                 mouse(MouseEventKind::Down(MouseButton::Left), 4, 4),
+                mouse(MouseEventKind::Drag(MouseButton::Left), 4, 5),
                 mouse(MouseEventKind::Moved, 5, 5),
             ]
         );

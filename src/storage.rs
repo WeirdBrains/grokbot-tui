@@ -169,7 +169,15 @@ const V6: &str = "UPDATE messages SET ord = (SELECT COALESCE(MAX(m.ord), 0) FROM
         WHERE account_id = NEW.account_id AND bot_id = NEW.bot_id AND id != NEW.id)
       WHERE id = NEW.id;
     END;";
-const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6];
+/// v6 -> v7: per-account prompt history for Up/Down and Ctrl-R.
+const V7: &str = "CREATE TABLE prompt_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        text TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX prompt_history_account ON prompt_history(account_id, id DESC);";
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginMethod {
@@ -860,6 +868,43 @@ impl Store {
             )?,
         })
     }
+
+    /// Newest-first prompt history for the active account (capped).
+    pub fn prompt_history(&self, limit: usize) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT text FROM prompt_history WHERE account_id = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![self.account.id, limit as i64], |r| r.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Append a prompt, skipping an exact duplicate of the previous entry. Trims to `max` rows.
+    pub fn push_prompt(&self, text: &str, max: usize) -> Result<()> {
+        let text = text.trim_end();
+        if text.is_empty() {
+            return Ok(());
+        }
+        let last: Option<String> = self.conn.query_row(
+            "SELECT text FROM prompt_history WHERE account_id = ?1 ORDER BY id DESC LIMIT 1",
+            params![self.account.id],
+            |r| r.get(0),
+        ).optional()?;
+        if last.as_deref() == Some(text) {
+            return Ok(());
+        }
+        self.conn.execute(
+            "INSERT INTO prompt_history(account_id, text) VALUES (?1, ?2)",
+            params![self.account.id, text],
+        )?;
+        self.conn.execute(
+            "DELETE FROM prompt_history WHERE account_id = ?1 AND id NOT IN (
+                SELECT id FROM prompt_history WHERE account_id = ?1 ORDER BY id DESC LIMIT ?2
+            )",
+            params![self.account.id, max as i64],
+        )?;
+        Ok(())
+    }
+
 }
 
 fn user_version(conn: &Connection) -> Result<usize> {

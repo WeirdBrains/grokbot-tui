@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-21
+
+### Added
+- **Shipped themes** in `themes/`: Dracula (+ Alucard light), Nord, Gruvbox, Solarized,
+  Catppuccin (Mocha/Latte), Tokyo Night/Day, One Dark/Light, Rosé Pine/Dawn. First-run and
+  `/theme init all` fetch every shipped theme; `default` stays selected on first run.
+- **Prompt history** (Up/Down from the first/last input line; per-account in `context.db`,
+  deduped, capped at 500). Draft is restored when browsing back. Slash commands are stored.
+- **Ctrl-R** fuzzy history search (Ctrl-S reverse; Esc / Ctrl-G restore the draft). Shares
+  the fuzzy matcher with Tab completion. Ctrl-R in the theme editor still reverts all.
+- **`/switch [alias]`** — bare opens the account picker; an argument matches by exact name,
+  unique prefix, or unique fuzzy hit.
+- **Tab completion** for slash commands and arguments (Shift-Tab cycles; Esc restores).
+  Theme editor / picker Tab behaviour is unchanged.
+- **In-app chat selection**: drag to select (button-event drag kept; moves still coalesce),
+  copy on mouse-up via OSC 52, Esc clears, Ctrl-A selects the whole feed when the chat has
+  focus. New theme part `selection` (starter falls back to the selected style) so existing
+  themes keep working. F6 / `/mouse` persists as `ui.mouse_capture`.
+- **`install.sh`** and README troubleshooting for `command not found` / zsh `rehash`.
+
+### Changed
+- Shared `fuzzy` matcher ranks Tab completion, Ctrl-R, and `/switch`.
+- Mouse coalesce keeps the last drag (for selection) instead of dropping every drag.
+
 ## [1.7.2] - 2026-10-21
 
 ### Fixed

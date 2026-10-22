@@ -322,6 +322,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let cursor = draw_main(f, app);
     if app.picker.is_some() {
         draw_picker(f, app);
+    } else if let Some(s) = app.history_search.as_mut() {
+        crate::history::draw(f, s, &app.prompt_history, f.area());
+    } else if app.completion.is_some() {
+        crate::complete::draw(f, app);
     } else if app.shell.is_some() {
         draw_shell(f, app);
     } else if app.help.is_some() {
@@ -439,12 +443,31 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     let scroll = app.scroll.min(max_off);
     let off = max_off - scroll;
     // Only the lines that reach into the viewport are rendered.
-    let (lines, skip) = visible_lines(
+    let (mut lines, skip) = visible_lines(
         cache.lines.iter().chain(&extra),
         cache.rows.iter().chain(&extra_rows).copied(),
         off as usize,
         inner_h as usize,
     );
+    app.body_plain = crate::select::plain_text(app.feed());
+    app.body_wrap = bubble;
+    app.body_row_off = off as usize;
+    if let Some(sel) = &app.body_sel
+        && !sel.is_empty()
+    {
+        // Restyle visible lines while a selection is active (theme `selection` / selected).
+        lines = lines
+            .into_iter()
+            .map(|l| {
+                Line::from(
+                    l.spans
+                        .into_iter()
+                        .map(|sp| theme::selected().span(sp.content.to_string()))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+    }
     let title = match &bot_name {
         Some(n) if app.is_typing() => {
             const SPIN: [char; 4] = ['⠋', '⠙', '⠹', '⠸'];

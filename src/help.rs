@@ -177,21 +177,24 @@ Anywhere
   Shift-F5                     Theme editor (same as /theme edit; some terminals send F17)
   F6                           Mouse capture on/off (same as /mouse)
   Ctrl-C / Ctrl-Shift-C        Context-aware (see below). Ctrl-Shift-C never quits.
-  Ctrl-A                       Select all of the input (chat selection arrives in 1.8.0)
+  Ctrl-A                       Select all of the input (or the chat, when it has focus)
   Ctrl-Z                       Restore the input a Ctrl-C cleared
   Ctrl-D                       Delete forward; on an empty input like Ctrl-C
   Ctrl-Q                       Quit at once (also /quit)
   Shift+←/→/Home/End           Select text in the input
 
-Ctrl-C / Ctrl-Shift-C, in order: (1) a selection in the input (or the chat, 1.8.0) is
+Ctrl-C / Ctrl-Shift-C, in order: (1) a selection in the input or the chat is
 copied; (2) a pending reply is cancelled when the input or chat has focus; (3) text in
 the focused input: Ctrl-C clears it (Ctrl-Z brings it back), Ctrl-Shift-C copies it;
 (4) an open overlay closes like Esc; (5) over the chat with nothing selected: a hint;
 (6) otherwise 'press again to quit' — a second Ctrl-C within 1.5 s with nothing done
 in between quits.
-  Tab                          Switch focus between input and sidebar
-  PgUp / PgDn, mouse wheel     Scroll the chat
-  Esc                          Cancel a prompt (login, confirm) / return focus to input
+  Tab                          After `/`: fuzzy-complete a command or argument (Shift-Tab cycles).
+                               Otherwise switch focus between input and sidebar
+  Ctrl-R                       Fuzzy search prompt history (Ctrl-S reverse; Esc keeps the draft)
+  PgUp / PgDn, mouse wheel     Scroll the chat (not the prompt history)
+  Esc                          Clear an in-app selection; cancel a prompt; return focus to input
+  /switch [alias]              Switch account (bare opens the picker)
 
 Input focused (multi-line)
   Enter                     Send message or run /command
@@ -204,7 +207,7 @@ Input focused (multi-line)
                             `set -s extended-keys-format csi-u` (tmux 3.5+), and use an
                             outer terminal that sends Shift-Enter distinctly.
   ← → / Home End            Move the cursor / to the start or end of the line
-  ↑ / ↓                     Previous / next line; on the first / last line, scroll the chat
+  ↑ / ↓                     Previous / next line; on the first / last line, prompt history
   Backspace / Delete        Delete before / at the cursor
   Long lines wrap; the box grows up to 10 rows, then scrolls to keep the cursor
   visible (row/total shown bottom-right). Pasted text keeps its line breaks.
@@ -218,15 +221,13 @@ Mouse
   The header shows 'mouse: on/OFF'.
 
 Selecting and copying text
-  grokbot-tui captures the mouse, so plain drag doesn't select. Options:
-  • Hold Shift while dragging: most terminals (GNOME Console/Terminal, Konsole,
-    kitty, Alacritty, WezTerm, xterm) select natively even with capture on.
-    In tmux, Shift-drag works too; or turn capture off and use copy-mode.
-  • F6 or /mouse off: release the mouse, then select/copy with the terminal as usual.
-    While off, clicking bots, the pick-list mouse and wheel scrolling don't work
-    (keyboard still does). F6 or /mouse on to get them back.
-  • /copy: copy the last bot message to the system clipboard via OSC 52 (needs
-    terminal support; tmux needs `set -g set-clipboard on`).
+  With mouse capture on (default; F6 / /mouse; persisted as ui.mouse_capture):
+  • Drag in the chat to select. The selection is copied on mouse-up (OSC 52).
+    Esc clears it. Ctrl-C / Ctrl-Shift-C copy a selection; Ctrl-A selects the whole feed
+    when the chat has focus.
+  • Hold Shift (or Option) while dragging to use the terminal's own selection instead.
+  • F6 or /mouse off: release the mouse for terminal selection (clicks/wheel go off).
+  • /copy: copy the last bot message via OSC 52 (tmux: `set -g set-clipboard on`).
 
 In a pick list (F2, F3, F5, /bot, /account use)
   ↑ ↓ / j k, PgUp PgDn, Home End  Move      Enter  Pick      Esc / q  Cancel

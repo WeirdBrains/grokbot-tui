@@ -47,6 +47,8 @@ pub const PREF_THEME: &str = "ui.theme";
 /// Pref key: may grokbot-tui download the shipped default theme from GitHub when the themes
 /// folder is empty (`true`/`false`, global). `GROKBOT_TUI_NO_THEME_DOWNLOAD=1` also turns it off.
 pub const PREF_THEME_DOWNLOAD: &str = "ui.theme_download";
+/// Capture the mouse for clicks/wheel (`true`) or leave it to the terminal (`false`).
+pub const PREF_MOUSE_CAPTURE: &str = "ui.mouse_capture";
 
 /// Pref key for the big header title's glyphs: `auto`, `quadrant` or `half` (global).
 pub const PREF_TITLE_GLYPHS: &str = "ui.title_glyphs";
@@ -59,6 +61,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_TITLE_GLYPHS,
     PREF_THEME,
     PREF_THEME_DOWNLOAD,
+    PREF_MOUSE_CAPTURE,
 ];
 
 /// Which block glyphs draw the big header title (pref `ui.title_glyphs`).
@@ -131,6 +134,8 @@ pub struct Config {
     pub theme: String,
     /// Allow downloading the shipped default theme (see `PREF_THEME_DOWNLOAD`).
     pub theme_download: bool,
+    /// Capture the mouse for the TUI (F6 / `/mouse`).
+    pub mouse_capture: bool,
 }
 
 impl Default for Config {
@@ -147,6 +152,7 @@ impl Default for Config {
             title_glyphs: TitleGlyphs::Auto,
             theme: crate::themes::DEFAULT_ID.to_string(),
             theme_download: true,
+            mouse_capture: true,
         }
     }
 }
@@ -166,6 +172,7 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_TITLE_GLYPHS, c.title_glyphs.as_str().to_string()),
         (PREF_THEME, c.theme.clone()),
         (PREF_THEME_DOWNLOAD, c.theme_download.to_string()),
+        (PREF_MOUSE_CAPTURE, c.mouse_capture.to_string()),
     ]
 }
 
@@ -198,6 +205,9 @@ impl Config {
             theme_download: o(PREF_THEME_DOWNLOAD)
                 .map(|v| !matches!(v.trim(), "false" | "0" | "no" | "off"))
                 .unwrap_or(d.theme_download),
+            mouse_capture: o(PREF_MOUSE_CAPTURE)
+                .map(|v| !matches!(v.trim(), "false" | "0" | "no" | "off"))
+                .unwrap_or(d.mouse_capture),
         }
     }
 }

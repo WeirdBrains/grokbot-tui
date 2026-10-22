@@ -207,6 +207,7 @@ style_slots! {
     MOCK_TAG = "mock_tag", "Screen and header", false, "[MOCK] tag";
     SELECTED = "selected", "Sidebar and lists", false, "Active bot / picked list row";
     CURSOR_ROW = "cursor_row", "Sidebar and lists", false, "Sidebar cursor while the sidebar has focus";
+    SELECTION = "selection", "Chat", false, "In-app selected text in the chat body";
     PANEL_FOCUSED = "panel_focused", "Sidebar and lists", true, "Focused box (sidebar, input)";
     PANEL_UNFOCUSED = "panel_unfocused", "Sidebar and lists", true, "Unfocused box";
     CHAT_PANEL = "chat_panel", "Chat", true, "The chat box";
@@ -330,7 +331,7 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
             bg: Some(r(c::HEADER)),
             ..fg(c::TEXT)
         },
-        s::BRAND | s::MODE_ACTIVE | s::SELECTED => bold(reverse),
+        s::BRAND | s::MODE_ACTIVE | s::SELECTED | s::SELECTION => bold(reverse),
         s::CURSOR_ROW | s::MOUSE_OFF | s::LINK_SELECTED => reverse,
         // Not bold: some terminals draw bold block glyphs from another font.
         s::TITLE => fg(c::ACCENT),
@@ -764,7 +765,7 @@ mod tests {
         };
         match key {
             "base" => fgbg(text, background),
-            "brand" | "mode_active" | "selected" => bold(fgbg(on_accent, accent)),
+            "brand" | "mode_active" | "selected" | "selection" => bold(fgbg(on_accent, accent)),
             "top_bar" => fgbg(text, header),
             "title" => fg(accent),
             "header_label" | "mode_inactive" | "mouse_on" | "entry_system" => fg(subtle),
@@ -834,6 +835,7 @@ mod tests {
         assert_eq!(STYLE_SLOTS[slot::BASE].key, "base");
         assert_eq!(STYLE_SLOTS[slot::THEME_SWITCH].key, "theme_switch");
         assert_eq!(STYLE_SLOTS[slot::LINK_UNSELECTED].key, "link_unselected");
+        assert_eq!(STYLE_SLOTS[slot::SELECTION].key, "selection");
         assert_eq!(slot::LINK_UNSELECTED, N_STYLES - 1);
         assert_eq!(COLOR_SLOTS[color::LOGO_LIGHT], "logo_light");
         let mut keys: Vec<&str> = STYLE_SLOTS.iter().map(|s| s.key).collect();

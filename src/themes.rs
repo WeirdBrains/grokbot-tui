@@ -45,8 +45,20 @@ pub const DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 /// Env var overriding where themes are downloaded from: a URL base that `<name>.toml` is
 /// appended to (e.g. a local mock server in tests, or a fork).
 pub const URL_ENV: &str = "GROKBOT_TUI_THEME_URL";
-/// The themes in the repo's `themes/` folder (`/theme init all` downloads these).
-pub const SHIPPED: &[&str] = &["default"];
+/// The themes in the repo's `themes/` folder. First-run and `/theme init all` download
+/// every one of these from the release tag (`themes/<name>.toml`). `default` stays the
+/// selected theme on first run.
+pub const SHIPPED: &[&str] = &[
+    "default",
+    "dracula",
+    "nord",
+    "gruvbox",
+    "solarized",
+    "catppuccin",
+    "tokyo-night",
+    "one",
+    "rose-pine",
+];
 /// How long `--list-themes` / `--theme` wait for the first-run download.
 pub const CLI_DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
@@ -858,23 +870,33 @@ pub fn first_run_download(
     let Some(base) = base else {
         return FirstRun::Off;
     };
-    let url = theme_url(base, DEFAULT_ID);
-    let got = tokio::runtime::Builder::new_current_thread()
+    let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|e| e.to_string())
-        .and_then(|rt| rt.block_on(download_within(&url, timeout)));
-    match got {
-        Ok(text) => match write_new(dir, DEFAULT_ID, &text) {
-            Ok(p) => FirstRun::Downloaded(p),
-            Err(e) => FirstRun::Failed(format!(
-                "couldn't write {}: {e}",
-                path(dir, DEFAULT_ID).display()
-            )),
-        },
-        Err(e) => FirstRun::Failed(format!("couldn't download {url}: {e}")),
+    {
+        Ok(r) => r,
+        Err(e) => return FirstRun::Failed(e.to_string()),
+    };
+    let mut last_ok = None;
+    let mut last_err = None;
+    for name in SHIPPED {
+        let url = theme_url(base, name);
+        match rt.block_on(download_within(&url, timeout)) {
+            Ok(text) => match write_new(dir, name, &text) {
+                Ok(p) => last_ok = Some(p),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => last_err = Some(format!("couldn't write {}: {e}", path(dir, name).display())),
+            },
+            Err(e) => last_err = Some(format!("couldn't download {url}: {e}")),
+        }
+    }
+    match (last_ok, last_err) {
+        (Some(p), _) => FirstRun::Downloaded(p),
+        (None, Some(e)) => FirstRun::Failed(e),
+        (None, None) => FirstRun::NotNeeded,
     }
 }
+
 
 /// `YYYYmmdd-HHMMSSZ` in UTC (no date crate needed).
 pub fn utc_stamp(t: std::time::SystemTime) -> String {
@@ -1091,16 +1113,50 @@ mod tests {
     }
 
     #[test]
+    fn every_shipped_theme_parses_has_both_variants_and_passes_contrast() {
+        for name in SHIPPED {
+            let text = std::fs::read_to_string(repo_dir().join(format!("{name}.toml"))).unwrap();
+            let (t, w) = parse(name, &text).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(w.is_empty(), "{name}: warnings {w:?}");
+            assert_eq!(t.id, *name);
+            assert!(!t.name.is_empty());
+            for (label, v) in [("dark", &t.dark), ("light", &t.light)] {
+                let (fg, bg) = (v.colors[crate::theme::color::TEXT], v.colors[crate::theme::color::BACKGROUND]);
+                let r = contrast(fg, bg).unwrap_or(0.0);
+                assert!(
+                    r >= 3.0,
+                    "{name} {label}: text on background is {r:.2}:1 (need ≥ 3:1)"
+                );
+                let dark = rgb_of(v.colors[crate::theme::color::LOGO_DARK]).unwrap_or((128, 128, 128));
+                let light = rgb_of(v.colors[crate::theme::color::LOGO_LIGHT]).unwrap_or((128, 128, 128));
+                assert!(
+                    dark.0.max(dark.1).max(dark.2) < 80,
+                    "{name} {label}: logo_dark {dark:?} should be near-black"
+                );
+                assert!(
+                    light.0 as u32 + light.1 as u32 + light.2 as u32 > 600,
+                    "{name} {label}: logo_light {light:?} should be near-white"
+                );
+            }
+        }
+        assert!(SHIPPED.contains(&DEFAULT_ID));
+        assert_eq!(SHIPPED.len(), list(&repo_dir()).len());
+    }
+
+    #[test]
     fn first_run_download_fetches_the_default_into_an_empty_folder() {
         use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path as at};
         let rt = tokio::runtime::Runtime::new().unwrap();
         let body = std::fs::read_to_string(repo_dir().join("default.toml")).unwrap();
         let srv = rt.block_on(async {
             let srv = MockServer::start().await;
-            Mock::given(at("/t/default.toml"))
-                .respond_with(ResponseTemplate::new(200).set_body_string(body.clone()))
-                .mount(&srv)
-                .await;
+            for name in SHIPPED {
+                let b = std::fs::read_to_string(repo_dir().join(format!("{name}.toml"))).unwrap();
+                Mock::given(at(format!("/t/{name}.toml")))
+                    .respond_with(ResponseTemplate::new(200).set_body_string(b))
+                    .mount(&srv)
+                    .await;
+            }
             Mock::given(at("/slow/default.toml"))
                 .respond_with(
                     ResponseTemplate::new(200)
@@ -1126,10 +1182,15 @@ mod tests {
         else {
             panic!()
         };
-        assert!(e.contains("timed out"), "{e}");
+        assert!(
+            e.contains("timed out") || e.contains("404"),
+            "empty folder + unreachable themes: {e}"
+        );
         assert!(list(&dir).is_empty());
         let got = first_run_download(&dir, Some(&format!("{}/t", srv.uri())), quick);
-        assert_eq!(got, FirstRun::Downloaded(path(&dir, DEFAULT_ID)));
+        assert!(matches!(got, FirstRun::Downloaded(_)), "{got:?}");
+        assert_eq!(list(&dir).len(), SHIPPED.len());
+        for n in SHIPPED { assert!(list(&dir).iter().any(|h| h == n), "{n}"); }
         assert_eq!(
             std::fs::read_to_string(path(&dir, DEFAULT_ID)).unwrap(),
             body

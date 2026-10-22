@@ -3110,10 +3110,18 @@ mod tests {
         use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
         rt.block_on(async {
             let srv = MockServer::start().await;
-            Mock::given(path("/default.toml"))
-                .respond_with(ResponseTemplate::new(status).set_body_string(body.to_string()))
-                .mount(&srv)
-                .await;
+            for name in themes::SHIPPED {
+                let b = if *name == "default" {
+                    body.to_string()
+                } else {
+                    std::fs::read_to_string(crate::app::tests::repo_themes().join(format!("{name}.toml")))
+                        .unwrap_or_else(|_| body.to_string())
+                };
+                Mock::given(path(format!("/{name}.toml")))
+                    .respond_with(ResponseTemplate::new(status).set_body_string(b))
+                    .mount(&srv)
+                    .await;
+            }
             srv
         })
     }
@@ -3200,14 +3208,19 @@ mod tests {
             std::fs::read_to_string(themes::path(&dir, "default")).unwrap(),
             shipped()
         );
-        // `all` = every shipped theme; existing files are kept without downloading.
+        // `all` = every shipped theme; existing files are kept, the rest download.
+        type_line(&mut app, "/theme init all");
+        assert!(notices(&app).contains("default.toml already exists; it was kept"));
+        app.wait_idle(std::time::Duration::from_secs(30));
+        let have = themes::list(&dir);
+        assert_eq!(have.len(), themes::SHIPPED.len(), "{have:?}");
+        for n in themes::SHIPPED {
+            assert!(have.iter().any(|h| h == n), "missing {n} in {have:?}");
+        }
+        // A second `all` keeps every file.
         type_line(&mut app, "/theme init all");
         assert!(!app.theme_downloading);
-        assert!(notices(&app).contains("default.toml already exists; it was kept"));
-        std::fs::remove_file(themes::path(&dir, "default")).unwrap();
-        type_line(&mut app, "/theme init all");
-        app.wait_idle(std::time::Duration::from_secs(10));
-        assert_eq!(themes::list(&dir), themes::SHIPPED);
+        assert!(notices(&app).contains("already exists; it was kept"));
         // A name is that theme's file in the release, not the default renamed.
         type_line(&mut app, "/theme init mine");
         app.wait_idle(std::time::Duration::from_secs(10));
@@ -3219,7 +3232,7 @@ mod tests {
             )),
             "{n}"
         );
-        assert!(n.contains("Shipped themes: default"), "{n}");
+        assert!(n.contains("Shipped themes:"), "{n}");
         // Downloads off: the starter is written instead.
         app.theme_download_base = None;
         type_line(&mut app, "/theme init other");
@@ -3333,7 +3346,7 @@ mod tests {
             .collect();
         // Only parts that depend on the app's state: the compact header, mouse capture off,
         // the sidebar focused.
-        assert_eq!(hidden, ["brand", "mouse_off", "cursor_row"]);
+        assert_eq!(hidden, ["brand", "mouse_off", "cursor_row", "selection"]);
     }
 
     #[test]
