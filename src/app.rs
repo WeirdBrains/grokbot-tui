@@ -464,6 +464,18 @@ pub struct App {
     pub body_inner_h: u16,
     /// Clickable "↓ N new" badge area (set by the renderer).
     pub unread_area: Rect,
+    /// Local notification toasts + settings (1.10.0).
+    pub notices_board: crate::notify::NoticeBoard,
+    /// Rules deciding toast / mute / drop.
+    pub notify_rules: crate::notify_rules::Ruleset,
+    /// Top menu bar.
+    pub menu: crate::menubar::MenuBar,
+    /// Hover tooltips.
+    pub tooltip: crate::tooltip::TooltipState,
+    /// Kitty-style keyboard enhancement is active.
+    pub keyboard_enhancement: bool,
+    /// One-time Apple Terminal newline hint already shown this process.
+    pub apple_newline_hinted: bool,
     pub sidebar_area: Rect,
     /// The account switcher in the header (click opens the account picker).
     pub account_area: Rect,
@@ -652,6 +664,12 @@ impl App {
             body_rows: 0,
             body_inner_h: 0,
             unread_area: Rect::default(),
+            notices_board: crate::notify::NoticeBoard::new(),
+            notify_rules: crate::notify_rules::Ruleset::default(),
+            menu: crate::menubar::MenuBar::default(),
+            tooltip: crate::tooltip::TooltipState::default(),
+            keyboard_enhancement: false,
+            apple_newline_hinted: false,
             sidebar_area: Rect::default(),
             account_area: Rect::default(),
             theme_areas: Vec::new(),
@@ -742,6 +760,7 @@ impl App {
 
     /// Called every UI loop iteration: apply results and poll the active bot when due.
     pub fn tick(&mut self) {
+        self.notices_board.tick(std::time::Instant::now());
         self.pump();
         let now = Instant::now();
         if let Some((at, _)) = self.login_retry
@@ -1312,6 +1331,14 @@ impl App {
             "Welcome to grokbot-tui{}. Type /help for commands.",
             if self.mock { " (mock mode)" } else { "" }
         ));
+        {
+            let path = crate::notify_rules::user_path(&self.store.dir);
+            let (rs, err) = crate::notify_rules::Ruleset::load(&path, None);
+            self.notify_rules = rs;
+            if let Some(e) = err {
+                self.error(format!("Notify rules: {e} (kept defaults)."));
+            }
+        }
         if self.config.keys == crate::config::KeysScheme::Vim {
             self.vim_mode = crate::keymap::Mode::Insert;
             self.info("Keys: vim (ui.keys=vim). Esc → NORMAL, i → INSERT, : → command. /keymap".into());
@@ -1974,10 +2001,67 @@ impl App {
         self.push_to(&k, Entry { kind, text });
     }
     pub fn info(&mut self, t: String) {
+        self.raise_notice(crate::notify::NoticeKind::Info, "Info", t.clone());
         self.push(EntryKind::System, t);
     }
     pub fn error(&mut self, t: String) {
+        self.raise_notice(crate::notify::NoticeKind::Error, "Error", t.clone());
         self.push(EntryKind::Error, t);
+    }
+
+    /// Apply notify-rules then maybe toast. Never changes chat scroll (1.9.1).
+    pub fn raise_notice(
+        &mut self,
+        kind: crate::notify::NoticeKind,
+        title: impl Into<String>,
+        body: impl Into<String>,
+    ) {
+        let title = title.into();
+        let body = body.into();
+        match self.notify_rules.decide(kind, &title, &body) {
+            crate::notify_rules::Action::Drop => {}
+            crate::notify_rules::Action::Mute => {
+                self.notices_board.log.push_front(crate::notify::Notice::new(kind, title, body));
+            }
+            crate::notify_rules::Action::Toast => {
+                // Temporarily honour mute-via-settings by posting through the board.
+                self.notices_board
+                    .post(crate::notify::Notice::new(kind, title, body), std::time::Instant::now());
+            }
+        }
+    }
+
+    pub fn maybe_apple_terminal_hint(&mut self) {
+        if self.apple_newline_hinted {
+            return;
+        }
+        let term = std::env::var("TERM_PROGRAM").ok();
+        if crate::keys::apple_terminal_needs_hint(
+            self.keyboard_enhancement,
+            term.as_deref(),
+        ) {
+            self.apple_newline_hinted = true;
+            self.info(crate::keys::APPLE_TERMINAL_HINT.into());
+        }
+    }
+
+    pub fn reload_notify_rules(&mut self) {
+        let path = crate::notify_rules::user_path(&self.store.dir);
+        let (rs, err) = crate::notify_rules::Ruleset::load(&path, Some(&self.notify_rules));
+        self.notify_rules = rs;
+        if let Some(e) = err {
+            self.error(format!("Notify rules reload failed: {e}"));
+        } else {
+            self.info(format!("Notify rules reloaded from {}.", path.display()));
+        }
+    }
+
+    /// Run a menu-selected slash command by name.
+    pub fn run_menu_command(&mut self, name: &str) {
+        self.menu.close();
+        self.input = format!("/{name}");
+        self.input_cursor = self.input.len();
+        self.submit();
     }
 
     // ------------------------------------------------------------ input
@@ -2078,6 +2162,7 @@ impl App {
             || self.shell.is_some()
             || self.history_search.is_some()
             || self.completion.is_some()
+            || self.menu.open.is_some()
     }
 
     /// Load prompt history for the active account.
@@ -2414,6 +2499,10 @@ impl App {
             }
             "keymap.reload" => {
                 self.reload_keymap();
+                true
+            }
+            "input.newline" => {
+                self.input_newline();
                 true
             }
             "input.paste" => true, // terminal paste still works via bracketed paste
@@ -2921,6 +3010,8 @@ pub mod tests {
                 message: "no lister in tests".into(),
             })
         });
+        // Keep toast overlays off so layout/snapshot tests stay stable.
+        app.notices_board.settings.dnd = true;
         (app, d)
     }
 

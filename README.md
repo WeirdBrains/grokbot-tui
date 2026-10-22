@@ -73,7 +73,19 @@ the input, close an overlay, or ask before quitting; `Ctrl-Shift-C` never quits)
 `F1` help · `F2` pick a bot · `F3` pick an account · `F4` cycle dark/light/system · `F5` pick a theme ·
 `Shift-F5` theme editor · `F6` mouse capture on/off.
 
-### Vim-like keys (opt-in)
+### Newlines in the prompt
+
+Prefer **Ctrl-J** for a newline (works in every terminal). Shift/Alt/Ctrl-Enter work when
+the terminal reports modifiers. A trailing `\` then Enter also inserts a newline.
+**macOS Terminal.app** sends plain Enter for Shift/Ctrl-Enter; enable “Use Option as Meta
+key” for Option-Enter, or use Ctrl-J / `\`+Enter.
+
+## Notifications, menu bar, tooltips
+
+Toasts honour `~/.grokbot-tui/notify-rules.toml` and `/notify` (dnd / per-kind). They never
+jump the chat scroll. **F10** opens the menu bar. Hover shows a short tooltip after a delay.
+
+## Vim-like keys (opt-in)
 
 `/keymap vim` (or pref `ui.keys=vim`) enables NORMAL / INSERT / COMMAND / VISUAL modes
 with a mode badge on the input. Bindings live in `~/.grokbot-tui/keymap.toml`

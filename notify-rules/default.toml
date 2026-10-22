@@ -1,0 +1,15 @@
+# grokbot-tui notification rules (~/.grokbot-tui/notify-rules.toml).
+# First matching enabled rule wins. Actions: toast | mute | drop.
+# Reload with /notify reload.
+
+[[rule]]
+name = "mute heartbeats"
+priority = 10
+keyword = "heartbeat"
+action = "mute"
+
+[[rule]]
+name = "errors always toast"
+priority = 20
+kind = "error"
+action = "toast"

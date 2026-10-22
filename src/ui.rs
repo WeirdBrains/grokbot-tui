@@ -330,8 +330,56 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_shell(f, app);
     } else if app.help.is_some() {
         draw_help(f, app);
-    } else if let Some(c) = cursor {
+    }
+    // Menu dropdown above the chat; toasts and tooltips on top.
+    if app.menu.open.is_some() {
+        crate::menubar::draw_dropdown(f, &mut app.menu, &app.registry, f.area());
+    }
+    draw_toasts(f, app);
+    if let Some(tip) = app.tooltip.tip.clone() {
+        crate::tooltip::paint(f, &tip, app.tooltip.tip_at, f.area());
+    }
+    if app.picker.is_none()
+        && app.history_search.is_none()
+        && app.completion.is_none()
+        && app.shell.is_none()
+        && app.help.is_none()
+        && app.menu.open.is_none()
+        && let Some(c) = cursor
+    {
         f.set_cursor_position(c);
+    }
+}
+
+fn draw_toasts(f: &mut Frame, app: &mut App) {
+    use crate::theme;
+    let area = f.area();
+    let n = app.notices_board.toast_window(area.height);
+    if n == 0 {
+        return;
+    }
+    let toasts: Vec<_> = app.notices_board.toasts.iter().rev().take(n).cloned().collect();
+    let mut y = area.y + 1;
+    for t in toasts {
+        let w = area.width.saturating_sub(4).clamp(20, 56);
+        let x = area.x + area.width.saturating_sub(w + 1);
+        let r = Rect {
+            x,
+            y,
+            width: w,
+            height: 2,
+        };
+        if r.y + r.height > area.bottom() {
+            break;
+        }
+        f.render_widget(Clear, r);
+        let block = theme::block(&theme::toast(t.notice.kind))
+            .title(format!(" {} ", t.notice.title));
+        let inner = block.inner(r);
+        f.render_widget(block, r);
+        let body: String = t.notice.body.chars().take(inner.width as usize).collect();
+        f.render_widget(Paragraph::new(theme::toast(t.notice.kind).span(body)), inner);
+        y = y.saturating_add(3);
     }
 }
 
@@ -346,8 +394,9 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     let vis = crate::input::visible_rows(il.rows.len());
     app.input_scroll = crate::input::scroll_for(app.input_scroll, il.cursor.0, il.rows.len(), vis);
     let header = header_kind(f.area());
-    let [top, mid, bottom] = Layout::vertical([
+    let [top, menu_row, mid, bottom] = Layout::vertical([
         Constraint::Length(header.rows()),
+        Constraint::Length(1),
         Constraint::Min(3),
         Constraint::Length(vis as u16 + 2),
     ])
@@ -359,6 +408,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     .areas(mid);
 
     draw_header(f, app, top, header);
+    crate::menubar::draw(f, &mut app.menu, menu_row);
 
     // Sidebar: the bot list (the account switcher is in the header).
     app.sidebar_area = side;
@@ -957,7 +1007,7 @@ mod tests {
         assert!(text.contains("Coder"));
         assert_eq!(app.sidebar_area.width, 24);
         // The sidebar no longer has an account header: it starts right under the bar.
-        assert_eq!(app.sidebar_area.y, 1);
+        assert_eq!(app.sidebar_area.y, 2); // compact header + menu
         assert_eq!(app.account_area.y, 0);
         assert_eq!(app.theme_areas.len(), 3);
     }
@@ -1119,7 +1169,7 @@ mod tests {
         );
         assert!(r[3].contains("mouse: on (F6)"), "{header}");
         // The sidebar starts under the 4-row header and the account switcher is clickable.
-        assert_eq!(app.sidebar_area.y, 4);
+        assert_eq!(app.sidebar_area.y, 5); // tall header + menu
         assert_eq!(app.account_area.y, 0);
         let modes: Vec<Mode> = app.theme_areas.iter().map(|(_, m)| *m).collect();
         assert_eq!(modes, Mode::ALL);

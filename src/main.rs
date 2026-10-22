@@ -11,7 +11,12 @@ mod history;
 mod fuzzy;
 mod input;
 mod keyctx;
+mod keys;
 mod keymap;
+mod tooltip;
+mod menubar;
+mod notify_rules;
+mod notify;
 mod picker;
 mod select;
 mod storage;
@@ -24,8 +29,8 @@ use anyhow::Result;
 use app::{App, Focus};
 use clap::Parser;
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-    MouseButton, MouseEventKind,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
 use ratatui::crossterm::execute;
 use storage::Store;
@@ -171,12 +176,26 @@ fn main() -> Result<()> {
     // (for the "system" theme mode) before mouse capture and the event loop start.
     app.detected_variant = appearance::detect();
     execute!(std::io::stdout(), EnableMouseCapture)?;
-    enable_shift_enter();
-    let res = run(&mut term, &mut app);
+    let _ = execute!(std::io::stdout(), EnableBracketedPaste);
+    let enhancement = enable_shift_enter();
+    app.keyboard_enhancement = enhancement;
+    app.maybe_apple_terminal_hint();
+    // Pop enhancement / paste even on panic.
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        disable_shift_enter();
+        let _ = execute!(std::io::stdout(), DisableBracketedPaste);
+        hook(info);
+    }));
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&mut term, &mut app)));
     disable_shift_enter();
+    let _ = execute!(std::io::stdout(), DisableBracketedPaste);
     let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
-    res
+    match res {
+        Ok(r) => r,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
 }
 
 /// `--theme <name>`: refuse a bad name, or a theme that doesn't exist or can't be used,
@@ -215,8 +234,16 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let mut captured = true;
     let mut dirty = true;
     let mut last_draw = std::time::Instant::now();
+    let mut esc_meta = crate::keys::EscMeta::default();
     while !app.should_quit {
         app.tick();
+        let now = std::time::Instant::now();
+        if let Some(k) = esc_meta.poll_timeout(now) {
+            dirty |= handle_event(app, Event::Key(k));
+        }
+        if app.tooltip.tick(now, crate::tooltip::tip_for) {
+            dirty = true;
+        }
         if app.mouse_capture != captured {
             captured = app.mouse_capture;
             if captured {
@@ -253,7 +280,34 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             })
         })?;
         for ev in coalesce(batch) {
-            dirty |= handle_event(app, ev);
+            match ev {
+                Event::Key(k) if k.kind == KeyEventKind::Press => {
+                    let now = std::time::Instant::now();
+                    match esc_meta.feed(k, now) {
+                        crate::keys::Feed::Hold => {}
+                        crate::keys::Feed::Key(k) => {
+                            dirty |= handle_event(app, Event::Key(k));
+                        }
+                        crate::keys::Feed::EscThen(k) => {
+                            dirty |= handle_event(
+                                app,
+                                Event::Key(event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+                            );
+                            dirty |= handle_event(app, Event::Key(k));
+                        }
+                    }
+                }
+                Event::Paste(text) => {
+                    // Bracketed paste: keep newlines; never submit.
+                    if app.focus == Focus::Input && app.mode == app::InputMode::Normal {
+                        app.input_insert(&text);
+                        dirty = true;
+                    }
+                }
+                ev => {
+                    dirty |= handle_event(app, ev);
+                }
+            }
             if app.should_quit {
                 break;
             }
@@ -328,6 +382,27 @@ fn coalesce(batch: Vec<Event>) -> Vec<Event> {
 
 /// Apply one terminal event. Returns whether the screen may have changed (so a redraw is
 /// due); pointer moves outside a pick list, button releases and key releases don't.
+fn tooltip_hit(app: &App, col: u16, row: u16) -> Option<(crate::tooltip::Hit, ratatui::layout::Rect)> {
+    use crate::tooltip::Hit;
+    let at = ratatui::layout::Position::new(col, row);
+    if app.unread_area.contains(at) {
+        return Some((Hit::UnreadBadge, app.unread_area));
+    }
+    if let Some(i) = app.menu.hit_bar(col, row) {
+        return Some((Hit::MenuBar(i), app.menu.bar_areas[i]));
+    }
+    if let Some(i) = app.menu.hit_opt(col, row) {
+        return Some((Hit::MenuOpt(i), app.menu.opt_areas[i]));
+    }
+    if app.theme_switch_area.contains(at) {
+        return Some((Hit::ThemeSwitch, app.theme_switch_area));
+    }
+    if app.account_area.contains(at) {
+        return Some((Hit::AccountSwitch, app.account_area));
+    }
+    None
+}
+
 fn handle_event(app: &mut App, ev: Event) -> bool {
     if let Event::Mouse(m) = &ev {
         app.mouse_pos = Some((m.column, m.row));
@@ -336,10 +411,19 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
         }
     }
     match ev {
-        Event::Mouse(m)
-            if m.kind == MouseEventKind::Moved && app.picker.is_none() && app.body_sel.is_none() =>
-        {
-            return false;
+        Event::Mouse(m) if m.kind == MouseEventKind::Moved => {
+            app.mouse_pos = Some((m.column, m.row));
+            if app.picker.is_some() {
+                // picker hover handled below
+            } else {
+                let hit = tooltip_hit(app, m.column, m.row);
+                let now = std::time::Instant::now();
+                let changed = app.tooltip.pointer(hit, now);
+                // Coalesced moves: only redraw when the tip changes.
+                if app.body_sel.is_none() {
+                    return changed;
+                }
+            }
         }
         Event::Mouse(m) if matches!(m.kind, MouseEventKind::Drag(_)) && app.body_sel.is_some() => {
             app.body_drag(m.column, m.row);
@@ -450,6 +534,39 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
             if app.history_search.is_some() {
                 app.history_search_key(k);
+                return true;
+            }
+            if k.code == KeyCode::F(10)
+                || (k.code == KeyCode::Char('m')
+                    && k.modifiers.contains(KeyModifiers::ALT)
+                    && app.menu.open.is_none())
+            {
+                app.menu.open_menu(0);
+                app.tooltip.dismiss();
+                return true;
+            }
+            if app.menu.open.is_some() {
+                match k.code {
+                    KeyCode::Esc => app.menu.close(),
+                    KeyCode::Left | KeyCode::Char('h') => app.menu.move_bar(-1),
+                    KeyCode::Right | KeyCode::Char('l') => app.menu.move_bar(1),
+                    KeyCode::Up | KeyCode::Char('k') => app.menu.move_opt(-1),
+                    KeyCode::Down | KeyCode::Char('j') => app.menu.move_opt(1),
+                    KeyCode::Enter => {
+                        if let Some(cmd) = app.menu.selected_command() {
+                            app.run_menu_command(cmd);
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        if let Some(i) = crate::menubar::MENUS
+                            .iter()
+                            .position(|m| m.hint == c.to_ascii_lowercase())
+                        {
+                            app.menu.open_menu(i);
+                        }
+                    }
+                    _ => {}
+                }
                 return true;
             }
             if app.completion.is_some() {
@@ -584,7 +701,17 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 KeyCode::Char('j') if k.modifiers.contains(KeyModifiers::CONTROL) => {
                     app.input_newline()
                 }
-                KeyCode::Enter => app.submit(),
+                KeyCode::Enter => {
+                    if app.mode == app::InputMode::Normal
+                        && let Some(next) = crate::keys::trailing_backslash_newline(&app.input)
+                    {
+                        app.input = next;
+                        app.input_cursor = app.input.len();
+                        app.input_anchor = None;
+                    } else {
+                        app.submit();
+                    }
+                }
                 KeyCode::Char('a') if k.modifiers.contains(KeyModifiers::CONTROL) => app.ctrl_a(),
                 KeyCode::Char('z') if k.modifiers.contains(KeyModifiers::CONTROL) => {
                     app.input_undo_clear()
@@ -727,16 +854,23 @@ const MODIFY_OTHER_KEYS_OFF: &str = "\x1b[>4m";
 /// Both requests are sent unconditionally: the kitty "supports?" query fails behind
 /// tmux/screen even when the outer terminal could help, and terminals ignore requests
 /// they don't understand. Alt-Enter and Ctrl-J always work as fallbacks.
-fn enable_shift_enter() {
+/// Push keyboard enhancement when the terminal supports it. Always send modifyOtherKeys
+/// level 1 (harmless when ignored). Returns whether kitty-style enhancement is active.
+fn enable_shift_enter() -> bool {
     use ratatui::crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
     use std::io::Write;
+    let supported = ratatui::crossterm::terminal::supports_keyboard_enhancement()
+        .unwrap_or(false);
     let mut out = std::io::stdout();
-    let _ = execute!(
-        out,
-        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-    );
+    if supported {
+        let _ = execute!(
+            out,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+    }
     let _ = out.write_all(MODIFY_OTHER_KEYS_ON.as_bytes());
     let _ = out.flush();
+    supported
 }
 
 fn disable_shift_enter() {
@@ -747,11 +881,8 @@ fn disable_shift_enter() {
     let _ = out.flush();
 }
 
-/// Shift-Enter (needs keyboard enhancement) or Alt-Enter (works everywhere) inserts a newline.
 fn is_newline_key(k: &event::KeyEvent) -> bool {
-    k.code == KeyCode::Enter
-        && k.modifiers
-            .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
+    crate::keys::is_newline_key(k)
 }
 
 #[cfg(test)]
@@ -766,7 +897,7 @@ mod key_tests {
     }
 
     #[test]
-    fn shift_or_alt_enter_is_newline_plain_enter_submits() {
+    fn shift_alt_or_ctrl_enter_is_newline_plain_enter_submits() {
         assert!(is_newline_key(&KeyEvent::new(
             KeyCode::Enter,
             KeyModifiers::SHIFT
@@ -774,6 +905,10 @@ mod key_tests {
         assert!(is_newline_key(&KeyEvent::new(
             KeyCode::Enter,
             KeyModifiers::ALT
+        )));
+        assert!(is_newline_key(&KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::CONTROL
         )));
         assert!(!is_newline_key(&KeyEvent::new(
             KeyCode::Enter,

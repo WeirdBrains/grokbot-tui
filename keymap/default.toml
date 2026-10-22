@@ -31,6 +31,10 @@
 [mode.insert]
 "esc" = "mode.normal"
 "ctrl-r" = "input.history_search"
+"ctrl-j" = "input.newline"
+"alt-enter" = "input.newline"
+"shift-enter" = "input.newline"
+"ctrl-enter" = "input.newline"
 
 [mode.command]
 "esc" = "mode.normal"

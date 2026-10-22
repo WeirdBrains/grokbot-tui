@@ -203,14 +203,14 @@ in between quits.
 
 Input focused (multi-line)
   Enter                     Send message or run /command
-  Shift-Enter               New line (terminals with the kitty keyboard protocol:
-                            kitty, WezTerm, foot, Ghostty, recent Alacritty/iTerm2)
-  Alt-Enter or Ctrl-J       New line (fallback that works in any terminal)
-                            GNOME Console/Terminal (VTE), Konsole and most others send
-                            Shift-Enter as plain Enter: use Ctrl-J or Alt-Enter there.
-                            In tmux, add `set -s extended-keys on` and
-                            `set -s extended-keys-format csi-u` (tmux 3.5+), and use an
-                            outer terminal that sends Shift-Enter distinctly.
+  Shift/Alt/Ctrl-Enter      New line when the terminal reports modifiers (kitty protocol
+                            / modifyOtherKeys). Remap via keymap `input.newline`.
+  Ctrl-J                    New line (works everywhere, including macOS Terminal.app)
+  \\ then Enter             New line (strip the backslash) when modifiers are unavailable
+  Alt-Enter                 New line (Option-as-Meta / ESC+CR). macOS Terminal.app:
+                            enable “Use Option as Meta key”, or use Ctrl-J / \\+Enter.
+  F10 / Alt-M               Menu bar (Chat, Account, Theme, Notify, Help)
+  /notify                   Toasts: dnd, on/off <kind>, reload rules
   ← → / Home End            Move the cursor / to the start or end of the line
   ↑ / ↓                     Previous / next line; on the first / last line, prompt history
   Backspace / Delete        Delete before / at the cursor

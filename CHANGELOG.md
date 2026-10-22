@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.10.0] - 2026-10-22
+
+### Added
+- **Notifications** (from acp-rs-scraper `src/notify.rs` + rules gist @ `a60c82a`):
+  toast stack with TTL, do-not-disturb, per-kind switches (`error`/`warning`/`info`/
+  `message`), and `~/.grokbot-tui/notify-rules.toml` (toast/mute/drop). `/notify`.
+  Toasts never move the chat scroll (1.9.1 rule). Theme parts `toast`, `toast_warn`,
+  `toast_error`.
+- **Menu bar** (from `src/tui/widgets/menu.rs` gist): Chat / Account / Theme / Notify /
+  Help mapping onto slash commands. F10 / Alt+M, arrows, Enter, click. Theme parts
+  `menu_bar`, `menu_active`.
+- **Hover tooltips** (from `src/tui/tooltip.rs` gist): 400 ms delay, theme part
+  `tooltip`, deep-link topic. Motion stays coalesced — redraw only when the tip
+  changes (no all-motion flood).
+- **`docs/notifications-menu-tooltip-plan.md`**: source paths/commits and deviations.
+
+### Fixed
+- **macOS Terminal.app: Shift/Ctrl/Alt-Enter submitted instead of inserting a newline.**
+  Push keyboard enhancement when `supports_keyboard_enhancement()` is true (pop on
+  exit/panic); treat ESC+CR as Alt-Enter; Ctrl-J and Ctrl-Enter insert a newline;
+  a trailing `\` then Enter becomes a newline; bracketed paste keeps multi-line
+  pastes as text. One-time hint when enhancement is unsupported and
+  `TERM_PROGRAM=Apple_Terminal`. Remappable as `input.newline` in `keymap.toml`
+  (vim insert). See `/help keys`.
+
 ## [1.9.1] - 2026-10-22
 
 ### Fixed

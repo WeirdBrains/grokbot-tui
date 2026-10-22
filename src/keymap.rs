@@ -27,6 +27,7 @@ pub const ACTIONS: &[&str] = &[
     "input.history_search",
     "input.undo_clear",
     "input.paste",
+    "input.newline",
     "selection.select_all",
     "selection.copy",
     "selection.copy_line",

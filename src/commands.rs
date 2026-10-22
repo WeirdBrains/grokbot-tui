@@ -152,6 +152,14 @@ pub fn registry() -> Registry {
             },
 
             Command {
+                name: "notify",
+                aliases: &["notices"],
+                usage: "/notify [dnd|reload|list|on <kind>|off <kind>]",
+                help: "Notification toasts: do-not-disturb, per-kind switches, reload rules",
+                complete: notify_complete,
+                run: notify_cmd,
+            },
+            Command {
                 name: "keymap",
                 aliases: &["keys"],
                 usage: "/keymap [reload|list|vim|default]",
@@ -639,6 +647,60 @@ fn aliases(app: &App) -> Vec<crate::complete::Candidate> {
         Ok(list) => crate::complete::names(list.into_iter().map(|a| a.alias)),
         Err(_) => vec![],
     }
+}
+
+fn notify_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    match idx {
+        0 => crate::complete::names(["dnd", "reload", "list", "on", "off"]),
+        1 => crate::complete::names(["error", "warning", "info", "message"]),
+        _ => vec![],
+    }
+}
+
+fn notify_cmd(app: &mut App, args: &str) -> Result<()> {
+    let mut parts = args.split_whitespace();
+    match parts.next().unwrap_or("list") {
+        "list" | "" => {
+            let s = &app.notices_board.settings;
+            let kinds: String = crate::notify::NoticeKind::ALL
+                .iter()
+                .map(|k| {
+                    format!(
+                        "{}={}",
+                        k.key(),
+                        if s.on[k.index()] { "on" } else { "off" }
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            app.info(format!(
+                "notify: dnd={} {}  rules={}  toasts={}",
+                s.dnd,
+                kinds,
+                app.notify_rules.rules.len(),
+                app.notices_board.toasts.len()
+            ));
+        }
+        "dnd" => {
+            app.notices_board.settings.dnd = !app.notices_board.settings.dnd;
+            app.info(format!(
+                "Do-not-disturb {}.",
+                if app.notices_board.settings.dnd { "on" } else { "off" }
+            ));
+        }
+        "reload" => app.reload_notify_rules(),
+        "on" | "off" => {
+            let on = args.trim_start().starts_with("on");
+            let kind = parts
+                .next()
+                .and_then(crate::notify::NoticeKind::parse)
+                .ok_or_else(|| anyhow::anyhow!("Usage: /notify on|off <error|warning|info|message>"))?;
+            app.notices_board.settings.on[kind.index()] = on;
+            app.info(format!("{} toasts {}.", kind.label(), if on { "on" } else { "off" }));
+        }
+        other => bail!("Usage: /notify [dnd|reload|list|on <kind>|off <kind>] (got {other})"),
+    }
+    Ok(())
 }
 
 fn keymap_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
