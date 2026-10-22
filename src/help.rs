@@ -545,6 +545,8 @@ Desktop errors (APP_NOT_FOUND, NOT_SIGNED_IN, SECRET_TOOL_MISSING, KEYCHAIN_LOCK
 'host not allowed' — the URL isn't on the allowlist (see /help login gateway).
 
 Chat looks out of date — /history reloads the full transcript.
+Team bot in the list but empty chat / send fails — re-login with /login cursor
+  or /login desktop (needs a Cursor token) so shared agents get a viewer sessionId.
 No bots — create one in the desktop app, then /bots.
 Running gb prints git errors — gb is often a git alias; the command is grokbot-tui.",
         related: &[

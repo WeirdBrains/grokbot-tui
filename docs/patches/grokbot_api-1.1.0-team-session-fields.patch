@@ -1,0 +1,72 @@
+# Proposed grokbot_api 1.1.x patch (NOT published by this grokbot-tui task).
+#
+# Symptom: shared team agents appear in ListGrokBotTeamAgents but viewerSessionId is
+# missing after parse → grokbot-tui merges them as ·team with no sessionId →
+# getAgentTranscriptTail/sendPrompt run without sessionId (empty history / failed send).
+#
+# Cause to verify against a live ListGrokBotTeamAgents payload: field names may be
+# snake_case (viewer_session_id) or viewerIsOwner may be 0/1. Today TeamAgent::list
+# only reads camelCase string/bool forms.
+#
+# Also note: viewer_is_owner defaults to true when the field is absent
+# (`!= Some(false)`). That skips merge for those entries (they won't show as ·team).
+# Entries that DO show with team:true but session None are the empty-sessionId case.
+#
+# Apply in a WeirdBrains/grokbot_api clone, add tests, publish a 1.1.1 (or path-dep).
+
+--- a/src/types.rs
++++ b/src/types.rs
+@@ -414,6 +414,24 @@ impl TeamAgent {
+         let s = |a: &Value, k: &str| a.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+         let opt = |a: &Value, k: &str| {
+             a.get(k)
+                 .and_then(Value::as_str)
+                 .map(str::trim)
+                 .filter(|x| !x.is_empty())
+                 .map(str::to_string)
+         };
++        let opt2 = |a: &Value, camel: &str, snake: &str| opt(a, camel).or_else(|| opt(a, snake));
++        let s2 = |a: &Value, camel: &str, snake: &str| {
++            let x = s(a, camel);
++            if x.is_empty() { s(a, snake) } else { x }
++        };
++        let as_bool = |a: &Value, k: &str| -> Option<bool> {
++            match a.get(k)? {
++                Value::Bool(b) => Some(*b),
++                Value::Number(n) => Some(n.as_i64() != Some(0)),
++                Value::String(t) => match t.to_ascii_lowercase().as_str() {
++                    "true" | "1" => Some(true),
++                    "false" | "0" => Some(false),
++                    _ => None,
++                },
++                _ => None,
++            }
++        };
+         v.get("entries")
+             .and_then(Value::as_array)
+             .map(|es| {
+                 es.iter()
+                     .filter_map(|e| e.get("agent"))
+-                    .filter(|a| !s(a, "agentId").is_empty())
++                    .filter(|a| !s2(a, "agentId", "agent_id").is_empty())
+                     .map(|a| TeamAgent {
+-                        agent_id: s(a, "agentId"),
++                        agent_id: s2(a, "agentId", "agent_id"),
+                         name: s(a, "name"),
+                         description: s(a, "description"),
+-                        viewer_is_owner: a.get("viewerIsOwner").and_then(Value::as_bool)
++                        viewer_is_owner: as_bool(a, "viewerIsOwner")
++                            .or_else(|| as_bool(a, "viewer_is_owner"))
+                             != Some(false),
+                         team_visible: s(a, "visibility") == "GROK_BOT_AGENT_VISIBILITY_TEAM",
+-                        viewer_session_id: opt(a, "viewerSessionId"),
+-                        owner_display_name: opt(a, "ownerDisplayName"),
++                        viewer_session_id: opt2(a, "viewerSessionId", "viewer_session_id"),
++                        owner_display_name: opt2(a, "ownerDisplayName", "owner_display_name"),
+                         is_room: s(a, "kind") == "GROK_BOT_AGENT_KIND_ROOM",
+                     })
+                     .collect()
+             })
+             .unwrap_or_default()
+     }
+ }

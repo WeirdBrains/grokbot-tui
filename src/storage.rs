@@ -177,7 +177,11 @@ const V7: &str = "CREATE TABLE prompt_history (
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX prompt_history_account ON prompt_history(account_id, id DESC);";
-const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7];
+
+const V8: &str = "ALTER TABLE bots ADD COLUMN team INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE bots ADD COLUMN viewer_session_id TEXT;";
+
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginMethod {
@@ -569,10 +573,21 @@ impl Store {
     pub fn save_bots(&self, bots: &[Bot]) -> Result<()> {
         for b in bots {
             self.conn.execute(
-                "INSERT INTO bots(account_id, bot_id, name, description, hidden, is_group) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "INSERT INTO bots(account_id, bot_id, name, description, hidden, is_group, team, viewer_session_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(account_id, bot_id) DO UPDATE SET name = excluded.name, description = excluded.description,
-                   hidden = excluded.hidden, is_group = excluded.is_group",
-                params![self.account.id, b.id, b.name, b.description, b.hidden, b.is_group],
+                   hidden = excluded.hidden, is_group = excluded.is_group,
+                   team = excluded.team, viewer_session_id = excluded.viewer_session_id",
+                params![
+                    self.account.id,
+                    b.id,
+                    b.name,
+                    b.description,
+                    b.hidden,
+                    b.is_group,
+                    b.team,
+                    b.viewer_session_id
+                ],
             )?;
         }
         Ok(())
@@ -580,7 +595,8 @@ impl Store {
 
     pub fn bots(&self) -> Result<Vec<Bot>> {
         let mut st = self.conn.prepare(
-            "SELECT bot_id, name, description, hidden, is_group FROM bots WHERE account_id = ?1 ORDER BY rowid",
+            "SELECT bot_id, name, description, hidden, is_group, team, viewer_session_id
+             FROM bots WHERE account_id = ?1 ORDER BY rowid",
         )?;
         let rows = st.query_map([self.account.id], |r| {
             Ok(Bot {
@@ -589,7 +605,8 @@ impl Store {
                 description: r.get(2)?,
                 hidden: r.get(3)?,
                 is_group: r.get(4)?,
-                team: false,
+                team: r.get(5)?,
+                viewer_session_id: r.get(6)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -1288,6 +1305,7 @@ mod tests {
                 hidden: true,
                 is_group: false,
                 team: false,
+                viewer_session_id: None,
             }])
             .unwrap();
             s.append_message("a", &msg(Role::User, "hi")).unwrap();

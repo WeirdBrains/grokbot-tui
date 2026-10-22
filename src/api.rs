@@ -17,6 +17,8 @@ pub struct Bot {
     pub is_group: bool,
     /// A team bot shared with you (owned by someone else). Not in the gateway's listAgents.
     pub team: bool,
+    /// Viewer session from ListGrokBotTeamAgents; required as gateway `sessionId`.
+    pub viewer_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,10 +52,32 @@ pub trait ApiClient: Send + Sync {
     fn take_refreshed_session(&self) -> Option<Session> {
         None
     }
+    /// Bind a shared team bot's viewer session so send/transcript/acceptance send `sessionId`.
+    /// `grokbot_api` also remembers sessions from `list_team_agents`; this re-applies from
+    /// the TUI's `Bot` so a lost in-memory map (or a mock) cannot silently drop it.
+    fn bind_viewer_session(&self, _bot_id: &str, session_id: Option<&str>) {
+        let _ = session_id;
+    }
+    /// Soft notice from the last `list_bots` (e.g. team list failed). Cleared on read.
+    fn take_list_notice(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Real gateway client (unofficial, undocumented API).
-pub struct GatewayApi(pub gw::Client);
+pub struct GatewayApi {
+    pub client: gw::Client,
+    list_notice: Mutex<Option<String>>,
+}
+
+impl GatewayApi {
+    pub fn new(client: gw::Client) -> Self {
+        Self {
+            client,
+            list_notice: Mutex::new(None),
+        }
+    }
+}
 
 pub fn bot_from_agent(a: &gw::Agent) -> Bot {
     Bot {
@@ -63,6 +87,7 @@ pub fn bot_from_agent(a: &gw::Agent) -> Bot {
         hidden: a.hidden_from_sidebar.unwrap_or(false),
         is_group: a.is_group,
         team: false,
+        viewer_session_id: None,
     }
 }
 
@@ -83,6 +108,7 @@ pub fn merge_team_bots(mut bots: Vec<Bot>, team: &[gw::TeamAgent]) -> Vec<Bot> {
             hidden: false,
             is_group: t.is_room,
             team: true,
+            viewer_session_id: t.viewer_session_id.clone(),
         });
     }
     bots
@@ -112,21 +138,48 @@ pub fn messages_from_entries(entries: &[gw::Entry]) -> Vec<Message> {
 #[async_trait]
 impl ApiClient for GatewayApi {
     async fn acceptance(&self, bot_id: &str, nonce: &str) -> gw::Result<gw::AcceptanceStatus> {
-        self.0.prompt_acceptance_status(bot_id, nonce).await
+        self.client.prompt_acceptance_status(bot_id, nonce).await
     }
     /// Gateway `listAgents` (your box) plus, when a Cursor token is available, team bots
-    /// from the backend's `ListGrokBotTeamAgents`. A team-list failure keeps your bots.
+    /// from the backend's `ListGrokBotTeamAgents`. A team-list failure keeps your bots
+    /// and records a notice via [`ApiClient::take_list_notice`].
     async fn list_bots(&self) -> gw::Result<Vec<Bot>> {
         let own: Vec<Bot> = self
-            .0
+            .client
             .list_agents()
             .await?
             .iter()
             .map(bot_from_agent)
             .collect();
-        match self.0.list_team_agents().await {
-            Ok(Some(team)) => Ok(merge_team_bots(own, &team)),
-            _ => Ok(own),
+        match self.client.list_team_agents().await {
+            Ok(Some(team)) => {
+                let bots = merge_team_bots(own, &team);
+                // Belt-and-suspenders: re-bind viewer sessions from the merged list.
+                for b in &bots {
+                    if let Some(s) = &b.viewer_session_id {
+                        self.client.set_agent_session(&b.id, s);
+                    }
+                }
+                let missing = bots
+                    .iter()
+                    .filter(|b| b.team && b.viewer_session_id.is_none())
+                    .map(|b| b.name.as_str())
+                    .collect::<Vec<_>>();
+                if !missing.is_empty() {
+                    *self.list_notice.lock().unwrap() = Some(format!(
+                        "Team bot(s) missing viewerSessionId (cannot send/history): {}.                          Re-login with /login cursor or /login desktop.",
+                        missing.join(", ")
+                    ));
+                }
+                Ok(bots)
+            }
+            Ok(None) => Ok(own),
+            Err(e) => {
+                *self.list_notice.lock().unwrap() = Some(format!(
+                    "Could not list team bots (shared agents hidden): {e}"
+                ));
+                Ok(own)
+            }
         }
     }
     async fn create_bot(&self, name: &str) -> gw::Result<Bot> {
@@ -134,7 +187,7 @@ impl ApiClient for GatewayApi {
             name: name.trim().into(),
             ..Default::default()
         };
-        if let Some(a) = self.0.create_agent(&input).await? {
+        if let Some(a) = self.client.create_agent(&input).await? {
             return Ok(bot_from_agent(&a));
         }
         // No agent in the reply: find it by name in a fresh list.
@@ -151,31 +204,39 @@ impl ApiClient for GatewayApi {
             })
     }
     async fn delete_bot(&self, bot_id: &str) -> gw::Result<()> {
-        self.0.delete_agent(bot_id).await.map(|_| ())
+        self.client.delete_agent(bot_id).await.map(|_| ())
     }
     async fn send(&self, bot_id: &str, text: &str, nonce: &str) -> gw::Result<SendReceipt> {
         let req = gw::SendPrompt {
             client_nonce: Some(nonce.into()),
             ..gw::SendPrompt::new(bot_id, text)
         };
-        self.0.send_prompt(&req).await
+        self.client.send_prompt(&req).await
     }
     async fn transcript(&self, bot_id: &str, limit: u32) -> gw::Result<Vec<Message>> {
         Ok(messages_from_entries(
-            &self.0.transcript_tail(bot_id, limit, None).await?.entries,
+            &self.client.transcript_tail(bot_id, limit, None).await?.entries,
         ))
     }
     async fn transcript_history(&self, bot_id: &str, max_entries: u32) -> gw::Result<Vec<Message>> {
         Ok(messages_from_entries(
             &self
-                .0
+                .client
                 .transcript_history(bot_id, 200, max_entries as usize)
                 .await?
                 .entries,
         ))
     }
     fn take_refreshed_session(&self) -> Option<Session> {
-        self.0.take_refreshed_session()
+        self.client.take_refreshed_session()
+    }
+    fn bind_viewer_session(&self, bot_id: &str, session_id: Option<&str>) {
+        if let Some(s) = session_id {
+            self.client.set_agent_session(bot_id, s);
+        }
+    }
+    fn take_list_notice(&self) -> Option<String> {
+        self.list_notice.lock().unwrap().take()
     }
 }
 
@@ -190,6 +251,8 @@ pub struct MockClient {
     /// Bots made with `create_bot` / removed with `delete_bot`.
     extra: Mutex<Vec<Bot>>,
     deleted: Mutex<Vec<String>>,
+    /// Agent id → viewer sessionId (mirrors grokbot_api's map).
+    sessions: Mutex<HashMap<String, String>>,
     next: AtomicU64,
     pub reply_delay: Duration,
 }
@@ -202,9 +265,29 @@ impl MockClient {
             nonces: Mutex::new(HashMap::new()),
             extra: Mutex::new(Vec::new()),
             deleted: Mutex::new(Vec::new()),
+            sessions: Mutex::new(HashMap::new()),
             next: AtomicU64::new(1),
             reply_delay: Duration::from_millis(300),
         }
+    }
+
+    fn require_team_session(&self, bot_id: &str, method: &str) -> gw::Result<()> {
+        let bot = self.current_bots().into_iter().find(|b| b.id == bot_id);
+        let Some(b) = bot else {
+            return Ok(());
+        };
+        if !b.team {
+            return Ok(());
+        }
+        let bound = self.sessions.lock().unwrap().get(bot_id).cloned();
+        if bound.is_none() {
+            return Err(gw::Error::Http {
+                method: method.into(),
+                status: 404,
+                message: "team agent requires sessionId (viewer session not bound)".into(),
+            });
+        }
+        Ok(())
     }
 
     fn check(&self, method: &str) -> gw::Result<()> {
@@ -219,7 +302,7 @@ impl MockClient {
     }
 
     fn bots() -> Vec<Bot> {
-        [
+        let mut v: Vec<Bot> = [
             ("helper", "Helper", "General assistant", false),
             ("coder", "Coder", "Writes code", false),
             ("scribe", "Scribe", "Takes notes", false),
@@ -233,8 +316,20 @@ impl MockClient {
             hidden: h,
             is_group: false,
             team: false,
+            viewer_session_id: None,
         })
-        .collect()
+        .collect();
+        // Shared team bot (like production Chomp): needs viewer sessionId on send/history.
+        v.push(Bot {
+            id: "c61d849e-c1ec-5ec8-add4-078ba3518635".into(),
+            name: "Chomp".into(),
+            description: "team bot · owner Mandible · mock".into(),
+            hidden: false,
+            is_group: false,
+            team: true,
+            viewer_session_id: Some("vs-chomp".into()),
+        });
+        v
     }
 
     /// Built-in bots plus created ones, minus deleted ones.
@@ -271,7 +366,16 @@ pub fn mock_ensure_sandbox(cursor_token: &str) -> gw::Result<Session> {
 impl ApiClient for MockClient {
     async fn list_bots(&self) -> gw::Result<Vec<Bot>> {
         self.check("listAgents")?;
-        Ok(self.current_bots())
+        let bots = self.current_bots();
+        for b in &bots {
+            if let Some(s) = &b.viewer_session_id {
+                self.sessions
+                    .lock()
+                    .unwrap()
+                    .insert(b.id.clone(), s.clone());
+            }
+        }
+        Ok(bots)
     }
     async fn create_bot(&self, name: &str) -> gw::Result<Bot> {
         self.check("createAgent")?;
@@ -290,6 +394,7 @@ impl ApiClient for MockClient {
             hidden: false,
             is_group: false,
             team: false,
+            viewer_session_id: None,
         };
         self.extra.lock().unwrap().push(b.clone());
         Ok(b)
@@ -315,6 +420,7 @@ impl ApiClient for MockClient {
     }
     async fn send(&self, bot_id: &str, text: &str, nonce: &str) -> gw::Result<SendReceipt> {
         self.check("sendPrompt")?;
+        self.require_team_session(bot_id, "sendPrompt")?;
         // Mock texts drive the acceptance status seen by a later check.
         let status = match text {
             "lost" => None,
@@ -378,6 +484,7 @@ impl ApiClient for MockClient {
     }
     async fn transcript(&self, bot_id: &str, limit: u32) -> gw::Result<Vec<Message>> {
         self.check("getAgentTranscriptTail")?;
+        self.require_team_session(bot_id, "getAgentTranscriptTail")?;
         let now = Instant::now();
         let c = self.chats.lock().unwrap();
         let v: Vec<Message> = c
@@ -391,6 +498,19 @@ impl ApiClient for MockClient {
             .unwrap_or_default();
         let skip = v.len().saturating_sub(limit as usize);
         Ok(v.into_iter().skip(skip).collect())
+    }
+    fn bind_viewer_session(&self, bot_id: &str, session_id: Option<&str>) {
+        match session_id {
+            Some(s) => {
+                self.sessions
+                    .lock()
+                    .unwrap()
+                    .insert(bot_id.into(), s.into());
+            }
+            None => {
+                self.sessions.lock().unwrap().remove(bot_id);
+            }
+        }
     }
 }
 
@@ -422,7 +542,48 @@ mod tests {
             (all[1].id.as_str(), all[1].name.as_str(), all[1].team),
             ("c", "Chomp", true)
         );
+        assert_eq!(all[1].viewer_session_id.as_deref(), Some("s1"));
         assert!(all[1].description.contains("owner Ana"));
+    }
+
+    #[tokio::test]
+    async fn mock_team_bot_needs_viewer_session_for_send_and_history() {
+        let m = MockClient::new("t");
+        // Fresh client: sessions not bound until list_bots (or bind_viewer_session).
+        let err = m
+            .send("c61d849e-c1ec-5ec8-add4-078ba3518635", "hi", "n")
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("sessionId"),
+            "{err}"
+        );
+        let err = m
+            .transcript("c61d849e-c1ec-5ec8-add4-078ba3518635", 10)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("sessionId"), "{err}");
+
+        let bots = m.list_bots().await.unwrap();
+        let chomp = bots.iter().find(|b| b.name == "Chomp").unwrap();
+        assert!(chomp.team);
+        assert_eq!(chomp.viewer_session_id.as_deref(), Some("vs-chomp"));
+        m.send(&chomp.id, "hi", "n2").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        // reply_delay default 300ms — bind path only needs send Accepted
+        let _ = m.transcript(&chomp.id, 10).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mock_bind_viewer_session_repairs_lost_map() {
+        let m = MockClient::new("t");
+        let id = "c61d849e-c1ec-5ec8-add4-078ba3518635";
+        // Simulate a lost in-memory map after list (clear).
+        m.list_bots().await.unwrap();
+        m.sessions.lock().unwrap().clear();
+        assert!(m.send(id, "x", "n").await.is_err());
+        m.bind_viewer_session(id, Some("vs-chomp"));
+        m.send(id, "x", "n").await.unwrap();
     }
     use serde_json::json;
 

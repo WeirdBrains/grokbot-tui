@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.10.1] - 2026-10-22
+
+### Fixed
+- **Team bots (e.g. Chomp) showed in the sidebar but send/history did nothing.** Shared
+  agents need the viewer `sessionId` from `ListGrokBotTeamAgents` on every
+  `sendPrompt` / `getAgentTranscriptTail` / `promptAcceptanceStatus`. The TUI now keeps
+  `viewer_session_id` on each bot (persisted), re-binds it before those calls, and errors
+  clearly when a team bot has no session. Soft-fails of the team list are no longer
+  silent. Send failures that are not gateway-rejected are shown in the chat. Desktop
+  stored logins re-read the app session so a Cursor token is available again for the
+  team list after restart.
+
 ## [1.10.0] - 2026-10-22
 
 ### Added

@@ -608,7 +608,7 @@ async fn login_task(
         }
         .map_err(es)?;
         let s = c.session();
-        (Arc::new(GatewayApi(c)), s)
+        (Arc::new(GatewayApi::new(c)), s)
     };
     // There is no whoami call; listAgents validates the credential.
     let bots = client.list_bots().await.map_err(es)?;
@@ -775,17 +775,24 @@ impl App {
         }
         self.awaiting
             .retain(|_, t| now.duration_since(*t) < AWAIT_TIMEOUT);
-        let (Some(api), Some(bot)) = (self.api.clone(), self.active_bot().map(|b| b.id.clone()))
+        let (Some(api), Some((bot, session, team))) =
+            (self.api.clone(), self.active_bot_route())
         else {
             return;
         };
         if self.poll.inflight || now < self.poll.next {
             return;
         }
+        if team && session.is_none() {
+            // Avoid spamming: one error when selecting the bot is enough; skip polls.
+            self.poll.next = now + POLL_IDLE_MAX;
+            return;
+        }
         self.poll.inflight = true;
         let (epoch, limit) = (self.epoch, self.poll.limit);
         self.poll.limit = POLL_LIMIT;
         self.spawn(async move {
+            api.bind_viewer_session(&bot, session.as_deref());
             let result = api.transcript(&bot, limit).await;
             Event::Transcript {
                 epoch,
@@ -891,6 +898,9 @@ impl App {
                                 .info(format!("Logged in with {TOKEN_ENV} ({label}); not saved.")),
                         }
                         self.apply_bots(bots);
+                        if let Some(n) = self.api.as_ref().and_then(|a| a.take_list_notice()) {
+                            self.error(n);
+                        }
                     }
                     Err(e) => {
                         let hint = crate::help::hint_for_error(&e)
@@ -1004,6 +1014,9 @@ impl App {
                 match result {
                     Ok(b) => {
                         self.apply_bots(b);
+                        if let Some(n) = self.api.as_ref().and_then(|a| a.take_list_notice()) {
+                            self.error(n);
+                        }
                         if announce {
                             let list = self
                                 .all_bots
@@ -1129,8 +1142,17 @@ impl App {
                             },
                         );
                     }
-                    // Network error / 5xx: ask the gateway whether it landed.
-                    Err(_) => self.check_acceptance(bot, nonce, 1, Duration::ZERO),
+                    // Network / 5xx / team-session errors: show the error, then ask whether it landed.
+                    Err(e) => {
+                        self.push_to(
+                            &bot,
+                            Entry {
+                                kind: EntryKind::Error,
+                                text: format!("Send failed: {e}"),
+                            },
+                        );
+                        self.check_acceptance(bot, nonce, 1, Duration::ZERO);
+                    }
                 }
             }
             Event::ThemeDownload {
@@ -1245,11 +1267,18 @@ impl App {
         let Some(api) = self.api.clone() else {
             return;
         };
+        let session = self
+            .bots
+            .iter()
+            .chain(self.all_bots.iter())
+            .find(|b| b.id == bot)
+            .and_then(|b| b.viewer_session_id.clone());
         let epoch = self.epoch;
         self.spawn(async move {
             if !after.is_zero() {
                 tokio::time::sleep(after).await;
             }
+            api.bind_viewer_session(&bot, session.as_deref());
             let result = api.acceptance(&bot, &nonce).await;
             Event::Acceptance {
                 epoch,
@@ -1384,14 +1413,19 @@ impl App {
             let session = Session::new(url.trim(), tok.trim()).with_headers(headers);
             self.start_login(LoginMethod::Gateway, LoginSource::Env, Some(session), None);
         } else if let Some(l) = stored {
-            // Restore the saved session as-is (keeping the desktop entry choice).
-            self.spawn_login(
-                l.method,
-                LoginSource::Stored,
-                Some(l.session),
-                l.cursor_token,
-                l.desktop_entry,
-            );
+            // Desktop login often yields a Cursor sand token (not persisted). Re-read the
+            // app so ListGrokBotTeamAgents can run and shared bots get a viewer sessionId.
+            if l.method == LoginMethod::Desktop && l.cursor_token.is_none() {
+                self.start_desktop_login(l.desktop_entry, LoginSource::Stored);
+            } else {
+                self.spawn_login(
+                    l.method,
+                    LoginSource::Stored,
+                    Some(l.session),
+                    l.cursor_token,
+                    l.desktop_entry,
+                );
+            }
         } else {
             self.info(format!(
                 "Account '{}' is not logged in. Recommended: sign in to the Grok Bot desktop app, then /login desktop. Other options: /help login · keys: F1",
@@ -1687,6 +1721,13 @@ impl App {
             .position(|b| b.id.to_lowercase() == q || b.name.to_lowercase() == q)
     }
 
+
+    /// Id, viewer session, and team flag for the active bot (for gateway routing).
+    fn active_bot_route(&self) -> Option<(String, Option<String>, bool)> {
+        self.active_bot()
+            .map(|b| (b.id.clone(), b.viewer_session_id.clone(), b.team))
+    }
+
     /// Switch the body to bot `i`'s chat: restore from the DB, then poll its transcript.
     pub fn select_bot(&mut self, i: usize) {
         if i >= self.bots.len() {
@@ -1710,6 +1751,15 @@ impl App {
             } else {
                 POLL_IDLE
             };
+            if let Some(b) = self.active_bot()
+                && b.team
+                && b.viewer_session_id.is_none()
+            {
+                self.error(format!(
+                    "Team bot '{}' has no viewer session — send/history will fail.                      Re-login with /login cursor or /login desktop (needs a Cursor token).",
+                    b.name
+                ));
+            }
             // Pull the server transcript whenever the active bot changes so chats
             // from the desktop app show up without a manual /history.
             if self.api.is_some() {
@@ -1741,12 +1791,20 @@ impl App {
 
     /// Fetch the full (paged) chat history for the active bot now.
     pub fn request_history(&mut self) {
-        let (Some(api), Some(bot)) = (self.api.clone(), self.active_bot().map(|b| b.id.clone()))
+        let (Some(api), Some((bot, session, team))) =
+            (self.api.clone(), self.active_bot_route())
         else {
             self.poll.limit = HISTORY_LIMIT;
             self.poll_now();
             return;
         };
+        if team && session.is_none() {
+            self.error(
+                "Cannot load history: team bot has no viewer session.                  Re-login with /login cursor or /login desktop."
+                    .into(),
+            );
+            return;
+        }
         if self.poll.inflight {
             // Queue a full fetch as soon as the in-flight poll finishes.
             self.poll.limit = HISTORY_LIMIT;
@@ -1755,6 +1813,7 @@ impl App {
         self.poll.inflight = true;
         let epoch = self.epoch;
         self.spawn(async move {
+            api.bind_viewer_session(&bot, session.as_deref());
             let result = api.transcript_history(&bot, HISTORY_LIMIT).await;
             Event::Transcript {
                 epoch,
@@ -2831,10 +2890,17 @@ impl App {
             self.error("Not logged in. Use /login gateway or /login cursor.".into());
             return;
         };
-        let Some(bot) = self.active_bot().map(|b| b.id.clone()) else {
+        let Some((bot, session, team)) = self.active_bot_route() else {
             self.error("No active bot. Pick one with /bot or the sidebar.".into());
             return;
         };
+        if team && session.is_none() {
+            self.error(
+                "Cannot send: team bot has no viewer session.                  Re-login with /login cursor or /login desktop so shared agents get a sessionId."
+                    .into(),
+            );
+            return;
+        }
         let nonce = uuid::Uuid::new_v4().to_string();
         let mine = Message {
             role: Role::User,
@@ -2850,6 +2916,7 @@ impl App {
         self.reload_bot_log(&bot);
         let epoch = self.epoch;
         self.spawn(async move {
+            api.bind_viewer_session(&bot, session.as_deref());
             let result = api.send(&bot, &text, &nonce).await;
             Event::Sent {
                 epoch,
@@ -3670,6 +3737,45 @@ pub mod tests {
     }
 
     #[test]
+    fn team_chomp_send_and_history_via_viewer_session() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "t");
+        // list_bots bound Chomp's viewer session; select and chat.
+        let i = app.bots.iter().position(|b| b.name == "Chomp").expect("Chomp");
+        assert!(app.bots[i].team);
+        assert_eq!(app.bots[i].viewer_session_id.as_deref(), Some("vs-chomp"));
+        app.select_bot(i);
+        type_line(&mut app, "hello chomp");
+        settle(&mut app);
+        // Without a surfaced send error, the pending/accepted path ran.
+        let t = texts(&app);
+        assert!(
+            t.iter().any(|x| x.contains("hello chomp")),
+            "prompt visible: {t:?}"
+        );
+        assert!(
+            !t.iter().any(|x| x.contains("sessionId") || x.contains("Send failed")),
+            "should not fail session bind: {t:?}"
+        );
+        // Simulate lost in-memory session map; bind from Bot must repair on next send.
+        if let Some(api) = app.api.clone() {
+            api.bind_viewer_session(&app.bots[i].id, None);
+        }
+        type_line(&mut app, "again");
+        settle(&mut app);
+        let t = texts(&app);
+        assert!(
+            t.iter().any(|x| x.contains("again")),
+            "{t:?}"
+        );
+        assert!(
+            !t.iter().any(|x| x.contains("team agent requires sessionId")),
+            "re-bind from Bot.viewer_session_id should repair: {t:?}"
+        );
+    }
+
+    #[test]
     fn mock_gateway_login_send_poll_logout() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = test_app(&rt);
@@ -3693,8 +3799,8 @@ pub mod tests {
             (l.method, l.session.gateway_token.as_str()),
             (LoginMethod::Gateway, "secret")
         );
-        assert_eq!(app.bots.len(), 3, "hidden bot filtered");
-        assert_eq!(app.all_bots.len(), 4);
+        assert_eq!(app.bots.len(), 4, "hidden bot filtered; Chomp team bot visible");
+        assert_eq!(app.all_bots.len(), 5);
 
         type_line(&mut app, "/bot coder");
         type_line(&mut app, "hi there");
@@ -3828,7 +3934,7 @@ pub mod tests {
         type_line(&mut app, "/memory add topic rust tui");
         type_line(&mut app, "/prefs set ui.sidebar_width 30");
         type_line(&mut app, "/prefs set show_hidden_bots true");
-        assert_eq!(app.bots.len(), 4);
+        assert_eq!(app.bots.len(), 5); // includes hidden Secret + team Chomp
         drop(app);
 
         let mut app = mk(); // fresh mock backend, same DB
