@@ -67,7 +67,9 @@ In mock mode any token logs in except `bad`. Sending `reject` simulates a 4xx an
 - **Bottom bar:** `/`-prefixed input runs a command; plain text is sent to the active bot.
 
 Keys: `Enter` submit · `Tab` toggle focus input/sidebar · `↑/↓` (or `j/k`) + `Enter` in sidebar to pick a bot ·
-`↑/↓`, `PgUp/PgDn`, mouse wheel scroll body · `Esc` cancel a prompt · `Ctrl-C`/`Ctrl-D` quit ·
+`↑/↓`, `PgUp/PgDn`, mouse wheel scroll body · `Esc` cancel a prompt · `Ctrl-C` / `Ctrl-Shift-C` are context-aware (copy a selection, cancel a reply, clear or copy
+the input, close an overlay, or ask before quitting; `Ctrl-Shift-C` never quits) ·
+`Ctrl-Q` or `/quit` quit at once ·
 `F1` help · `F2` pick a bot · `F3` pick an account · `F4` cycle dark/light/system · `F5` pick a theme ·
 `Shift-F5` theme editor · `F6` mouse capture on/off.
 

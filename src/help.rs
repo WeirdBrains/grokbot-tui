@@ -176,7 +176,19 @@ Anywhere
   F5                           Pick a theme (same as /theme use)
   Shift-F5                     Theme editor (same as /theme edit; some terminals send F17)
   F6                           Mouse capture on/off (same as /mouse)
-  Ctrl-C / Ctrl-D              Quit
+  Ctrl-C / Ctrl-Shift-C        Context-aware (see below). Ctrl-Shift-C never quits.
+  Ctrl-A                       Select all of the input (chat selection arrives in 1.8.0)
+  Ctrl-Z                       Restore the input a Ctrl-C cleared
+  Ctrl-D                       Delete forward; on an empty input like Ctrl-C
+  Ctrl-Q                       Quit at once (also /quit)
+  Shift+←/→/Home/End           Select text in the input
+
+Ctrl-C / Ctrl-Shift-C, in order: (1) a selection in the input (or the chat, 1.8.0) is
+copied; (2) a pending reply is cancelled when the input or chat has focus; (3) text in
+the focused input: Ctrl-C clears it (Ctrl-Z brings it back), Ctrl-Shift-C copies it;
+(4) an open overlay closes like Esc; (5) over the chat with nothing selected: a hint;
+(6) otherwise 'press again to quit' — a second Ctrl-C within 1.5 s with nothing done
+in between quits.
   Tab                          Switch focus between input and sidebar
   PgUp / PgDn, mouse wheel     Scroll the chat
   Esc                          Cancel a prompt (login, confirm) / return focus to input

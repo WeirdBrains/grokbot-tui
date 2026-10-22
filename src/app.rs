@@ -25,6 +25,8 @@ use tokio::sync::mpsc;
 /// gated separately by `poll.next` (POLL_IDLE / POLL_FAST / backoff), so a faster UI
 /// tick never causes extra API calls.
 pub const UI_TICK: Duration = Duration::from_millis(100);
+/// A second Ctrl-C within this long quits.
+pub const QUIT_CONFIRM: Duration = Duration::from_millis(1500);
 /// How often the visible feed is re-read from local SQLite (cheap, no network).
 pub const DB_REFRESH: Duration = Duration::from_millis(100);
 /// Retry delays for restoring a saved login after a non-auth failure (network etc.).
@@ -471,6 +473,20 @@ pub struct App {
     /// `--theme <name>`: the theme for this run only (never saved; survives config reloads
     /// until a theme is picked in the app).
     pub theme_override: Option<String>,
+    /// When a lone Ctrl-C asked "press again to quit" (a second one before
+    /// [`QUIT_CONFIRM`] quits).
+    pub quit_armed: Option<Instant>,
+    /// Input selection anchor (byte offset); the selection runs to the cursor.
+    pub input_anchor: Option<usize>,
+    /// What the last Ctrl-C cleared from the input (Ctrl-Z restores it).
+    pub cleared_input: Option<(String, usize)>,
+    /// Last mouse position reported by the terminal (for "the pane under the mouse").
+    pub mouse_pos: Option<(u16, u16)>,
+    /// The chat body and the input box, as last drawn.
+    pub body_area: Rect,
+    pub input_area: Rect,
+    /// The chat feed's layout, reused while nothing it depends on changes.
+    pub feed_cache: Option<crate::ui::FeedCache>,
     /// While the theme picker is open: the theme (and its problem) to put back on Esc.
     pub theme_preview: Option<(Arc<crate::theme::Theme>, Option<&'static str>)>,
     /// The `‹theme› ▾` switcher in the header (click opens the theme picker).
@@ -608,6 +624,13 @@ impl App {
             theme_downloading: false,
             theme_override: None,
             theme_preview: None,
+            feed_cache: None,
+            quit_armed: None,
+            input_anchor: None,
+            cleared_input: None,
+            mouse_pos: None,
+            body_area: Rect::default(),
+            input_area: Rect::default(),
             theme_switch_area: Rect::default(),
             editor: None,
             pending_remove: None,
@@ -1892,6 +1915,7 @@ impl App {
     // ------------------------------------------------------------ input
 
     pub fn input_insert(&mut self, t: &str) {
+        self.input_delete_selection();
         crate::input::insert(&mut self.input, &mut self.input_cursor, t);
     }
     /// Newline in the message (Shift/Alt-Enter, Ctrl-J). Login prompts stay one line.
@@ -1901,10 +1925,14 @@ impl App {
         }
     }
     pub fn input_backspace(&mut self) {
-        crate::input::backspace(&mut self.input, &mut self.input_cursor);
+        if !self.input_delete_selection() {
+            crate::input::backspace(&mut self.input, &mut self.input_cursor);
+        }
     }
     pub fn input_delete(&mut self) {
-        crate::input::delete(&mut self.input, &mut self.input_cursor);
+        if !self.input_delete_selection() {
+            crate::input::delete(&mut self.input, &mut self.input_cursor);
+        }
     }
     pub fn input_left(&mut self) {
         crate::input::left(&self.input, &mut self.input_cursor);
@@ -1918,6 +1946,187 @@ impl App {
     pub fn input_end(&mut self) {
         crate::input::end(&self.input, &mut self.input_cursor);
     }
+    /// The input's selected byte range, if any (anchor to cursor, ordered).
+    pub fn input_selection(&self) -> Option<(usize, usize)> {
+        let a = self.input_anchor?.min(self.input.len());
+        let c = self.input_cursor.min(self.input.len());
+        (a != c).then(|| (a.min(c), a.max(c)))
+    }
+
+    /// Start or extend the input selection before a Shift+movement.
+    pub fn input_extend(&mut self) {
+        if self.input_anchor.is_none() {
+            self.input_anchor = Some(self.input_cursor);
+        }
+    }
+
+    pub fn input_select_all(&mut self) {
+        self.input_anchor = Some(0);
+        self.input_cursor = self.input.len();
+    }
+
+    /// Delete the selected range. Returns whether there was one.
+    fn input_delete_selection(&mut self) -> bool {
+        let sel = self.input_selection();
+        self.input_anchor = None;
+        match sel {
+            Some((a, b)) => {
+                self.input.replace_range(a..b, "");
+                self.input_cursor = a;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Put `text` on the clipboard (OSC 52) and say how much.
+    pub fn copy_text(&mut self, text: String) {
+        let n = text.chars().count();
+        self.pending_clipboard = Some(text);
+        self.info(format!("Copied {n} chars."));
+    }
+
+    /// The pane at a screen position.
+    pub fn pane_at(&self, col: u16, row: u16) -> crate::keyctx::Pane {
+        use crate::keyctx::Pane;
+        let at = ratatui::layout::Position::new(col, row);
+        if self.body_area.contains(at) {
+            Pane::Body
+        } else if self.input_area.contains(at) {
+            Pane::Input
+        } else if self.sidebar_area.contains(at) {
+            Pane::Sidebar
+        } else if row < self.sidebar_area.y {
+            Pane::Header
+        } else {
+            Pane::None
+        }
+    }
+
+    pub fn overlay_open(&self) -> bool {
+        self.picker.is_some()
+            || self.editor.is_some()
+            || self.help.is_some()
+            || self.shell.is_some()
+    }
+
+    /// What Ctrl-C / Ctrl-A look at (see [`crate::keyctx`]).
+    pub fn key_ctx(&self, now: Instant) -> crate::keyctx::Ctx {
+        use crate::keyctx::{Ctx, Pane};
+        Ctx {
+            focus: if self.overlay_open() {
+                Pane::Overlay
+            } else if self.focus == Focus::Sidebar {
+                Pane::Sidebar
+            } else {
+                Pane::Input
+            },
+            hovered: self
+                .mouse_capture
+                .then_some(self.mouse_pos)
+                .flatten()
+                .map(|(c, r)| self.pane_at(c, r))
+                .unwrap_or_default(),
+            body_selection: false,
+            input_selection: self.input_selection().is_some(),
+            input_has_text: !self.input.is_empty(),
+            in_flight: self.is_typing(),
+            overlay_own_ctrl_c: false,
+            quit_armed: self
+                .quit_armed
+                .is_some_and(|at| now.duration_since(at) <= QUIT_CONFIRM),
+        }
+    }
+
+    /// Ctrl-C (`copy`: Ctrl-Shift-C), resolved by [`crate::keyctx::ctrl_c`]. Never quits
+    /// at once: a lone Ctrl-C asks, a second within [`QUIT_CONFIRM`] (nothing done in
+    /// between) quits.
+    pub fn ctrl_c(&mut self, copy: bool, now: Instant) {
+        use crate::keyctx::CtrlC;
+        let act = crate::keyctx::ctrl_c(&self.key_ctx(now), copy);
+        if act != CtrlC::ArmQuit {
+            self.quit_armed = None;
+        }
+        match act {
+            // In-app chat selection arrives with 1.8.0.
+            CtrlC::CopyBodySelection => {}
+            CtrlC::CopyInputSelection => {
+                let (a, b) = self.input_selection().unwrap_or_default();
+                self.copy_text(self.input[a..b].to_string());
+            }
+            CtrlC::CancelRequest => {
+                if let Some(bot) = self.active_bot().map(|b| b.id.clone()) {
+                    self.awaiting.remove(&bot);
+                }
+                self.info(
+                    "Stopped waiting for the reply (it still lands in the chat if it comes)."
+                        .into(),
+                );
+            }
+            CtrlC::CopyInput => self.copy_text(self.input.clone()),
+            CtrlC::ClearInput => {
+                self.cleared_input = Some((std::mem::take(&mut self.input), self.input_cursor));
+                self.input_cursor = 0;
+                self.input_scroll = 0;
+                self.input_anchor = None;
+                self.info("Input cleared (Ctrl-Z brings it back).".into());
+            }
+            CtrlC::CloseOverlay => self.close_overlay(),
+            CtrlC::Overlay => {}
+            CtrlC::BodyHint => self.info(
+                "Nothing selected. Shift-drag (Option-drag in macOS terminals) selects text \
+                 with your terminal, F6 turns mouse capture off, /copy copies the last reply. \
+                 Ctrl-Q quits."
+                    .into(),
+            ),
+            CtrlC::NothingToCopy => self.info(
+                "Nothing selected to copy. Shift-drag (Option-drag in macOS terminals) selects \
+                 with your terminal; /copy copies the last bot reply."
+                    .into(),
+            ),
+            CtrlC::ArmQuit => {
+                self.quit_armed = Some(now);
+                self.info("Press Ctrl-C again to quit (or Ctrl-Q / /quit).".into());
+            }
+            CtrlC::Quit => self.should_quit = true,
+        }
+    }
+
+    /// Close the open overlay the way Esc does (the theme editor asks about unsaved changes).
+    pub fn close_overlay(&mut self) {
+        if self.picker.is_some() {
+            self.picker_cancel();
+        } else if self.editor.is_some() {
+            self.editor_key(ratatui::crossterm::event::KeyEvent::new(
+                ratatui::crossterm::event::KeyCode::Esc,
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            ));
+        } else if self.help.is_some() {
+            self.close_help();
+        } else if self.shell.is_some() {
+            self.close_shell();
+        }
+    }
+
+    /// Ctrl-A, resolved by [`crate::keyctx::ctrl_a`].
+    pub fn ctrl_a(&mut self) {
+        match crate::keyctx::ctrl_a(&self.key_ctx(Instant::now())) {
+            crate::keyctx::CtrlA::Input => self.input_select_all(),
+            // Selecting chat text in the app arrives with 1.8.0.
+            crate::keyctx::CtrlA::BodyMessage | crate::keyctx::CtrlA::None => {}
+        }
+    }
+
+    /// Ctrl-Z: bring back the input a Ctrl-C cleared (only into an empty input).
+    pub fn input_undo_clear(&mut self) {
+        if self.input.is_empty()
+            && let Some((text, cur)) = self.cleared_input.take()
+        {
+            self.input = text;
+            self.input_cursor = cur.min(self.input.len());
+        }
+    }
+
     pub fn input_up(&mut self) -> bool {
         crate::input::up(&self.input, &mut self.input_cursor)
     }
@@ -1998,6 +2207,7 @@ impl App {
         let was = self.mode;
         self.mode = InputMode::Normal;
         self.input.clear();
+        self.input_anchor = None;
         self.input_cursor = 0;
         self.input_scroll = 0;
         self.login_url_draft = None;
@@ -2011,6 +2221,7 @@ impl App {
         let line = std::mem::take(&mut self.input);
         self.input_cursor = 0;
         self.input_scroll = 0;
+        self.input_anchor = None;
         let trimmed = line.trim().to_string();
         match self.mode {
             InputMode::GatewayUrl | InputMode::GatewayToken | InputMode::CursorToken
@@ -3502,6 +3713,57 @@ pub mod tests {
             msgs[0].remote_id.as_deref(),
             Some("e1"),
             "transcript confirmed it landed"
+        );
+    }
+}
+
+#[cfg(test)]
+mod perf_probe {
+    use super::tests::*;
+    use super::*;
+
+    /// Timing, not a pass/fail check: `cargo test --release -- --ignored draw_cost --nocapture`.
+    #[test]
+    #[ignore = "timing probe"]
+    fn draw_cost_with_a_long_chat() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "tok");
+        let bot = app.active_bot().unwrap().id.clone();
+        let v: Vec<Entry> = (0..400)
+            .map(|i| Entry {
+                kind: if i % 2 == 0 {
+                    EntryKind::User
+                } else {
+                    EntryKind::Bot
+                },
+                text: format!(
+                    "message {i}: {}\n```rust\nfn x() {{}}\n```\n- item\n- **bold** `code`",
+                    "lorem ipsum dolor sit amet ".repeat(12)
+                ),
+            })
+            .collect();
+        app.logs.insert(bot, v);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(200, 60)).unwrap();
+        let n = 50;
+        let t = Instant::now();
+        for _ in 0..n {
+            app.feed_cache = None;
+            term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        }
+        let cold = t.elapsed() / n;
+        let t = Instant::now();
+        for _ in 0..n {
+            term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        }
+        let warm = t.elapsed() / n;
+        let t = Instant::now();
+        for _ in 0..n {
+            app.tick();
+        }
+        eprintln!(
+            "PROBE 400 messages, 200x60: draw (layout rebuilt) {cold:?}, draw (cached) {warm:?}, tick {:?}",
+            t.elapsed() / n
         );
     }
 }

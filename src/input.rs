@@ -133,6 +133,22 @@ pub fn layout(s: &str, cur: usize, width: usize) -> Layout {
     Layout { rows, cursor }
 }
 
+/// The char index (in the whole buffer, counting each newline as one char) where each of
+/// [`layout`]'s rows starts.
+pub fn row_starts(s: &str, width: usize) -> Vec<usize> {
+    let w = width.max(1);
+    let mut out = vec![];
+    let mut off = 0;
+    for line in s.split('\n') {
+        let n = line.chars().count();
+        for r in 0..(n / w + 1) {
+            out.push(off + r * w);
+        }
+        off += n + 1;
+    }
+    out
+}
+
 /// Rows the box shows: all rows, capped at [`MAX_INPUT_ROWS`].
 pub fn visible_rows(total: usize) -> usize {
     total.clamp(1, MAX_INPUT_ROWS)

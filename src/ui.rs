@@ -358,6 +358,8 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
 
     // Sidebar: the bot list (the account switcher is in the header).
     app.sidebar_area = side;
+    app.body_area = body;
+    app.input_area = bottom;
     let items: Vec<ListItem> = app
         .bots
         .iter()
@@ -390,44 +392,59 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     // Message bubbles wrap at most 2/3 of the body width.
     let bubble = bubble_width(inner_w);
     // Chat feed (from SQLite), then transient notices in their own section.
-    // A blank line separates consecutive messages.
-    let mut lines: Vec<Line> = vec![];
-    for (i, e) in app.feed().iter().enumerate() {
-        if i > 0 {
-            lines.push(Line::default());
+    // A blank line separates consecutive messages. The feed's lines and their wrapped
+    // heights are cached and only rebuilt when the feed, width, bot name or entry styles
+    // change, so a frame doesn't re-wrap the whole transcript.
+    let key = feed_key(app.feed(), inner_w, bot_name.as_deref());
+    if app.feed_cache.as_ref().is_none_or(|c| c.key != key) {
+        let mut lines: Vec<Line<'static>> = vec![];
+        for (i, e) in app.feed().iter().enumerate() {
+            if i > 0 {
+                lines.push(Line::default());
+            }
+            lines.extend(entry_lines(
+                e.kind,
+                &e.text,
+                bot_name.as_deref(),
+                Some(bubble),
+            ));
         }
-        lines.extend(entry_lines(
-            e.kind,
-            &e.text,
-            bot_name.as_deref(),
-            Some(bubble),
-        ));
+        let rows = row_counts(&lines, inner_w);
+        app.feed_cache = Some(FeedCache { key, lines, rows });
     }
+    let cache = app.feed_cache.as_ref().expect("built above");
+    let mut extra: Vec<Line<'static>> = vec![];
     if !app.notices().is_empty() {
-        if !lines.is_empty() {
-            lines.push(Line::default());
-            lines.push(theme::muted().line("── notices (not saved) ──"));
+        if !cache.lines.is_empty() {
+            extra.push(Line::default());
+            extra.push(theme::muted().line("── notices (not saved) ──"));
         }
-        lines.extend(
+        extra.extend(
             app.notices()
                 .iter()
                 .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref(), None)),
         );
     }
-    if lines.is_empty() {
-        lines = empty_state(app)
+    if cache.lines.is_empty() && extra.is_empty() {
+        extra = empty_state(app)
             .into_iter()
             .map(|t| theme::muted().line(t))
             .collect();
     }
+    let extra_rows = row_counts(&extra, inner_w);
     // Exact wrapped height (word wrap can need more rows than width/cols), so
     // "scrolled to bottom" really shows the newest line.
-    let total: usize = Paragraph::new(lines.clone())
-        .wrap(Wrap { trim: false })
-        .line_count(inner_w as u16);
-    let max_off = (total as u16).saturating_sub(inner_h);
+    let total: usize = cache.rows.iter().chain(&extra_rows).sum();
+    let max_off = (total.min(u16::MAX as usize) as u16).saturating_sub(inner_h);
     let scroll = app.scroll.min(max_off);
     let off = max_off - scroll;
+    // Only the lines that reach into the viewport are rendered.
+    let (lines, skip) = visible_lines(
+        cache.lines.iter().chain(&extra),
+        cache.rows.iter().chain(&extra_rows).copied(),
+        off as usize,
+        inner_h as usize,
+    );
     let title = match &bot_name {
         Some(n) if app.is_typing() => {
             const SPIN: [char; 4] = ['⠋', '⠙', '⠹', '⠸'];
@@ -446,7 +463,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     f.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
-            .scroll((off, 0))
+            .scroll((skip as u16, 0))
             .block(chat_block.title(title)),
         body,
     );
@@ -460,13 +477,41 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         InputMode::Normal => " message or /command · Shift/Alt-Enter newline · F1 help ",
     };
     let scroll = app.input_scroll;
+    // The selected range in char indices (masked prompts never select).
+    let sel = match app.mode {
+        InputMode::Normal => app.input_selection().map(|(a, b)| {
+            (
+                app.input[..a].chars().count(),
+                app.input[..b].chars().count(),
+            )
+        }),
+        _ => None,
+    };
+    let starts = crate::input::row_starts(&shown, text_w);
     let input_lines: Vec<Line> = il
         .rows
         .iter()
         .enumerate()
         .skip(scroll)
         .take(vis)
-        .map(|(i, r)| Line::raw(format!("{}{r}", if i == 0 { "> " } else { "  " })))
+        .map(|(i, r)| {
+            let lead = Span::raw(if i == 0 { "> " } else { "  " });
+            match (sel, starts.get(i)) {
+                (Some((a, b)), Some(&s0)) => {
+                    let chars: Vec<char> = r.chars().collect();
+                    let n = chars.len();
+                    let (x, y) = (a.saturating_sub(s0).min(n), b.saturating_sub(s0).min(n));
+                    let part = |p: &[char]| p.iter().collect::<String>();
+                    Line::from(vec![
+                        lead,
+                        Span::raw(part(&chars[..x])),
+                        theme::selected().span(part(&chars[x..y])),
+                        Span::raw(part(&chars[y..])),
+                    ])
+                }
+                _ => Line::from(vec![lead, Span::raw(r.clone())]),
+            }
+        })
         .collect();
     let more = if il.rows.len() > vis {
         format!(" {}/{} ", il.cursor.0 + 1, il.rows.len())
@@ -487,6 +532,69 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         let y = bottom.y + 1 + (row - scroll) as u16;
         Position::new(x.min(bottom.right().saturating_sub(2)), y)
     })
+}
+
+/// The chat feed's laid-out lines and the wrapped height of each, for one key.
+pub struct FeedCache {
+    key: u64,
+    lines: Vec<Line<'static>>,
+    rows: Vec<usize>,
+}
+
+/// What the feed's layout depends on: the entries, the width, the bot's name and the
+/// entry styles of the theme being drawn with.
+fn feed_key(feed: &[crate::app::Entry], inner_w: usize, bot: Option<&str>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (inner_w, bot, feed.len()).hash(&mut h);
+    for e in feed {
+        (e.kind as u8, &e.text).hash(&mut h);
+    }
+    for k in [
+        EntryKind::System,
+        EntryKind::Error,
+        EntryKind::User,
+        EntryKind::Bot,
+    ] {
+        format!("{:?}{:?}", theme::entry(k), theme::entry_label(k)).hash(&mut h);
+    }
+    h.finish()
+}
+
+/// Wrapped height of each line at `width` (what `Paragraph` with `Wrap` would use).
+fn row_counts(lines: &[Line<'static>], width: usize) -> Vec<usize> {
+    lines
+        .iter()
+        .map(|l| {
+            Paragraph::new(l.clone())
+                .wrap(Wrap { trim: false })
+                .line_count(width.max(1) as u16)
+        })
+        .collect()
+}
+
+/// The lines that cover rows `off..off + height`, and how many rows of the first one
+/// lie above the viewport.
+fn visible_lines<'l>(
+    lines: impl Iterator<Item = &'l Line<'static>>,
+    rows: impl Iterator<Item = usize>,
+    off: usize,
+    height: usize,
+) -> (Vec<Line<'static>>, usize) {
+    let (mut out, mut skip, mut at) = (vec![], 0, 0);
+    for (l, r) in lines.zip(rows) {
+        if at + r > off && at < off + height {
+            if out.is_empty() {
+                skip = off.saturating_sub(at);
+            }
+            out.push(l.clone());
+        }
+        at += r;
+        if at >= off + height {
+            break;
+        }
+    }
+    (out, skip)
 }
 
 /// Guidance shown when the body has nothing in it yet.
@@ -716,12 +824,12 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
 
 /// Lines for one entry. Chat messages (`bubble = Some(max)`) are pre-wrapped to `max`
 /// columns: yours right-aligned, the bot's left-aligned. Notices (`None`) wrap normally.
-fn entry_lines<'a>(
+fn entry_lines(
     kind: EntryKind,
-    text: &'a str,
+    text: &str,
     bot: Option<&str>,
     bubble: Option<usize>,
-) -> Vec<Line<'a>> {
+) -> Vec<Line<'static>> {
     if let Some(max) = bubble
         && kind == EntryKind::User
     {
@@ -787,6 +895,78 @@ mod tests {
         assert_eq!(app.sidebar_area.y, 1);
         assert_eq!(app.account_area.y, 0);
         assert_eq!(app.theme_areas.len(), 3);
+    }
+
+    #[test]
+    fn visible_lines_cover_exactly_the_viewport() {
+        let lines: Vec<Line<'static>> = (0..6).map(|i| Line::raw(format!("l{i}"))).collect();
+        let rows = [1, 3, 1, 2, 1, 1];
+        let (v, skip) = visible_lines(lines.iter(), rows.iter().copied(), 2, 3);
+        // Rows: l0=0, l1=1..4, l2=4, l3=5..7 → rows 2..5 are l1 (from its 2nd row) and l2.
+        assert_eq!(v, vec![Line::raw("l1"), Line::raw("l2")]);
+        assert_eq!(skip, 1);
+        let (v, skip) = visible_lines(lines.iter(), rows.iter().copied(), 0, 100);
+        assert_eq!((v.len(), skip), (6, 0));
+    }
+
+    #[test]
+    fn the_feed_cache_follows_new_entries_and_theme_changes() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        crate::app::tests::mock_login(&mut app, "t");
+        let bot = app.active_bot().unwrap().id.clone();
+        let entry = |t: &str| crate::app::Entry {
+            kind: EntryKind::Bot,
+            text: t.into(),
+        };
+        app.logs.insert(
+            bot.clone(),
+            (0..200).map(|i| entry(&format!("old {i}"))).collect(),
+        );
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        let screen = |term: &mut Terminal<TestBackend>, app: &mut App| {
+            term.draw(|f| draw(f, app)).unwrap();
+            term.backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>()
+        };
+        let s = screen(&mut term, &mut app);
+        assert!(
+            s.contains("old 199") && !s.contains("old 100"),
+            "bottom of the feed"
+        );
+        let key = app.feed_cache.as_ref().unwrap().key;
+        screen(&mut term, &mut app);
+        assert_eq!(
+            app.feed_cache.as_ref().unwrap().key,
+            key,
+            "reused while unchanged"
+        );
+        app.logs.get_mut(&bot).unwrap().push(entry("brand new"));
+        assert!(screen(&mut term, &mut app).contains("brand new"));
+        // Scrolled up: older lines, same as an uncached layout would show.
+        app.scroll = 10_000;
+        let s = screen(&mut term, &mut app);
+        assert!(s.contains("old 0") && !s.contains("brand new"), "{s}");
+        // Another theme's entry styles rebuild the layout.
+        app.scroll = 0;
+        let key = app.feed_cache.as_ref().unwrap().key;
+        let mut t = app.theme.as_ref().clone();
+        t.dark.colors[crate::theme::color::ACCENT] = ratatui::style::Color::Indexed(1);
+        t.light.colors[crate::theme::color::ACCENT] = ratatui::style::Color::Indexed(1);
+        let s = crate::theme::slot::LABEL_BOT;
+        t.dark.styles[s].fg = Some(crate::theme::ColorRef::Lit(ratatui::style::Color::Indexed(
+            9,
+        )));
+        t.light.styles[s].fg = Some(crate::theme::ColorRef::Lit(ratatui::style::Color::Indexed(
+            9,
+        )));
+        app.theme = std::sync::Arc::new(t);
+        screen(&mut term, &mut app);
+        assert_ne!(app.feed_cache.as_ref().unwrap().key, key);
     }
 
     #[test]

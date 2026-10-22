@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.7.2] - 2026-10-21
+
+### Fixed
+
+- **Clicks responded slowly**, mostly while the mouse was moving. Mouse capture reports every
+  pointer move (xterm mode 1003). The event loop handled one event per pass and redrew the
+  whole screen after each, so a click waited behind one full redraw per queued move.
+  - With a 400-message chat at 200×60, a redraw took about 17 ms in a release build (about
+    207 ms in a debug build). A burst of a few hundred moves therefore held a click back for
+    seconds.
+  - Every queued event is now handled before the next draw. Only the last pointer move of a
+    batch is kept (pick-list hover), and drags are dropped.
+  - Pointer moves outside pick lists, button releases and key releases no longer trigger a
+    redraw.
+  - A click now takes effect on the next frame.
+- **Ctrl-Shift-C quit the program.** The quit handler fired on any key with Ctrl held whose
+  letter was `c` or `d`. Terminals deliver Ctrl-Shift-C as Ctrl-C (or as Ctrl+Shift+C), so the
+  copy shortcut quit, as did Ctrl-D, even in the theme editor with unsaved changes. Now a
+  single resolver (`keyctx`) decides from focus, the pane under the mouse, selection and
+  in-flight state, in this order:
+  1. A selection in the input is copied (chat selection lands in 1.8.0).
+  2. A pending reply is cancelled when the input or chat has focus.
+  3. Text in the focused input: Ctrl-C clears it (Ctrl-Z restores it); Ctrl-Shift-C copies it.
+  4. An open overlay (picker, theme editor, help, shell) closes like Esc.
+  5. Over the chat with nothing selected: a hint, no quit.
+  6. Otherwise "Press Ctrl-C again to quit"; a second press within 1.5 s with nothing done
+     in between quits.
+  - Ctrl-Shift-C never quits, closes or cancels. Ctrl-Q and `/quit` quit at once. Ctrl-D
+    deletes forward (or, in the theme editor, duplicates); on an empty input it counts like
+    Ctrl-C. Shift+arrows select in the input; Ctrl-A selects all of it.
+- **Redraws no longer re-wrap the whole transcript.** The chat feed's lines and wrapped heights
+  are cached until the feed, width, bot name or entry styles change, and only the lines in view
+  are rendered. A redraw of a 400-message chat dropped from about 17 ms to about 0.5 ms
+  (release build).
+
 ## [1.7.1] - 2026-10-18
 
 Completes the 1.7.0 sync with acp-rs-scraper (its 2.14.0). These changes missed the 1.7.0 tag,
@@ -450,7 +485,8 @@ First release.
   handled like 401, re-reading or re-exchanging the credential.
 - A build break caused by quotes inside the delivery help text.
 
-[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.7.2...HEAD
+[1.7.2]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/WeirdBrains/grokbot-tui/compare/v1.5.0...v1.6.0

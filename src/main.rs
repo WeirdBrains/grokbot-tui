@@ -7,6 +7,7 @@ mod config;
 mod datadir;
 mod help;
 mod input;
+mod keyctx;
 mod picker;
 mod storage;
 mod theme;
@@ -207,6 +208,8 @@ fn check_theme_flag(dir: &std::path::Path, name: &str) -> Result<()> {
 
 fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let mut captured = true;
+    let mut dirty = true;
+    let mut last_draw = std::time::Instant::now();
     while !app.should_quit {
         app.tick();
         if app.mouse_capture != captured {
@@ -223,217 +226,351 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             let _ = out.write_all(osc52(&t).as_bytes());
             let _ = out.flush();
         }
-        term.draw(|f| ui::draw(f, app))?;
-        if !event::poll(app::UI_TICK)? {
+        // Draw after input changed something, else at the UI tick (spinners, replies
+        // arriving from background tasks).
+        if dirty || last_draw.elapsed() >= app::UI_TICK {
+            term.draw(|f| ui::draw(f, app))?;
+            dirty = false;
+            last_draw = std::time::Instant::now();
+        }
+        if !event::poll(app::UI_TICK.saturating_sub(last_draw.elapsed()))? {
             continue;
         }
-        match event::read()? {
-            Event::Key(k) if k.kind == KeyEventKind::Press => {
-                if k.modifiers.contains(KeyModifiers::CONTROL)
-                    && matches!(k.code, KeyCode::Char('c') | KeyCode::Char('d'))
-                {
-                    app.should_quit = true;
-                    continue;
-                }
-                if let Some(p) = app.picker.as_mut() {
-                    let before = p.cursor;
-                    match k.code {
-                        KeyCode::Esc | KeyCode::Char('q') => app.picker_cancel(),
-                        KeyCode::Enter => app.picker_confirm(),
-                        KeyCode::Up | KeyCode::Char('k') => p.move_by(-1),
-                        KeyCode::Down | KeyCode::Char('j') => p.move_by(1),
-                        KeyCode::PageUp => p.move_by(-10),
-                        KeyCode::PageDown => p.move_by(10),
-                        KeyCode::Home => p.first(),
-                        KeyCode::End => p.last(),
-                        _ => {}
-                    }
-                    app.picker_moved(before);
-                    continue;
-                }
-                if app.editor.is_some() {
-                    app.editor_key(k);
-                    continue;
-                }
-                if k.code == KeyCode::F(6) {
-                    app.toggle_mouse_capture();
-                    continue;
-                }
-                // Shift-F5 (most terminals send F5 + Shift; some send F17): theme editor.
-                if (k.code == KeyCode::F(5) && k.modifiers.contains(KeyModifiers::SHIFT))
-                    || k.code == KeyCode::F(17)
-                {
-                    app.open_theme_editor(None);
-                    continue;
-                }
-                if k.code == KeyCode::F(5) {
-                    app.open_theme_picker();
-                    continue;
-                }
-                if k.code == KeyCode::F(2) {
-                    app.open_bot_picker();
-                    continue;
-                }
-                if k.code == KeyCode::F(3) {
-                    app.open_account_picker();
-                    continue;
-                }
-                if k.code == KeyCode::F(4) {
-                    app.cycle_theme_mode();
-                    continue;
-                }
-                if app.shell.is_some() {
-                    match k.code {
-                        KeyCode::Esc | KeyCode::Char('q') => app.close_shell(),
-                        KeyCode::Up | KeyCode::Char('k') => app.shell_scroll(-1),
-                        KeyCode::Down | KeyCode::Char('j') => app.shell_scroll(1),
-                        KeyCode::PageUp => app.shell_scroll(-10),
-                        KeyCode::PageDown | KeyCode::Char(' ') => app.shell_scroll(10),
-                        KeyCode::Home => app.shell_scroll(-100_000),
-                        KeyCode::End => app.shell_scroll(100_000),
-                        _ => {}
-                    }
-                    continue;
-                }
-                if app.help.as_ref().is_some_and(|m| m.query.is_some()) {
-                    let q = app.help.as_mut().and_then(|m| m.query.as_mut()).unwrap();
-                    match k.code {
-                        KeyCode::Esc => app.help.as_mut().unwrap().query = None,
-                        KeyCode::Enter => app.help_search_submit(),
-                        KeyCode::Backspace => {
-                            q.pop();
-                        }
-                        KeyCode::Char(c) => q.push(c),
-                        _ => {}
-                    }
-                    continue;
-                }
-                if app.help.is_some() {
-                    match k.code {
-                        KeyCode::Char('/') => app.help_search_start(),
-                        KeyCode::Esc | KeyCode::Char('q') | KeyCode::F(1) => app.close_help(),
-                        KeyCode::Up | KeyCode::Char('k') => app.help_scroll(-1),
-                        KeyCode::Down | KeyCode::Char('j') => app.help_scroll(1),
-                        KeyCode::PageUp => app.help_scroll(-10),
-                        KeyCode::PageDown | KeyCode::Char(' ') => app.help_scroll(10),
-                        KeyCode::Home => app.help_scroll(-10_000),
-                        KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => app.help_select(1),
-                        KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
-                            app.help_select(-1)
-                        }
-                        KeyCode::Enter => app.help_follow(),
-                        KeyCode::Backspace => app.help_back(),
-                        _ => {}
-                    }
-                    continue;
-                }
-                if k.code == KeyCode::F(1)
-                    || (k.code == KeyCode::Char('?')
-                        && app.input.is_empty()
-                        && app.mode == app::InputMode::Normal)
-                {
-                    app.open_help(if k.code == KeyCode::F(1) { "" } else { "keys" });
-                    continue;
-                }
-                match k.code {
-                    KeyCode::Tab => {
-                        app.focus = if app.focus == Focus::Input {
-                            Focus::Sidebar
-                        } else {
-                            Focus::Input
-                        };
-                        if let Some(i) = app.active {
-                            app.sidebar_cursor = i;
-                        }
-                    }
-                    KeyCode::PageUp => app.scroll_up(10),
-                    KeyCode::PageDown => app.scroll_down(10),
-                    KeyCode::Esc => {
-                        app.focus = Focus::Input;
-                        app.cancel_input_mode();
-                    }
-                    code if app.focus == Focus::Sidebar => match code {
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            app.sidebar_cursor = app.sidebar_cursor.saturating_sub(1)
-                        }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            if app.sidebar_cursor + 1 < app.bots.len() {
-                                app.sidebar_cursor += 1;
-                            }
-                        }
-                        KeyCode::Enter => {
-                            app.select_bot(app.sidebar_cursor);
-                            app.focus = Focus::Input;
-                        }
-                        _ => {}
-                    },
-                    KeyCode::Enter if is_newline_key(&k) => app.input_newline(),
-                    KeyCode::Char('j') if k.modifiers.contains(KeyModifiers::CONTROL) => {
-                        app.input_newline()
-                    }
-                    KeyCode::Enter => app.submit(),
-                    KeyCode::Backspace => app.input_backspace(),
-                    KeyCode::Delete => app.input_delete(),
-                    KeyCode::Left => app.input_left(),
-                    KeyCode::Right => app.input_right(),
-                    KeyCode::Home => app.input_home(),
-                    KeyCode::End => app.input_end(),
-                    // Move between input lines; at the top/bottom line, scroll the chat.
-                    KeyCode::Up => {
-                        if !app.input_up() {
-                            app.scroll_up(1)
-                        }
-                    }
-                    KeyCode::Down => {
-                        if !app.input_down() {
-                            app.scroll_down(1)
-                        }
-                    }
-                    KeyCode::Char(c) => app.input_insert(&c.to_string()),
-                    _ => {}
-                }
+        // Handle everything already queued before drawing again. Mouse capture reports
+        // every pointer move (xterm mode 1003), so a click used to wait behind one full
+        // redraw per queued move.
+        let first = event::read()?;
+        let batch = read_batch(first, || {
+            Ok(if event::poll(std::time::Duration::ZERO)? {
+                Some(event::read()?)
+            } else {
+                None
+            })
+        })?;
+        for ev in coalesce(batch) {
+            dirty |= handle_event(app, ev);
+            if app.should_quit {
+                break;
             }
-            Event::Paste(_) if app.editor.is_some() => {}
-            Event::Paste(s) => app.input_insert(s.trim_end_matches(['\r', '\n'])),
-            Event::Mouse(m) if app.picker.is_some() => {
-                let p = app.picker.as_mut().unwrap();
-                let before = p.cursor;
-                match m.kind {
-                    MouseEventKind::Moved => p.hover(m.column, m.row),
-                    MouseEventKind::ScrollUp => p.move_by(-1),
-                    MouseEventKind::ScrollDown => p.move_by(1),
-                    MouseEventKind::Down(MouseButton::Left) => match p.click(m.column, m.row) {
-                        picker::MouseOutcome::Confirm => app.picker_confirm(),
-                        picker::MouseOutcome::Cancel => app.picker_cancel(),
-                        picker::MouseOutcome::None => {}
-                    },
-                    _ => {}
-                }
-                app.picker_moved(before);
-            }
-            Event::Mouse(m) if app.editor.is_some() => match m.kind {
-                MouseEventKind::Down(MouseButton::Left) => app.editor_click(m.column, m.row),
-                MouseEventKind::ScrollUp => app.editor_scroll(-1),
-                MouseEventKind::ScrollDown => app.editor_scroll(1),
-                _ => {}
-            },
-            Event::Mouse(m) => match m.kind {
-                MouseEventKind::ScrollUp if app.shell.is_some() => app.shell_scroll(-3),
-                MouseEventKind::ScrollDown if app.shell.is_some() => app.shell_scroll(3),
-                MouseEventKind::Down(MouseButton::Left) if app.shell.is_some() => {}
-                MouseEventKind::Down(MouseButton::Left) if app.help.is_none() => {
-                    app.click(m.column, m.row)
-                }
-                MouseEventKind::ScrollUp if app.help.is_some() => app.help_scroll(-3),
-                MouseEventKind::ScrollDown if app.help.is_some() => app.help_scroll(3),
-                MouseEventKind::ScrollUp => app.scroll_up(3),
-                MouseEventKind::ScrollDown => app.scroll_down(3),
-                _ => {}
-            },
-            _ => {}
         }
     }
     Ok(())
+}
+
+/// What a Ctrl key that could end the program does.
+#[derive(Debug, PartialEq, Eq)]
+enum QuitKey {
+    /// Ctrl-Q: quit right away.
+    Quit,
+    /// Ctrl-Shift-C (terminals' copy shortcut): copy, never quit.
+    Copy,
+    CtrlC,
+    CtrlD,
+}
+
+/// Classify Ctrl-C / Ctrl-Shift-C / Ctrl-D / Ctrl-Q. Shift is checked first, so the copy
+/// shortcut can't fall through to Ctrl-C, whichever case the terminal reports the letter in.
+fn quit_key(k: &ratatui::crossterm::event::KeyEvent) -> Option<QuitKey> {
+    if !k.modifiers.contains(KeyModifiers::CONTROL) {
+        return None;
+    }
+    let KeyCode::Char(c) = k.code else {
+        return None;
+    };
+    let shift = k.modifiers.contains(KeyModifiers::SHIFT) || c.is_ascii_uppercase();
+    match (c.to_ascii_lowercase(), shift) {
+        ('c', true) => Some(QuitKey::Copy),
+        ('c', false) => Some(QuitKey::CtrlC),
+        ('d', false) => Some(QuitKey::CtrlD),
+        ('q', false) => Some(QuitKey::Quit),
+        _ => None,
+    }
+}
+
+/// Most events read in one go before a redraw (so a flood can't starve the screen).
+const MAX_BATCH: usize = 4096;
+
+/// `first` plus every event `more` returns without waiting, up to [`MAX_BATCH`].
+fn read_batch(first: Event, mut more: impl FnMut() -> Result<Option<Event>>) -> Result<Vec<Event>> {
+    let mut v = vec![first];
+    while v.len() < MAX_BATCH {
+        match more()? {
+            Some(e) => v.push(e),
+            None => break,
+        }
+    }
+    Ok(v)
+}
+
+/// Drop pointer motion nobody needs: drags are unused, and of the moves only the last one
+/// matters (pick-list hover). Everything else keeps its order.
+fn coalesce(batch: Vec<Event>) -> Vec<Event> {
+    let is_move = |e: &Event| matches!(e, Event::Mouse(m) if m.kind == MouseEventKind::Moved);
+    let last_move = batch.iter().rposition(is_move);
+    batch
+        .into_iter()
+        .enumerate()
+        .filter(|(i, e)| match e {
+            Event::Mouse(m) if matches!(m.kind, MouseEventKind::Drag(_)) => false,
+            e if is_move(e) => Some(*i) == last_move,
+            _ => true,
+        })
+        .map(|(_, e)| e)
+        .collect()
+}
+
+/// Apply one terminal event. Returns whether the screen may have changed (so a redraw is
+/// due); pointer moves outside a pick list, button releases and key releases don't.
+fn handle_event(app: &mut App, ev: Event) -> bool {
+    if let Event::Mouse(m) = &ev {
+        app.mouse_pos = Some((m.column, m.row));
+        if matches!(m.kind, MouseEventKind::Down(_)) {
+            app.quit_armed = None;
+        }
+    }
+    match ev {
+        Event::Mouse(m)
+            if (m.kind == MouseEventKind::Moved && app.picker.is_none())
+                || matches!(m.kind, MouseEventKind::Up(_) | MouseEventKind::Drag(_)) =>
+        {
+            return false;
+        }
+        Event::Key(k) if k.kind == KeyEventKind::Press => {
+            if let Some(q) = quit_key(&k) {
+                let now = std::time::Instant::now();
+                match q {
+                    QuitKey::Quit => app.should_quit = true,
+                    QuitKey::Copy => app.ctrl_c(true, now),
+                    QuitKey::CtrlC => app.ctrl_c(false, now),
+                    // Ctrl-D: the theme editor's duplicate; delete forward while there's
+                    // text; else like Ctrl-C.
+                    QuitKey::CtrlD if app.editor.is_some() && app.picker.is_none() => {
+                        app.quit_armed = None;
+                        app.editor_key(k)
+                    }
+                    QuitKey::CtrlD if !app.input.is_empty() && !app.overlay_open() => {
+                        app.quit_armed = None;
+                        app.input_delete()
+                    }
+                    QuitKey::CtrlD => app.ctrl_c(false, now),
+                }
+                return true;
+            }
+            // Anything else done in between disarms "press Ctrl-C again".
+            app.quit_armed = None;
+            if let Some(p) = app.picker.as_mut() {
+                let before = p.cursor;
+                match k.code {
+                    KeyCode::Esc | KeyCode::Char('q') => app.picker_cancel(),
+                    KeyCode::Enter => app.picker_confirm(),
+                    KeyCode::Up | KeyCode::Char('k') => p.move_by(-1),
+                    KeyCode::Down | KeyCode::Char('j') => p.move_by(1),
+                    KeyCode::PageUp => p.move_by(-10),
+                    KeyCode::PageDown => p.move_by(10),
+                    KeyCode::Home => p.first(),
+                    KeyCode::End => p.last(),
+                    _ => {}
+                }
+                app.picker_moved(before);
+                return true;
+            }
+            if app.editor.is_some() {
+                app.editor_key(k);
+                return true;
+            }
+            if k.code == KeyCode::F(6) {
+                app.toggle_mouse_capture();
+                return true;
+            }
+            // Shift-F5 (most terminals send F5 + Shift; some send F17): theme editor.
+            if (k.code == KeyCode::F(5) && k.modifiers.contains(KeyModifiers::SHIFT))
+                || k.code == KeyCode::F(17)
+            {
+                app.open_theme_editor(None);
+                return true;
+            }
+            if k.code == KeyCode::F(5) {
+                app.open_theme_picker();
+                return true;
+            }
+            if k.code == KeyCode::F(2) {
+                app.open_bot_picker();
+                return true;
+            }
+            if k.code == KeyCode::F(3) {
+                app.open_account_picker();
+                return true;
+            }
+            if k.code == KeyCode::F(4) {
+                app.cycle_theme_mode();
+                return true;
+            }
+            if app.shell.is_some() {
+                match k.code {
+                    KeyCode::Esc | KeyCode::Char('q') => app.close_shell(),
+                    KeyCode::Up | KeyCode::Char('k') => app.shell_scroll(-1),
+                    KeyCode::Down | KeyCode::Char('j') => app.shell_scroll(1),
+                    KeyCode::PageUp => app.shell_scroll(-10),
+                    KeyCode::PageDown | KeyCode::Char(' ') => app.shell_scroll(10),
+                    KeyCode::Home => app.shell_scroll(-100_000),
+                    KeyCode::End => app.shell_scroll(100_000),
+                    _ => {}
+                }
+                return true;
+            }
+            if app.help.as_ref().is_some_and(|m| m.query.is_some()) {
+                let q = app.help.as_mut().and_then(|m| m.query.as_mut()).unwrap();
+                match k.code {
+                    KeyCode::Esc => app.help.as_mut().unwrap().query = None,
+                    KeyCode::Enter => app.help_search_submit(),
+                    KeyCode::Backspace => {
+                        q.pop();
+                    }
+                    KeyCode::Char(c) => q.push(c),
+                    _ => {}
+                }
+                return true;
+            }
+            if app.help.is_some() {
+                match k.code {
+                    KeyCode::Char('/') => app.help_search_start(),
+                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::F(1) => app.close_help(),
+                    KeyCode::Up | KeyCode::Char('k') => app.help_scroll(-1),
+                    KeyCode::Down | KeyCode::Char('j') => app.help_scroll(1),
+                    KeyCode::PageUp => app.help_scroll(-10),
+                    KeyCode::PageDown | KeyCode::Char(' ') => app.help_scroll(10),
+                    KeyCode::Home => app.help_scroll(-10_000),
+                    KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => app.help_select(1),
+                    KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => app.help_select(-1),
+                    KeyCode::Enter => app.help_follow(),
+                    KeyCode::Backspace => app.help_back(),
+                    _ => {}
+                }
+                return true;
+            }
+            if k.code == KeyCode::F(1)
+                || (k.code == KeyCode::Char('?')
+                    && app.input.is_empty()
+                    && app.mode == app::InputMode::Normal)
+            {
+                app.open_help(if k.code == KeyCode::F(1) { "" } else { "keys" });
+                return true;
+            }
+            match k.code {
+                KeyCode::Tab => {
+                    app.focus = if app.focus == Focus::Input {
+                        Focus::Sidebar
+                    } else {
+                        Focus::Input
+                    };
+                    if let Some(i) = app.active {
+                        app.sidebar_cursor = i;
+                    }
+                }
+                KeyCode::PageUp => app.scroll_up(10),
+                KeyCode::PageDown => app.scroll_down(10),
+                KeyCode::Esc => {
+                    app.focus = Focus::Input;
+                    app.cancel_input_mode();
+                }
+                code if app.focus == Focus::Sidebar => match code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        app.sidebar_cursor = app.sidebar_cursor.saturating_sub(1)
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if app.sidebar_cursor + 1 < app.bots.len() {
+                            app.sidebar_cursor += 1;
+                        }
+                    }
+                    KeyCode::Enter => {
+                        app.select_bot(app.sidebar_cursor);
+                        app.focus = Focus::Input;
+                    }
+                    _ => {}
+                },
+                KeyCode::Enter if is_newline_key(&k) => app.input_newline(),
+                KeyCode::Char('j') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.input_newline()
+                }
+                KeyCode::Enter => app.submit(),
+                KeyCode::Char('a') if k.modifiers.contains(KeyModifiers::CONTROL) => app.ctrl_a(),
+                KeyCode::Char('z') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.input_undo_clear()
+                }
+                KeyCode::Backspace => app.input_backspace(),
+                KeyCode::Delete => app.input_delete(),
+                // Shift+movement selects; plain movement drops the selection.
+                KeyCode::Left | KeyCode::Right | KeyCode::Home | KeyCode::End => {
+                    if k.modifiers.contains(KeyModifiers::SHIFT) {
+                        app.input_extend();
+                    } else {
+                        app.input_anchor = None;
+                    }
+                    match k.code {
+                        KeyCode::Left => app.input_left(),
+                        KeyCode::Right => app.input_right(),
+                        KeyCode::Home => app.input_home(),
+                        _ => app.input_end(),
+                    }
+                }
+                // Move between input lines; at the top/bottom line, scroll the chat.
+                KeyCode::Up => {
+                    app.input_anchor = None;
+                    if !app.input_up() {
+                        app.scroll_up(1)
+                    }
+                }
+                KeyCode::Down => {
+                    app.input_anchor = None;
+                    if !app.input_down() {
+                        app.scroll_down(1)
+                    }
+                }
+                KeyCode::Char(c) => app.input_insert(&c.to_string()),
+                _ => {}
+            }
+        }
+        Event::Paste(_) if app.editor.is_some() => {}
+        Event::Paste(s) => app.input_insert(s.trim_end_matches(['\r', '\n'])),
+        Event::Mouse(m) if app.picker.is_some() => {
+            let p = app.picker.as_mut().unwrap();
+            let before = p.cursor;
+            match m.kind {
+                MouseEventKind::Moved => p.hover(m.column, m.row),
+                MouseEventKind::ScrollUp => p.move_by(-1),
+                MouseEventKind::ScrollDown => p.move_by(1),
+                MouseEventKind::Down(MouseButton::Left) => match p.click(m.column, m.row) {
+                    picker::MouseOutcome::Confirm => app.picker_confirm(),
+                    picker::MouseOutcome::Cancel => app.picker_cancel(),
+                    picker::MouseOutcome::None => {}
+                },
+                _ => {}
+            }
+            app.picker_moved(before);
+        }
+        Event::Mouse(m) if app.editor.is_some() => match m.kind {
+            MouseEventKind::Down(MouseButton::Left) => app.editor_click(m.column, m.row),
+            MouseEventKind::ScrollUp => app.editor_scroll(-1),
+            MouseEventKind::ScrollDown => app.editor_scroll(1),
+            _ => {}
+        },
+        Event::Mouse(m) => match m.kind {
+            MouseEventKind::ScrollUp if app.shell.is_some() => app.shell_scroll(-3),
+            MouseEventKind::ScrollDown if app.shell.is_some() => app.shell_scroll(3),
+            MouseEventKind::Down(MouseButton::Left) if app.shell.is_some() => {}
+            MouseEventKind::Down(MouseButton::Left) if app.help.is_none() => {
+                app.click(m.column, m.row)
+            }
+            MouseEventKind::ScrollUp if app.help.is_some() => app.help_scroll(-3),
+            MouseEventKind::ScrollDown if app.help.is_some() => app.help_scroll(3),
+            MouseEventKind::ScrollUp => app.scroll_up(3),
+            MouseEventKind::ScrollDown => app.scroll_down(3),
+            _ => {}
+        },
+        Event::Resize(..) => {}
+        _ => return false,
+    }
+    true
 }
 
 /// OSC 52 "set clipboard" sequence for `text` (base64). Terminals without support ignore it.
@@ -672,6 +809,303 @@ mod theme_flag_tests {
                 .unwrap_err()
                 .to_string()
                 .contains("can't be used")
+        );
+    }
+}
+
+#[cfg(test)]
+mod event_batch_tests {
+    use super::*;
+    use crate::app::tests::{mock_login, test_app};
+    use ratatui::crossterm::event::{KeyEvent, MouseEvent};
+    use std::collections::VecDeque;
+
+    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> Event {
+        Event::Mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    #[test]
+    fn coalesce_keeps_only_the_last_move_and_drops_drags() {
+        let batch = vec![
+            mouse(MouseEventKind::Moved, 1, 1),
+            mouse(MouseEventKind::Drag(MouseButton::Left), 2, 2),
+            Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+            mouse(MouseEventKind::Moved, 3, 3),
+            mouse(MouseEventKind::Down(MouseButton::Left), 4, 4),
+            mouse(MouseEventKind::Moved, 5, 5),
+        ];
+        let out = coalesce(batch);
+        assert_eq!(
+            out,
+            vec![
+                Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+                mouse(MouseEventKind::Down(MouseButton::Left), 4, 4),
+                mouse(MouseEventKind::Moved, 5, 5),
+            ]
+        );
+    }
+
+    #[test]
+    fn read_batch_takes_everything_queued_up_to_the_cap() {
+        let mut q: VecDeque<Event> = (0..10)
+            .map(|i| mouse(MouseEventKind::Moved, i, 0))
+            .collect();
+        let b = read_batch(Event::FocusGained, || Ok(q.pop_front())).unwrap();
+        assert_eq!(b.len(), 11);
+        let b = read_batch(Event::FocusGained, || Ok(Some(Event::FocusLost))).unwrap();
+        assert_eq!(b.len(), MAX_BATCH, "a flood can't starve the screen");
+    }
+
+    #[test]
+    fn pointer_moves_outside_a_pick_list_need_no_redraw() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        assert!(!handle_event(&mut app, mouse(MouseEventKind::Moved, 3, 3)));
+        assert!(!handle_event(
+            &mut app,
+            mouse(MouseEventKind::Up(MouseButton::Left), 3, 3)
+        ));
+        assert!(!handle_event(
+            &mut app,
+            mouse(MouseEventKind::Drag(MouseButton::Left), 3, 3)
+        ));
+        assert!(!handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new_with_kind(
+                KeyCode::Char('a'),
+                KeyModifiers::NONE,
+                KeyEventKind::Release
+            ))
+        ));
+        assert!(handle_event(&mut app, Event::Resize(80, 24)));
+        // In a pick list the hover follows the pointer, so moves do redraw.
+        app.open_theme_picker();
+        assert!(handle_event(&mut app, mouse(MouseEventKind::Moved, 3, 3)));
+    }
+
+    fn press(app: &mut App, code: KeyCode, m: KeyModifiers) {
+        handle_event(app, Event::Key(KeyEvent::new(code, m)));
+    }
+
+    #[test]
+    fn ctrl_shift_c_copies_and_never_quits() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        let cs = KeyModifiers::CONTROL | KeyModifiers::SHIFT;
+        for _ in 0..3 {
+            press(&mut app, KeyCode::Char('c'), cs);
+            press(&mut app, KeyCode::Char('C'), cs);
+            press(&mut app, KeyCode::Char('C'), KeyModifiers::CONTROL);
+        }
+        assert!(!app.should_quit);
+        assert!(app.quit_armed.is_none(), "copy doesn't arm the quit");
+        let n: Vec<String> = app.notices().iter().map(|e| e.text.clone()).collect();
+        assert!(
+            n.iter().any(|t| t.contains("Nothing selected to copy")),
+            "{n:?}"
+        );
+    }
+
+    #[test]
+    fn ctrl_c_twice_quits_and_ctrl_q_quits_at_once() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        // Text in the input: the first Ctrl-C clears it.
+        app.input = "draft".into();
+        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(app.input.is_empty() && !app.should_quit);
+        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(!app.should_quit, "one press only asks");
+        let n: Vec<String> = app.notices().iter().map(|e| e.text.clone()).collect();
+        assert!(
+            n.iter().any(|t| t.contains("Press Ctrl-C again to quit")),
+            "{n:?}"
+        );
+        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(app.should_quit, "the second press quits");
+        // Too slow: the second press asks again.
+        let (mut app, _d) = test_app(&rt);
+        let t0 = std::time::Instant::now();
+        app.ctrl_c(false, t0);
+        app.ctrl_c(
+            false,
+            t0 + app::QUIT_CONFIRM + std::time::Duration::from_millis(1),
+        );
+        assert!(!app.should_quit);
+        app.ctrl_c(
+            false,
+            t0 + app::QUIT_CONFIRM + std::time::Duration::from_millis(500),
+        );
+        assert!(app.should_quit);
+        // Ctrl-D deletes while there's text, else counts like Ctrl-C.
+        let (mut app, _d) = test_app(&rt);
+        app.input = "ab".into();
+        app.input_cursor = 0;
+        press(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
+        assert_eq!(app.input, "b");
+        app.input.clear();
+        press(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
+        assert!(!app.should_quit);
+        press(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
+        assert!(app.should_quit);
+        // In the theme editor Ctrl-D still duplicates (asks for a name).
+        let (mut app, _d) = test_app(&rt);
+        app.open_theme_editor(Some("default"));
+        press(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
+        assert!(!app.should_quit && app.quit_armed.is_none());
+        assert!(matches!(
+            app.editor.as_ref().unwrap().edit,
+            crate::theme_editor::Edit::Name {
+                duplicate: true,
+                ..
+            }
+        ));
+        // Ctrl-Q quits directly; plain q / Esc never quit.
+        let (mut app, _d) = test_app(&rt);
+        press(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+        press(&mut app, KeyCode::Char('q'), KeyModifiers::NONE);
+        assert!(!app.should_quit);
+        press(&mut app, KeyCode::Char('q'), KeyModifiers::CONTROL);
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn ctrl_c_stops_waiting_for_a_reply_first() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "t");
+        let bot = app.active_bot().unwrap().id.clone();
+        app.awaiting.insert(bot, std::time::Instant::now());
+        assert!(app.is_typing());
+        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(!app.is_typing() && !app.should_quit && app.quit_armed.is_none());
+    }
+
+    fn notices_text(app: &App) -> String {
+        app.notices()
+            .iter()
+            .map(|e| e.text.clone())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn a_selection_in_the_input_is_copied_not_cleared() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        app.input_insert("hello world");
+        // Shift-Left ×5 selects "world".
+        for _ in 0..5 {
+            press(&mut app, KeyCode::Left, KeyModifiers::SHIFT);
+        }
+        assert_eq!(app.input_selection(), Some((6, 11)));
+        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(app.pending_clipboard.as_deref(), Some("world"));
+        assert_eq!(app.input, "hello world", "copying never clears");
+        assert!(notices_text(&app).contains("Copied 5 chars"));
+        // Ctrl-A selects everything; Ctrl-Shift-C copies it; typing replaces it.
+        press(&mut app, KeyCode::Char('a'), KeyModifiers::CONTROL);
+        press(
+            &mut app,
+            KeyCode::Char('C'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        );
+        assert_eq!(app.pending_clipboard.as_deref(), Some("hello world"));
+        press(&mut app, KeyCode::Char('x'), KeyModifiers::NONE);
+        assert_eq!(app.input, "x");
+        assert!(app.input_selection().is_none());
+        // Plain movement drops a selection.
+        app.input_select_all();
+        press(&mut app, KeyCode::Left, KeyModifiers::NONE);
+        assert!(app.input_selection().is_none());
+        // Ctrl-Shift-C without a selection copies the whole input; Ctrl-C clears it and
+        // Ctrl-Z brings it back.
+        press(
+            &mut app,
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        );
+        assert_eq!(app.pending_clipboard.as_deref(), Some("x"));
+        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(app.input.is_empty());
+        press(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
+        assert_eq!(app.input, "x");
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn ctrl_c_closes_overlays_and_hints_over_the_chat() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        app.open_theme_picker();
+        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(app.picker.is_none() && !app.should_quit && app.quit_armed.is_none());
+        app.open_help("keys");
+        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(app.help.is_none());
+        // The mouse rests on the chat: a hint, never a quit.
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        term.draw(|f| ui::draw(f, &mut app)).unwrap();
+        let b = app.body_area;
+        handle_event(&mut app, mouse(MouseEventKind::Moved, b.x + 3, b.y + 3));
+        for _ in 0..3 {
+            press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        }
+        assert!(!app.should_quit);
+        assert!(notices_text(&app).contains("Nothing selected"));
+        // Over the header: the double press quits, unless something happens in between.
+        handle_event(&mut app, mouse(MouseEventKind::Moved, 0, 0));
+        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        press(&mut app, KeyCode::Char('x'), KeyModifiers::NONE);
+        app.input.clear();
+        app.input_cursor = 0;
+        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(
+            !app.should_quit,
+            "typing in between disarmed the first press"
+        );
+        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn input_row_starts_match_the_layout() {
+        let s = "abcdef\nxy";
+        assert_eq!(crate::input::row_starts(s, 4), vec![0, 4, 7]);
+        assert_eq!(crate::input::layout(s, 0, 4).rows, vec!["abcd", "ef", "xy"]);
+    }
+
+    /// The reported bug: a click queued behind a burst of pointer moves. All of it is
+    /// handled in one batch, so the click takes effect before the next frame.
+    #[test]
+    fn a_click_behind_hundreds_of_moves_lands_in_one_batch() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "t");
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        term.draw(|f| ui::draw(f, &mut app)).unwrap();
+        let r = app.theme_switch_area;
+        let mut q: VecDeque<Event> = (0..500)
+            .map(|i| mouse(MouseEventKind::Moved, (i % 120) as u16, (i % 40) as u16))
+            .collect();
+        q.push_back(mouse(MouseEventKind::Down(MouseButton::Left), r.x + 1, r.y));
+        q.push_back(mouse(MouseEventKind::Up(MouseButton::Left), r.x + 1, r.y));
+        let first = q.pop_front().unwrap();
+        let batch = coalesce(read_batch(first, || Ok(q.pop_front())).unwrap());
+        assert!(batch.len() <= 3, "{batch:?}");
+        let mut dirty = false;
+        for ev in batch {
+            dirty |= handle_event(&mut app, ev);
+        }
+        assert!(dirty);
+        assert!(
+            app.picker.is_some(),
+            "the click opened the theme picker in the same frame"
         );
     }
 }
