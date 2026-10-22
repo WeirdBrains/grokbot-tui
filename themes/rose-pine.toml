@@ -43,6 +43,7 @@ mock_tag = { fg = "@warn" }
 selected = { fg = "@on_accent", bg = "@accent", bold = true }
 cursor_row = { reverse = true }
 selection = { fg = "@on_accent", bg = "@accent", bold = true }
+unread_badge = { fg = "@on_accent", bg = "@warn", bold = true }
 panel_focused = { border = "@accent" }
 panel_unfocused = { border = "@subtle" }
 chat_panel = {}
@@ -104,6 +105,7 @@ mock_tag = { fg = "@warn" }
 selected = { fg = "@on_accent", bg = "@accent", bold = true }
 cursor_row = { reverse = true }
 selection = { fg = "@on_accent", bg = "@accent", bold = true }
+unread_badge = { fg = "@on_accent", bg = "@warn", bold = true }
 panel_focused = { border = "@accent" }
 panel_unfocused = { border = "@subtle" }
 chat_panel = {}

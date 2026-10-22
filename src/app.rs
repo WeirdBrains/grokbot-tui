@@ -452,6 +452,18 @@ pub struct App {
     pub mode: InputMode,
     pub focus: Focus,
     pub scroll: u16,
+    /// Stick the viewport to the newest content (distance-from-bottom scroll == 0).
+    pub follow: bool,
+    /// Absolute top-row offset to keep under the eyes when [`follow`] is false.
+    pub pinned_off: Option<u16>,
+    /// New feed/notice items arrived while scrolled up.
+    pub unread: u32,
+    /// Last laid-out body height in wrapped rows (for anchoring).
+    pub body_rows: u16,
+    /// Last body viewport height in rows.
+    pub body_inner_h: u16,
+    /// Clickable "↓ N new" badge area (set by the renderer).
+    pub unread_area: Rect,
     pub sidebar_area: Rect,
     /// The account switcher in the header (click opens the account picker).
     pub account_area: Rect,
@@ -634,6 +646,12 @@ impl App {
             mode: InputMode::Normal,
             focus: Focus::Input,
             scroll: 0,
+            follow: true,
+            pinned_off: None,
+            unread: 0,
+            body_rows: 0,
+            body_inner_h: 0,
+            unread_area: Rect::default(),
             sidebar_area: Rect::default(),
             account_area: Rect::default(),
             theme_areas: Vec::new(),
@@ -768,9 +786,7 @@ impl App {
         let stamp = self.store.message_stamp(&bot).ok();
         if stamp != self.db_refresh.1 {
             self.db_refresh.1 = stamp;
-            let scroll = self.scroll;
             self.reload_bot_log(&bot);
-            self.scroll = scroll;
         }
     }
 
@@ -1258,7 +1274,7 @@ impl App {
         self.logs.clear();
         self.notices.clear();
         self.awaiting.clear();
-        self.scroll = 0;
+        self.follow_bottom();
         self.poll = PollState {
             next: Instant::now(),
             interval: POLL_IDLE,
@@ -1652,7 +1668,7 @@ impl App {
         let changed = self.active != Some(i);
         self.active = Some(i);
         self.sidebar_cursor = i;
-        self.scroll = 0;
+        self.follow_bottom();
         let id = self.bots[i].id.clone();
         if self.config.active_bot.as_deref() != Some(id.as_str()) {
             self.config.active_bot = Some(id.clone());
@@ -1681,6 +1697,7 @@ impl App {
     /// keeping only trailing system/error lines (e.g. delivery notices) so polls
     /// don't wipe them and don't duplicate them.
     fn reload_bot_log(&mut self, bot_id: &str) {
+        let old_len = self.logs.get(bot_id).map(|v| v.len()).unwrap_or(0);
         let entries: Vec<Entry> = self
             .store
             .messages(bot_id)
@@ -1688,9 +1705,10 @@ impl App {
             .iter()
             .map(entry_from_msg)
             .collect();
+        let new_len = entries.len();
         self.logs.insert(bot_id.to_string(), entries);
-        if self.active_bot().is_some_and(|b| b.id == bot_id) {
-            self.scroll = 0;
+        if self.active_bot().is_some_and(|b| b.id == bot_id) && !self.follow && new_len > old_len {
+            self.unread = self.unread.saturating_add((new_len - old_len) as u32);
         }
     }
 
@@ -1946,8 +1964,8 @@ impl App {
         if n.len() > MAX_NOTICES {
             n.drain(..n.len() - MAX_NOTICES);
         }
-        if key == self.key() {
-            self.scroll = 0;
+        if key == self.key() && !self.follow {
+            self.unread = self.unread.saturating_add(1);
         }
     }
 
@@ -2311,11 +2329,14 @@ impl App {
                 true
             }
             "move.top" => {
-                self.scroll = 0;
+                // Distance-from-bottom: large value = top of the chat.
+                self.scroll = u16::MAX / 2;
+                self.follow = false;
+                self.pinned_off = Some(0);
                 true
             }
             "move.bottom" => {
-                self.scroll = u16::MAX / 2;
+                self.follow_bottom();
                 true
             }
             "focus.next" => {
@@ -2639,6 +2660,7 @@ impl App {
         let trimmed = line.trim().to_string();
         if !trimmed.is_empty() && self.mode == InputMode::Normal {
             self.remember_prompt(&trimmed);
+            self.follow_bottom();
         }
         match self.mode {
             InputMode::GatewayUrl | InputMode::GatewayToken | InputMode::CursorToken
@@ -2751,6 +2773,10 @@ impl App {
 
     pub fn click(&mut self, col: u16, row: u16) {
         let at = ratatui::layout::Position::new(col, row);
+        if self.unread_area.contains(at) {
+            self.follow_bottom();
+            return;
+        }
         if self.body_area.contains(at) && self.help.is_none() && self.shell.is_none() {
             if let Some(off) = crate::select::offset_at(
                 &self.body_plain,
@@ -2795,12 +2821,68 @@ impl App {
     }
 
     pub fn scroll_up(&mut self, n: u16) {
+        if n == 0 {
+            return;
+        }
+        self.follow = false;
         self.scroll = self.scroll.saturating_add(n);
+        self.pinned_off = None; // recompute from scroll on next draw
     }
     pub fn scroll_down(&mut self, n: u16) {
+        if n == 0 {
+            return;
+        }
         self.scroll = self.scroll.saturating_sub(n);
+        self.pinned_off = None;
+        if self.scroll == 0 {
+            self.follow_bottom();
+        }
+    }
+
+    /// Jump to the newest content and resume sticking to the bottom.
+    pub fn follow_bottom(&mut self) {
+        self.scroll = 0;
+        self.follow = true;
+        self.pinned_off = None;
+        self.unread = 0;
+    }
+
+    /// Apply layout totals. Follow (stick to bottom) only when the distance-from-bottom
+    /// scroll is exactly 0 — the max absolute offset. Otherwise pin the absolute top
+    /// offset so appends/rewraps leave the lines on screen unmoved.
+    pub fn apply_body_layout(&mut self, total_rows: u16, inner_h: u16) {
+        let max_off = total_rows.saturating_sub(inner_h);
+        let prev_max = self.body_rows.saturating_sub(self.body_inner_h);
+        // Exact bottom only: no "within a line" tolerance.
+        if self.scroll == 0 {
+            self.follow = true;
+            self.pinned_off = None;
+            self.unread = 0;
+            self.scroll = 0;
+        } else {
+            self.follow = false;
+            let scroll = match self.pinned_off {
+                Some(off) => max_off.saturating_sub(off.min(max_off)),
+                None => anchor_scroll(self.scroll, prev_max, max_off, false),
+            };
+            let off = max_off.saturating_sub(scroll);
+            self.pinned_off = Some(off);
+            self.scroll = scroll;
+        }
+        self.body_rows = total_rows;
+        self.body_inner_h = inner_h;
     }
 }
+
+/// Pure helper: keep the absolute top offset when not following.
+pub fn anchor_scroll(scroll: u16, prev_max_off: u16, new_max_off: u16, follow: bool) -> u16 {
+    if follow {
+        return 0;
+    }
+    let off = prev_max_off.saturating_sub(scroll.min(prev_max_off));
+    new_max_off.saturating_sub(off)
+}
+
 
 fn entry_from_msg(m: &Message) -> Entry {
     Entry {
@@ -2885,6 +2967,120 @@ pub mod tests {
         }
         assert_eq!(app.poll.next, next);
         assert!(UI_TICK < POLL_FAST);
+    }
+
+
+    #[test]
+    fn anchor_scroll_keeps_absolute_offset_when_content_grows() {
+        // Scrolled up 10 from a max of 50 → absolute off = 40.
+        // Content grows so max becomes 60 → keep off 40 → scroll = 20.
+        assert_eq!(crate::app::anchor_scroll(10, 50, 60, false), 20);
+        assert_eq!(crate::app::anchor_scroll(0, 50, 60, true), 0);
+        assert_eq!(crate::app::anchor_scroll(0, 50, 60, false), 10, "at bottom stays at bottom offset");
+    }
+
+    #[test]
+    fn scrolled_up_stays_put_when_notices_and_messages_arrive() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        // Give the feed enough height that scrolling up is possible.
+        if let Some(bot) = app.active_bot().map(|b| b.id.clone()) {
+            for i in 0..40 {
+                app.store
+                    .append_message(
+                        &bot,
+                        &crate::api::Message {
+                            role: crate::api::Role::Bot,
+                            text: format!("line {i} {}", "x".repeat(20)),
+                            remote_id: Some(format!("m{i}")),
+                        },
+                    )
+                    .unwrap();
+            }
+            app.reload_bot_log(&bot);
+        }
+        app.follow_bottom();
+        app.apply_body_layout(80, 10); // max_off = 70
+        assert!(app.follow);
+        app.scroll_up(20);
+        assert!(!app.follow);
+        assert_eq!(app.scroll, 20);
+        app.apply_body_layout(80, 10);
+        let pinned = app.pinned_off;
+        assert_eq!(pinned, Some(50)); // 70 - 20
+        // A notice must not jump to the bottom.
+        app.info("toast while reading".into());
+        assert!(!app.follow, "notice must not re-enable follow");
+        assert_eq!(app.unread, 1);
+        app.apply_body_layout(85, 10); // +5 rows
+        assert_eq!(app.pinned_off, Some(50), "viewport stays on the same content");
+        assert_eq!(app.scroll, 25); // 75 - 50
+        // Returning to the bottom clears the badge.
+        app.follow_bottom();
+        assert!(app.follow);
+        assert_eq!(app.unread, 0);
+        assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn one_line_above_bottom_does_not_follow_on_new_content() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        app.follow_bottom();
+        app.apply_body_layout(80, 10); // max_off = 70, scroll = 0
+        assert!(app.follow);
+        // Exactly one wrapped row above the bottom — must NOT auto-follow.
+        app.scroll_up(1);
+        assert!(!app.follow);
+        assert_eq!(app.scroll, 1);
+        app.apply_body_layout(80, 10);
+        let pinned = app.pinned_off.expect("pinned");
+        assert_eq!(pinned, 69); // max_off 70 - 1
+        app.info("incoming while almost at bottom".into());
+        assert_eq!(app.unread, 1);
+        assert!(!app.follow);
+        app.apply_body_layout(90, 10); // +10 rows below
+        assert_eq!(
+            app.pinned_off,
+            Some(69),
+            "max-1 must keep the same lines on screen"
+        );
+        assert_eq!(app.scroll, 11); // new max_off 80 - 69
+        assert!(!app.follow);
+        assert_ne!(app.scroll, 0);
+    }
+
+    #[test]
+    fn follow_when_at_bottom_tracks_new_content() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        app.follow_bottom();
+        app.apply_body_layout(30, 10);
+        assert_eq!(app.scroll, 0);
+        app.info("new".into());
+        assert_eq!(app.unread, 0, "following: notices do not count as unread");
+        app.apply_body_layout(40, 10);
+        assert!(app.follow);
+        assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn sending_a_message_and_switching_bot_reenable_follow() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        app.scroll_up(5);
+        assert!(!app.follow);
+        app.unread = 3;
+        app.input = "hello".into();
+        app.submit();
+        assert!(app.follow);
+        assert_eq!(app.unread, 0);
+        app.scroll_up(5);
+        if !app.bots.is_empty() {
+            app.select_bot(0);
+            assert!(app.follow);
+            assert_eq!(app.scroll, 0);
+        }
     }
 
     #[test]

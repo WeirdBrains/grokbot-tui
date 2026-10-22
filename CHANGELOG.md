@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.9.1] - 2026-10-22
+
+### Fixed
+- **Chat jumps to the bottom while reading.** Notices (`info`/`error`) and feed
+  reloads forced `scroll = 0`, and distance-from-bottom scrolling kept a constant
+  distance from the newest line — so any new content moved the text under the
+  eyes. Now a follow/stick-to-bottom flag auto-scrolls only when the viewport is
+  exactly at the bottom (distance-from-bottom scroll == 0); when scrolled up, the absolute viewport offset is
+  pinned so appends and rewraps leave the reading position alone. Unread items
+  show an unobtrusive `↓ N new` badge (theme part `unread_badge`, starter falls
+  back to the warn badge). Click the badge, End (while scrolled up), vim `G`, or
+  scroll to the bottom to follow again. Sending a message, switching bots, or
+  switching accounts jumps to the bottom and re-enables follow.
+
 ## [1.9.0] - 2026-10-21
 
 ### Added

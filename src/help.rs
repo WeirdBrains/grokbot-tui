@@ -192,7 +192,11 @@ in between quits.
   Tab                          After `/`: fuzzy-complete a command or argument (Shift-Tab cycles).
                                Otherwise switch focus between input and sidebar
   Ctrl-R                       Fuzzy search prompt history (Ctrl-S reverse; Esc keeps the draft)
-  PgUp / PgDn, mouse wheel     Scroll the chat (not the prompt history)
+  PgUp / PgDn, mouse wheel     Scroll the chat (not the prompt history).
+                               Only the exact bottom follows new content; scroll up
+                               pins the view. '↓ N new' while unread (click / End /
+                               vim G to jump and follow). Send or switch bot/account
+                               follows again.
   Esc                          Clear an in-app selection; cancel a prompt; return focus to input
   /switch [alias]              Switch account (bare opens the picker)
   /keymap [vim|default|reload|list]  Opt-in vim keys (ui.keys); list/reload keymap.toml

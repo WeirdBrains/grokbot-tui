@@ -212,6 +212,7 @@ style_slots! {
     SELECTED = "selected", "Sidebar and lists", false, "Active bot / picked list row";
     CURSOR_ROW = "cursor_row", "Sidebar and lists", false, "Sidebar cursor while the sidebar has focus";
     SELECTION = "selection", "Chat", false, "In-app selected text in the chat body";
+    UNREAD_BADGE = "unread_badge", "Chat", false, "'↓ N new' while scrolled up";
     PANEL_FOCUSED = "panel_focused", "Sidebar and lists", true, "Focused box (sidebar, input)";
     PANEL_UNFOCUSED = "panel_unfocused", "Sidebar and lists", true, "Unfocused box";
     CHAT_PANEL = "chat_panel", "Chat", true, "The chat box";
@@ -338,6 +339,7 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
         s::BRAND | s::MODE_ACTIVE | s::MODE_NORMAL | s::MODE_INSERT | s::SELECTED | s::SELECTION => bold(reverse),
         s::MODE_COMMAND | s::MODE_VISUAL => bold(StyleSpec { bg: Some(r(c::WARN)), fg: Some(r(c::ON_ACCENT)), ..StyleSpec::default() }),
         s::CURSOR_ROW | s::MOUSE_OFF | s::LINK_SELECTED => reverse,
+        s::UNREAD_BADGE => bold(StyleSpec { bg: Some(r(c::WARN)), fg: Some(r(c::ON_ACCENT)), ..StyleSpec::default() }),
         // Not bold: some terminals draw bold block glyphs from another font.
         s::TITLE => fg(c::ACCENT),
         s::HEADER_LABEL | s::MODE_INACTIVE | s::MOUSE_ON | s::ENTRY_SYSTEM => fg(c::SUBTLE),
@@ -598,6 +600,10 @@ pub fn vim_mode_style(mode: crate::keymap::Mode) -> Style {
     })
 }
 
+pub fn unread_badge() -> Style {
+    st(slot::UNREAD_BADGE)
+}
+
 pub fn selected() -> Style {
     st(slot::SELECTED)
 }
@@ -825,12 +831,13 @@ mod tests {
             let spec = t.variant(v);
             for (i, s) in STYLE_SLOTS.iter().enumerate() {
                 if s.key == "theme_switch"
+                    || s.key == "unread_badge"
                     || s.key.starts_with("mode_n")
                     || s.key.starts_with("mode_i")
                     || s.key.starts_with("mode_c")
                     || s.key.starts_with("mode_v")
                 {
-                    continue; // theme_switch 1.5; vim mode_* 1.9
+                    continue; // theme_switch 1.5; vim mode_* / unread_badge 1.9
                 }
                 assert_eq!(spec.resolve(i), golden(v, s.key), "{v:?} {}", s.key);
             }

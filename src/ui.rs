@@ -416,10 +416,15 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         let rows = row_counts(&lines, inner_w);
         app.feed_cache = Some(FeedCache { key, lines, rows });
     }
-    let cache = app.feed_cache.as_ref().expect("built above");
     let mut extra: Vec<Line<'static>> = vec![];
+    let cache_empty = app.feed_cache.as_ref().is_some_and(|c| c.lines.is_empty());
+    let cache_rows_sum: usize = app
+        .feed_cache
+        .as_ref()
+        .map(|c| c.rows.iter().sum())
+        .unwrap_or(0);
     if !app.notices().is_empty() {
-        if !cache.lines.is_empty() {
+        if !cache_empty {
             extra.push(Line::default());
             extra.push(theme::muted().line("── notices (not saved) ──"));
         }
@@ -429,7 +434,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                 .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref(), None)),
         );
     }
-    if cache.lines.is_empty() && extra.is_empty() {
+    if cache_empty && extra.is_empty() {
         extra = empty_state(app)
             .into_iter()
             .map(|t| theme::muted().line(t))
@@ -438,10 +443,13 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     let extra_rows = row_counts(&extra, inner_w);
     // Exact wrapped height (word wrap can need more rows than width/cols), so
     // "scrolled to bottom" really shows the newest line.
-    let total: usize = cache.rows.iter().chain(&extra_rows).sum();
-    let max_off = (total.min(u16::MAX as usize) as u16).saturating_sub(inner_h);
+    let total = cache_rows_sum + extra_rows.iter().sum::<usize>();
+    let total_u = total.min(u16::MAX as usize) as u16;
+    app.apply_body_layout(total_u, inner_h);
+    let max_off = total_u.saturating_sub(inner_h);
     let scroll = app.scroll.min(max_off);
     let off = max_off - scroll;
+    let cache = app.feed_cache.as_ref().expect("built above");
     // Only the lines that reach into the viewport are rendered.
     let (mut lines, skip) = visible_lines(
         cache.lines.iter().chain(&extra),
@@ -491,6 +499,20 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         body,
     );
     app.scroll = scroll;
+    app.unread_area = Rect::default();
+    if !app.follow && app.unread > 0 && body.height > 2 && body.width > 8 {
+        let label = format!(" ↓ {} new ", app.unread);
+        let w = (label.chars().count() as u16).min(body.width.saturating_sub(2));
+        let r = Rect {
+            x: body.x + body.width.saturating_sub(w + 1),
+            y: body.y + body.height.saturating_sub(2),
+            width: w,
+            height: 1,
+        };
+        f.render_widget(Clear, r);
+        f.render_widget(Paragraph::new(theme::unread_badge().span(label)), r);
+        app.unread_area = r;
+    }
 
     // Bottom input bar
     let title = match app.mode {
@@ -991,11 +1013,11 @@ mod tests {
         app.logs.get_mut(&bot).unwrap().push(entry("brand new"));
         assert!(screen(&mut term, &mut app).contains("brand new"));
         // Scrolled up: older lines, same as an uncached layout would show.
-        app.scroll = 10_000;
+        app.scroll_up(10_000);
         let s = screen(&mut term, &mut app);
         assert!(s.contains("old 0") && !s.contains("brand new"), "{s}");
         // Another theme's entry styles rebuild the layout.
-        app.scroll = 0;
+        app.follow_bottom();
         let key = app.feed_cache.as_ref().unwrap().key;
         let mut t = app.theme.as_ref().clone();
         t.dark.colors[crate::theme::color::ACCENT] = ratatui::style::Color::Indexed(1);

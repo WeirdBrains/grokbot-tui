@@ -547,6 +547,17 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 }
                 KeyCode::PageUp => app.scroll_up(10),
                 KeyCode::PageDown => app.scroll_down(10),
+                // End → bottom of chat when reading history or the sidebar has focus;
+                // otherwise it moves to the end of the input line (arm below).
+                KeyCode::End
+                    if app.focus == Focus::Sidebar
+                        || (!app.follow && app.mode == app::InputMode::Normal) =>
+                {
+                    app.follow_bottom()
+                }
+                KeyCode::Home if app.focus == Focus::Sidebar => {
+                    app.scroll_up(u16::MAX / 2);
+                }
                 KeyCode::Esc => {
                     if app.body_sel.take().is_some() {
                         return true;
