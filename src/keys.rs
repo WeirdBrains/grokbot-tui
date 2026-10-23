@@ -81,11 +81,7 @@ pub fn is_newline_key(k: &KeyEvent) -> bool {
 pub fn is_newline_chord(encoded: &str) -> bool {
     matches!(
         encoded,
-        "shift-enter"
-            | "alt-enter"
-            | "ctrl-enter"
-            | "ctrl-j"
-            | "enter" // only when mapped to input.newline in insert mode
+        "shift-enter" | "alt-enter" | "ctrl-enter" | "ctrl-j" | "enter" // only when mapped to input.newline in insert mode
     ) || encoded == "input.newline"
 }
 
@@ -106,8 +102,7 @@ pub fn apple_terminal_needs_hint(enhancement_ok: bool, term_program: Option<&str
     !enhancement_ok && term_program == Some("Apple_Terminal")
 }
 
-pub const APPLE_TERMINAL_HINT: &str =
-    "Terminal.app: Shift/Ctrl-Enter send the prompt. Use Ctrl-J, type \\ then Enter, \
+pub const APPLE_TERMINAL_HINT: &str = "Terminal.app: Shift/Ctrl-Enter send the prompt. Use Ctrl-J, type \\ then Enter, \
      or Option-Enter with “Use Option as Meta key”. See /help keys.";
 
 #[cfg(test)]

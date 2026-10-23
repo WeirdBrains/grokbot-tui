@@ -86,8 +86,17 @@ pub struct Keymap {
 pub enum LoadError {
     Io(String),
     Parse(String),
-    UnknownAction { action: String, key: String, table: String },
-    Conflict { key: String, table: String, a: String, b: String },
+    UnknownAction {
+        action: String,
+        key: String,
+        table: String,
+    },
+    Conflict {
+        key: String,
+        table: String,
+        a: String,
+        b: String,
+    },
     UnknownMode(String),
 }
 
@@ -187,10 +196,7 @@ pub fn normalize_key(raw: &str) -> String {
         return s;
     }
     let last = parts.pop().unwrap();
-    let mut out: Vec<String> = parts
-        .into_iter()
-        .map(|p| p.to_ascii_lowercase())
-        .collect();
+    let mut out: Vec<String> = parts.into_iter().map(|p| p.to_ascii_lowercase()).collect();
     // Named keys (esc, tab, enter, …) stay lowercase; single letters keep case.
     if last.len() > 1 {
         out.push(last.to_ascii_lowercase());
@@ -218,7 +224,10 @@ pub fn load(path: &Path, previous: Option<&Keymap>) -> (Keymap, Option<LoadError
                 km.path = Some(path.to_path_buf());
                 km
             });
-            return (fallback, Some(LoadError::Io(format!("{}: {e}", path.display()))));
+            return (
+                fallback,
+                Some(LoadError::Io(format!("{}: {e}", path.display()))),
+            );
         }
     };
     match parse(&text) {
@@ -270,7 +279,10 @@ impl Keymap {
 }
 
 /// Encode a crossterm key into the keymap key string.
-pub fn encode_key(code: ratatui::crossterm::event::KeyCode, mods: ratatui::crossterm::event::KeyModifiers) -> Option<String> {
+pub fn encode_key(
+    code: ratatui::crossterm::event::KeyCode,
+    mods: ratatui::crossterm::event::KeyModifiers,
+) -> Option<String> {
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
     let mut parts = vec![];
     if mods.contains(KeyModifiers::CONTROL) {
@@ -325,17 +337,27 @@ mod tests {
 
     #[test]
     fn unknown_action_and_conflict_are_errors() {
-        let e = parse(r#"[global]
+        let e = parse(
+            r#"[global]
 "ctrl-q" = "nope"
-"#).unwrap_err();
+"#,
+        )
+        .unwrap_err();
         assert!(matches!(e, LoadError::UnknownAction { .. }), "{e}");
-        let e = parse(r#"[mode.normal]
+        let e = parse(
+            r#"[mode.normal]
 "j" = "move.down"
 "j" = "move.up"
-"#);
+"#,
+        );
         // TOML map can't have duplicate keys — serde keeps one. Simulate via fill.
         let mut m = BTreeMap::new();
-        fill_table("mode.normal", &[("j".into(), "move.down".into())].into(), &mut m).unwrap();
+        fill_table(
+            "mode.normal",
+            &[("j".into(), "move.down".into())].into(),
+            &mut m,
+        )
+        .unwrap();
         let err = fill_table(
             "mode.normal",
             &[("j".into(), "move.up".into())].into(),
@@ -371,7 +393,10 @@ mod tests {
             encode_key(KeyCode::Char('q'), KeyModifiers::CONTROL).as_deref(),
             Some("ctrl-q")
         );
-        assert_eq!(encode_key(KeyCode::Esc, KeyModifiers::NONE).as_deref(), Some("esc"));
+        assert_eq!(
+            encode_key(KeyCode::Esc, KeyModifiers::NONE).as_deref(),
+            Some("esc")
+        );
         assert_eq!(
             encode_key(KeyCode::BackTab, KeyModifiers::NONE).as_deref(),
             Some("shift-tab")

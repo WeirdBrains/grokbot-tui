@@ -21,7 +21,6 @@ fn no_complete(_: &App, _: usize, _: &str) -> Vec<crate::complete::Candidate> {
     vec![]
 }
 
-
 pub struct Registry {
     pub commands: Vec<Command>,
 }
@@ -150,7 +149,6 @@ pub fn registry() -> Registry {
                 complete: no_complete,
                 run: memory,
             },
-
             Command {
                 name: "notify",
                 aliases: &["notices"],
@@ -601,7 +599,10 @@ fn quit(app: &mut App, _: &str) -> Result<()> {
 
 fn theme_complete(app: &App, idx: usize, _q: &str) -> Vec<crate::complete::Candidate> {
     match idx {
-        0 => crate::complete::names(["dark", "light", "system", "use", "list", "edit", "init", "starter", "delete", "export", "reload"]),
+        0 => crate::complete::names([
+            "dark", "light", "system", "use", "list", "edit", "init", "starter", "delete",
+            "export", "reload",
+        ]),
         1 => {
             let ids = crate::themes::list(&app.themes_dir());
             crate::complete::names(ids)
@@ -629,7 +630,9 @@ fn bot_complete(app: &App, idx: usize, _q: &str) -> Vec<crate::complete::Candida
     match idx {
         0 => {
             let mut v = crate::complete::names(["new", "delete"]);
-            v.extend(crate::complete::names(app.bots.iter().map(|b| b.name.clone())));
+            v.extend(crate::complete::names(
+                app.bots.iter().map(|b| b.name.clone()),
+            ));
             v
         }
         1 => crate::complete::names(app.bots.iter().map(|b| b.name.clone())),
@@ -637,10 +640,18 @@ fn bot_complete(app: &App, idx: usize, _q: &str) -> Vec<crate::complete::Candida
     }
 }
 fn mouse_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
-    if idx == 0 { crate::complete::names(["on", "off", "toggle"]) } else { vec![] }
+    if idx == 0 {
+        crate::complete::names(["on", "off", "toggle"])
+    } else {
+        vec![]
+    }
 }
 fn login_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
-    if idx == 0 { crate::complete::names(["gateway", "cursor", "desktop"]) } else { vec![] }
+    if idx == 0 {
+        crate::complete::names(["gateway", "cursor", "desktop"])
+    } else {
+        vec![]
+    }
 }
 fn aliases(app: &App) -> Vec<crate::complete::Candidate> {
     match app.store.accounts() {
@@ -664,13 +675,7 @@ fn notify_cmd(app: &mut App, args: &str) -> Result<()> {
             let s = &app.notices_board.settings;
             let kinds: String = crate::notify::NoticeKind::ALL
                 .iter()
-                .map(|k| {
-                    format!(
-                        "{}={}",
-                        k.key(),
-                        if s.on[k.index()] { "on" } else { "off" }
-                    )
-                })
+                .map(|k| format!("{}={}", k.key(), if s.on[k.index()] { "on" } else { "off" }))
                 .collect::<Vec<_>>()
                 .join(" ");
             app.info(format!(
@@ -685,7 +690,11 @@ fn notify_cmd(app: &mut App, args: &str) -> Result<()> {
             app.notices_board.settings.dnd = !app.notices_board.settings.dnd;
             app.info(format!(
                 "Do-not-disturb {}.",
-                if app.notices_board.settings.dnd { "on" } else { "off" }
+                if app.notices_board.settings.dnd {
+                    "on"
+                } else {
+                    "off"
+                }
             ));
         }
         "reload" => app.reload_notify_rules(),
@@ -694,9 +703,15 @@ fn notify_cmd(app: &mut App, args: &str) -> Result<()> {
             let kind = parts
                 .next()
                 .and_then(crate::notify::NoticeKind::parse)
-                .ok_or_else(|| anyhow::anyhow!("Usage: /notify on|off <error|warning|info|message>"))?;
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Usage: /notify on|off <error|warning|info|message>")
+                })?;
             app.notices_board.settings.on[kind.index()] = on;
-            app.info(format!("{} toasts {}.", kind.label(), if on { "on" } else { "off" }));
+            app.info(format!(
+                "{} toasts {}.",
+                kind.label(),
+                if on { "on" } else { "off" }
+            ));
         }
         other => bail!("Usage: /notify [dnd|reload|list|on <kind>|off <kind>] (got {other})"),
     }
@@ -742,7 +757,10 @@ fn switch_account(app: &mut App, args: &str) -> Result<()> {
     if let Some(a) = list.iter().find(|a| a.alias.eq_ignore_ascii_case(alias)) {
         return app.switch_account(&a.alias);
     }
-    let prefixes: Vec<_> = names.iter().filter(|n| n.to_lowercase().starts_with(&alias.to_lowercase())).collect();
+    let prefixes: Vec<_> = names
+        .iter()
+        .filter(|n| n.to_lowercase().starts_with(&alias.to_lowercase()))
+        .collect();
     if prefixes.len() == 1 {
         return app.switch_account(prefixes[0]);
     }
@@ -753,13 +771,20 @@ fn switch_account(app: &mut App, args: &str) -> Result<()> {
     // Ambiguous or unknown: open the picker (pre-filtered by setting a notice).
     app.info(format!(
         "No unique account matching '{alias}' ({}).",
-        if ranked.is_empty() { "none".into() } else { ranked.iter().take(5).map(|(i,_)| names[*i].as_str()).collect::<Vec<_>>().join(", ") }
+        if ranked.is_empty() {
+            "none".into()
+        } else {
+            ranked
+                .iter()
+                .take(5)
+                .map(|(i, _)| names[*i].as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
     ));
     app.open_account_picker();
     Ok(())
 }
-
-
 
 #[cfg(test)]
 mod tests {

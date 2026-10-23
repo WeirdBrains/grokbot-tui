@@ -85,7 +85,10 @@ mod tests {
     #[test]
     fn plain_text_joins_entries_and_preserves_code() {
         let feed = [
-            Entry { kind: EntryKind::User, text: "hi".into() },
+            Entry {
+                kind: EntryKind::User,
+                text: "hi".into(),
+            },
             Entry {
                 kind: EntryKind::Bot,
                 text: "```rust\nfn x() {}\n```".into(),
@@ -93,12 +96,18 @@ mod tests {
         ];
         let p = plain_text(&feed);
         assert_eq!(p, "hi\n\n```rust\nfn x() {}\n```\n");
-        let mut sel = Selection { anchor: 4, cursor: p.len() - 1 };
+        let mut sel = Selection {
+            anchor: 4,
+            cursor: p.len() - 1,
+        };
         let t = selected_text(&p, &sel);
         assert!(t.starts_with("```rust"));
         assert!(t.contains("fn x() {}"));
         // Swap anchor/cursor.
-        sel = Selection { anchor: p.len(), cursor: 0 };
+        sel = Selection {
+            anchor: p.len(),
+            cursor: 0,
+        };
         assert_eq!(selected_text(&p, &sel), p);
     }
 

@@ -4,10 +4,10 @@
 //! (commit a60c82a). Dropdown options are existing registry commands.
 
 use crate::commands::Registry;
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Clear, Paragraph};
-use ratatui::Frame;
 
 /// One top-level menu on the bar.
 #[derive(Debug, Clone)]
@@ -98,16 +98,12 @@ impl MenuBar {
 
     pub fn hit_bar(&self, col: u16, row: u16) -> Option<usize> {
         let at = ratatui::layout::Position::new(col, row);
-        self.bar_areas
-            .iter()
-            .position(|r| r.contains(at))
+        self.bar_areas.iter().position(|r| r.contains(at))
     }
 
     pub fn hit_opt(&self, col: u16, row: u16) -> Option<usize> {
         let at = ratatui::layout::Position::new(col, row);
-        self.opt_areas
-            .iter()
-            .position(|r| r.contains(at))
+        self.opt_areas.iter().position(|r| r.contains(at))
     }
 }
 

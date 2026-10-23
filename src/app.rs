@@ -775,8 +775,7 @@ impl App {
         }
         self.awaiting
             .retain(|_, t| now.duration_since(*t) < AWAIT_TIMEOUT);
-        let (Some(api), Some((bot, session, team))) =
-            (self.api.clone(), self.active_bot_route())
+        let (Some(api), Some((bot, session, team))) = (self.api.clone(), self.active_bot_route())
         else {
             return;
         };
@@ -1370,7 +1369,9 @@ impl App {
         }
         if self.config.keys == crate::config::KeysScheme::Vim {
             self.vim_mode = crate::keymap::Mode::Insert;
-            self.info("Keys: vim (ui.keys=vim). Esc → NORMAL, i → INSERT, : → command. /keymap".into());
+            self.info(
+                "Keys: vim (ui.keys=vim). Esc → NORMAL, i → INSERT, : → command. /keymap".into(),
+            );
         }
         let path = crate::keymap::user_path(&self.store.dir);
         let (km, err) = crate::keymap::load(&path, Some(&self.keymap));
@@ -1721,7 +1722,6 @@ impl App {
             .position(|b| b.id.to_lowercase() == q || b.name.to_lowercase() == q)
     }
 
-
     /// Id, viewer session, and team flag for the active bot (for gateway routing).
     fn active_bot_route(&self) -> Option<(String, Option<String>, bool)> {
         self.active_bot()
@@ -1791,8 +1791,7 @@ impl App {
 
     /// Fetch the full (paged) chat history for the active bot now.
     pub fn request_history(&mut self) {
-        let (Some(api), Some((bot, session, team))) =
-            (self.api.clone(), self.active_bot_route())
+        let (Some(api), Some((bot, session, team))) = (self.api.clone(), self.active_bot_route())
         else {
             self.poll.limit = HISTORY_LIMIT;
             self.poll_now();
@@ -2080,12 +2079,16 @@ impl App {
         match self.notify_rules.decide(kind, &title, &body) {
             crate::notify_rules::Action::Drop => {}
             crate::notify_rules::Action::Mute => {
-                self.notices_board.log.push_front(crate::notify::Notice::new(kind, title, body));
+                self.notices_board
+                    .log
+                    .push_front(crate::notify::Notice::new(kind, title, body));
             }
             crate::notify_rules::Action::Toast => {
                 // Temporarily honour mute-via-settings by posting through the board.
-                self.notices_board
-                    .post(crate::notify::Notice::new(kind, title, body), std::time::Instant::now());
+                self.notices_board.post(
+                    crate::notify::Notice::new(kind, title, body),
+                    std::time::Instant::now(),
+                );
             }
         }
     }
@@ -2095,10 +2098,7 @@ impl App {
             return;
         }
         let term = std::env::var("TERM_PROGRAM").ok();
-        if crate::keys::apple_terminal_needs_hint(
-            self.keyboard_enhancement,
-            term.as_deref(),
-        ) {
+        if crate::keys::apple_terminal_needs_hint(self.keyboard_enhancement, term.as_deref()) {
             self.apple_newline_hinted = true;
             self.info(crate::keys::APPLE_TERMINAL_HINT.into());
         }
@@ -2349,7 +2349,8 @@ impl App {
     }
 
     pub fn set_keys_scheme(&mut self, scheme: crate::config::KeysScheme) -> anyhow::Result<()> {
-        self.store.set_pref(crate::config::PREF_KEYS, scheme.as_str())?;
+        self.store
+            .set_pref(crate::config::PREF_KEYS, scheme.as_str())?;
         self.config.keys = scheme;
         if scheme == crate::config::KeysScheme::Vim {
             self.vim_mode = crate::keymap::Mode::Insert;
@@ -3039,7 +3040,6 @@ pub fn anchor_scroll(scroll: u16, prev_max_off: u16, new_max_off: u16, follow: b
     new_max_off.saturating_sub(off)
 }
 
-
 fn entry_from_msg(m: &Message) -> Entry {
     Entry {
         kind: if m.role == Role::User {
@@ -3127,14 +3127,17 @@ pub mod tests {
         assert!(UI_TICK < POLL_FAST);
     }
 
-
     #[test]
     fn anchor_scroll_keeps_absolute_offset_when_content_grows() {
         // Scrolled up 10 from a max of 50 → absolute off = 40.
         // Content grows so max becomes 60 → keep off 40 → scroll = 20.
         assert_eq!(crate::app::anchor_scroll(10, 50, 60, false), 20);
         assert_eq!(crate::app::anchor_scroll(0, 50, 60, true), 0);
-        assert_eq!(crate::app::anchor_scroll(0, 50, 60, false), 10, "at bottom stays at bottom offset");
+        assert_eq!(
+            crate::app::anchor_scroll(0, 50, 60, false),
+            10,
+            "at bottom stays at bottom offset"
+        );
     }
 
     #[test]
@@ -3171,7 +3174,11 @@ pub mod tests {
         assert!(!app.follow, "notice must not re-enable follow");
         assert_eq!(app.unread, 1);
         app.apply_body_layout(85, 10); // +5 rows
-        assert_eq!(app.pinned_off, Some(50), "viewport stays on the same content");
+        assert_eq!(
+            app.pinned_off,
+            Some(50),
+            "viewport stays on the same content"
+        );
         assert_eq!(app.scroll, 25); // 75 - 50
         // Returning to the bottom clears the badge.
         app.follow_bottom();
@@ -3742,7 +3749,11 @@ pub mod tests {
         let (mut app, _d) = test_app(&rt);
         mock_login(&mut app, "t");
         // list_bots bound Chomp's viewer session; select and chat.
-        let i = app.bots.iter().position(|b| b.name == "Chomp").expect("Chomp");
+        let i = app
+            .bots
+            .iter()
+            .position(|b| b.name == "Chomp")
+            .expect("Chomp");
         assert!(app.bots[i].team);
         assert_eq!(app.bots[i].viewer_session_id.as_deref(), Some("vs-chomp"));
         app.select_bot(i);
@@ -3755,7 +3766,8 @@ pub mod tests {
             "prompt visible: {t:?}"
         );
         assert!(
-            !t.iter().any(|x| x.contains("sessionId") || x.contains("Send failed")),
+            !t.iter()
+                .any(|x| x.contains("sessionId") || x.contains("Send failed")),
             "should not fail session bind: {t:?}"
         );
         // Simulate lost in-memory session map; bind from Bot must repair on next send.
@@ -3765,12 +3777,10 @@ pub mod tests {
         type_line(&mut app, "again");
         settle(&mut app);
         let t = texts(&app);
+        assert!(t.iter().any(|x| x.contains("again")), "{t:?}");
         assert!(
-            t.iter().any(|x| x.contains("again")),
-            "{t:?}"
-        );
-        assert!(
-            !t.iter().any(|x| x.contains("team agent requires sessionId")),
+            !t.iter()
+                .any(|x| x.contains("team agent requires sessionId")),
             "re-bind from Bot.viewer_session_id should repair: {t:?}"
         );
     }
@@ -3799,7 +3809,11 @@ pub mod tests {
             (l.method, l.session.gateway_token.as_str()),
             (LoginMethod::Gateway, "secret")
         );
-        assert_eq!(app.bots.len(), 4, "hidden bot filtered; Chomp team bot visible");
+        assert_eq!(
+            app.bots.len(),
+            4,
+            "hidden bot filtered; Chomp team bot visible"
+        );
         assert_eq!(app.all_bots.len(), 5);
 
         type_line(&mut app, "/bot coder");

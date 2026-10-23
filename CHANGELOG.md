@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.10.2] - 2026-10-23
+
+### Fixed
+- Apply rustfmt so the CI format check passes (no behavior changes). First release
+  containing the 1.8.0–1.10.1 changes.
+
 ## [1.10.1] - 2026-10-22
 
 ### Fixed

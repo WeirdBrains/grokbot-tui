@@ -3114,8 +3114,10 @@ mod tests {
                 let b = if *name == "default" {
                     body.to_string()
                 } else {
-                    std::fs::read_to_string(crate::app::tests::repo_themes().join(format!("{name}.toml")))
-                        .unwrap_or_else(|_| body.to_string())
+                    std::fs::read_to_string(
+                        crate::app::tests::repo_themes().join(format!("{name}.toml")),
+                    )
+                    .unwrap_or_else(|_| body.to_string())
                 };
                 Mock::given(path(format!("/{name}.toml")))
                     .respond_with(ResponseTemplate::new(status).set_body_string(b))
@@ -3346,7 +3348,25 @@ mod tests {
             .collect();
         // Only parts that depend on the app's state: the compact header, mouse capture off,
         // the sidebar focused.
-        assert_eq!(hidden, ["brand", "mode_normal", "mode_insert", "mode_command", "mode_visual", "mouse_off", "cursor_row", "selection", "unread_badge", "menu_active", "tooltip", "toast", "toast_warn", "toast_error"]);
+        assert_eq!(
+            hidden,
+            [
+                "brand",
+                "mode_normal",
+                "mode_insert",
+                "mode_command",
+                "mode_visual",
+                "mouse_off",
+                "cursor_row",
+                "selection",
+                "unread_badge",
+                "menu_active",
+                "tooltip",
+                "toast",
+                "toast_warn",
+                "toast_error"
+            ]
+        );
     }
 
     #[test]

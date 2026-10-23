@@ -1,11 +1,11 @@
 //! Prompt history: Up/Down in the input and the Ctrl-R fuzzy search overlay.
 
 use crate::fuzzy;
+use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::Line;
 use ratatui::widgets::{Clear, Paragraph};
-use ratatui::Frame;
 
 /// How many prompts to keep per account.
 pub const MAX: usize = 500;
@@ -113,11 +113,11 @@ pub fn draw(f: &mut Frame, s: &mut Search, history: &[String], area: Rect) {
     use crate::theme;
     let r = centered(area, 70, 50);
     f.render_widget(Clear, r);
-    let block = theme::block(&theme::help_frame()).title(" History · Ctrl-R · Enter uses · Esc keeps ");
+    let block =
+        theme::block(&theme::help_frame()).title(" History · Ctrl-R · Enter uses · Esc keeps ");
     let inner = block.inner(r);
     f.render_widget(block, r);
-    let [q, list] =
-        Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(inner);
+    let [q, list] = Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(inner);
     f.render_widget(
         Paragraph::new(Line::from(vec![
             theme::key_hint().span("› "),
@@ -192,10 +192,27 @@ mod tests {
         assert_eq!(s.matches.len(), 3, "empty query shows all, recent first");
         s.query = "push".into();
         s.refilter(&h);
-        assert_eq!(s.matches.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![0, 2]);
-        assert_eq!(key(&mut s, &h, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)), Outcome::Take("git push origin main".into()));
+        assert_eq!(
+            s.matches.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            vec![0, 2]
+        );
+        assert_eq!(
+            key(
+                &mut s,
+                &h,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+            ),
+            Outcome::Take("git push origin main".into())
+        );
         s.cursor = 1;
-        assert_eq!(key(&mut s, &h, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)), Outcome::Take("git push --force".into()));
+        assert_eq!(
+            key(
+                &mut s,
+                &h,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+            ),
+            Outcome::Take("git push --force".into())
+        );
         assert_eq!(
             key(&mut s, &h, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
             Outcome::Cancel
@@ -206,9 +223,17 @@ mod tests {
     fn ctrl_r_and_ctrl_s_move_through_results() {
         let h: Vec<String> = (0..5).map(|i| format!("cmd {i}")).collect();
         let mut s = Search::new(&h, String::new(), 0);
-        key(&mut s, &h, KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        key(
+            &mut s,
+            &h,
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+        );
         assert_eq!(s.cursor, 4, "wraps up");
-        key(&mut s, &h, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        key(
+            &mut s,
+            &h,
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
+        );
         assert_eq!(s.cursor, 0);
     }
 }

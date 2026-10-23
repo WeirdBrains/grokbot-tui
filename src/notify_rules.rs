@@ -89,9 +89,9 @@ impl Ruleset {
                     (rs, None)
                 }
                 Err(e) => {
-                    let mut fb = previous.cloned().unwrap_or_else(|| {
-                        Self::parse(shipped_default()).expect("shipped rules")
-                    });
+                    let mut fb = previous
+                        .cloned()
+                        .unwrap_or_else(|| Self::parse(shipped_default()).expect("shipped rules"));
                     fb.path = Some(path.to_path_buf());
                     (fb, Some(e))
                 }
@@ -103,9 +103,9 @@ impl Ruleset {
                 (rs, None)
             }
             Err(e) => {
-                let mut fb = previous.cloned().unwrap_or_else(|| {
-                    Self::parse(shipped_default()).expect("shipped")
-                });
+                let mut fb = previous
+                    .cloned()
+                    .unwrap_or_else(|| Self::parse(shipped_default()).expect("shipped"));
                 fb.path = Some(path.to_path_buf());
                 (fb, Some(LoadError::Io(format!("{}: {e}", path.display()))))
             }
@@ -161,10 +161,7 @@ action = "mute"
             rs.decide(NoticeKind::Info, "Info", "agent heartbeat ok"),
             Action::Mute
         );
-        assert_eq!(
-            rs.decide(NoticeKind::Error, "Error", "boom"),
-            Action::Toast
-        );
+        assert_eq!(rs.decide(NoticeKind::Error, "Error", "boom"), Action::Toast);
     }
 
     #[test]
@@ -178,9 +175,6 @@ action = "drop"
 "#,
         )
         .unwrap();
-        assert_eq!(
-            rs.decide(NoticeKind::Message, "Bot", "hi"),
-            Action::Drop
-        );
+        assert_eq!(rs.decide(NoticeKind::Message, "Bot", "hi"), Action::Drop);
     }
 }

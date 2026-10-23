@@ -6,23 +6,23 @@ mod commands;
 mod complete;
 mod config;
 mod datadir;
+mod fuzzy;
 mod help;
 mod history;
-mod fuzzy;
 mod input;
 mod keyctx;
-mod keys;
 mod keymap;
-mod tooltip;
+mod keys;
 mod menubar;
-mod notify_rules;
 mod notify;
+mod notify_rules;
 mod picker;
 mod select;
 mod storage;
 mod theme;
 mod theme_editor;
 mod themes;
+mod tooltip;
 mod ui;
 
 use anyhow::Result;
@@ -365,7 +365,8 @@ fn read_batch(first: Event, mut more: impl FnMut() -> Result<Option<Event>>) -> 
 /// matters (pick-list hover / selection). Everything else keeps its order.
 fn coalesce(batch: Vec<Event>) -> Vec<Event> {
     let is_move = |e: &Event| matches!(e, Event::Mouse(m) if m.kind == MouseEventKind::Moved);
-    let is_drag = |e: &Event| matches!(e, Event::Mouse(m) if matches!(m.kind, MouseEventKind::Drag(_)));
+    let is_drag =
+        |e: &Event| matches!(e, Event::Mouse(m) if matches!(m.kind, MouseEventKind::Drag(_)));
     let last_move = batch.iter().rposition(is_move);
     let last_drag = batch.iter().rposition(is_drag);
     batch
@@ -382,7 +383,11 @@ fn coalesce(batch: Vec<Event>) -> Vec<Event> {
 
 /// Apply one terminal event. Returns whether the screen may have changed (so a redraw is
 /// due); pointer moves outside a pick list, button releases and key releases don't.
-fn tooltip_hit(app: &App, col: u16, row: u16) -> Option<(crate::tooltip::Hit, ratatui::layout::Rect)> {
+fn tooltip_hit(
+    app: &App,
+    col: u16,
+    row: u16,
+) -> Option<(crate::tooltip::Hit, ratatui::layout::Rect)> {
     use crate::tooltip::Hit;
     let at = ratatui::layout::Position::new(col, row);
     if app.unread_area.contains(at) {
@@ -738,7 +743,9 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                     app.completion = None;
                     let _ = app.history_up();
                 }
-                KeyCode::Down if app.focus == Focus::Input && app.mode == app::InputMode::Normal => {
+                KeyCode::Down
+                    if app.focus == Focus::Input && app.mode == app::InputMode::Normal =>
+                {
                     app.input_anchor = None;
                     app.completion = None;
                     let _ = app.history_down();
@@ -859,8 +866,7 @@ const MODIFY_OTHER_KEYS_OFF: &str = "\x1b[>4m";
 fn enable_shift_enter() -> bool {
     use ratatui::crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
     use std::io::Write;
-    let supported = ratatui::crossterm::terminal::supports_keyboard_enhancement()
-        .unwrap_or(false);
+    let supported = ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
     let mut out = std::io::stdout();
     if supported {
         let _ = execute!(

@@ -88,7 +88,10 @@ pub fn score(query: &str, candidate: &str) -> Option<Match> {
         }
     }
     s -= (chars.len() as i64) / 8;
-    Some(Match { score: s, positions })
+    Some(Match {
+        score: s,
+        positions,
+    })
 }
 
 /// Indices of `candidates` matching `query`, best first; ties keep the input order (so
@@ -121,7 +124,10 @@ mod tests {
         let names = ["xsxw", "show-window", "switch", "rest-switch", "sweep"];
         let order: Vec<&str> = rank("sw", &names).iter().map(|(i, _)| names[*i]).collect();
         // Prefixes first (shorter first), then word-start matches, the scattered one last.
-        assert_eq!(order, ["sweep", "switch", "show-window", "rest-switch", "xsxw"]);
+        assert_eq!(
+            order,
+            ["sweep", "switch", "show-window", "rest-switch", "xsxw"]
+        );
         let t = ["one", "tokyo-night", "default"];
         assert_eq!(rank("tn", &t)[0].0, 1);
         assert_eq!(rank("d", &t)[0].0, 2);

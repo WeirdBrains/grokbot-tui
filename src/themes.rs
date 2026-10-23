@@ -885,7 +885,9 @@ pub fn first_run_download(
             Ok(text) => match write_new(dir, name, &text) {
                 Ok(p) => last_ok = Some(p),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(e) => last_err = Some(format!("couldn't write {}: {e}", path(dir, name).display())),
+                Err(e) => {
+                    last_err = Some(format!("couldn't write {}: {e}", path(dir, name).display()))
+                }
             },
             Err(e) => last_err = Some(format!("couldn't download {url}: {e}")),
         }
@@ -896,7 +898,6 @@ pub fn first_run_download(
         (None, None) => FirstRun::NotNeeded,
     }
 }
-
 
 /// `YYYYmmdd-HHMMSSZ` in UTC (no date crate needed).
 pub fn utc_stamp(t: std::time::SystemTime) -> String {
@@ -1121,14 +1122,19 @@ mod tests {
             assert_eq!(t.id, *name);
             assert!(!t.name.is_empty());
             for (label, v) in [("dark", &t.dark), ("light", &t.light)] {
-                let (fg, bg) = (v.colors[crate::theme::color::TEXT], v.colors[crate::theme::color::BACKGROUND]);
+                let (fg, bg) = (
+                    v.colors[crate::theme::color::TEXT],
+                    v.colors[crate::theme::color::BACKGROUND],
+                );
                 let r = contrast(fg, bg).unwrap_or(0.0);
                 assert!(
                     r >= 3.0,
                     "{name} {label}: text on background is {r:.2}:1 (need ≥ 3:1)"
                 );
-                let dark = rgb_of(v.colors[crate::theme::color::LOGO_DARK]).unwrap_or((128, 128, 128));
-                let light = rgb_of(v.colors[crate::theme::color::LOGO_LIGHT]).unwrap_or((128, 128, 128));
+                let dark =
+                    rgb_of(v.colors[crate::theme::color::LOGO_DARK]).unwrap_or((128, 128, 128));
+                let light =
+                    rgb_of(v.colors[crate::theme::color::LOGO_LIGHT]).unwrap_or((128, 128, 128));
                 assert!(
                     dark.0.max(dark.1).max(dark.2) < 80,
                     "{name} {label}: logo_dark {dark:?} should be near-black"
@@ -1190,7 +1196,9 @@ mod tests {
         let got = first_run_download(&dir, Some(&format!("{}/t", srv.uri())), quick);
         assert!(matches!(got, FirstRun::Downloaded(_)), "{got:?}");
         assert_eq!(list(&dir).len(), SHIPPED.len());
-        for n in SHIPPED { assert!(list(&dir).iter().any(|h| h == n), "{n}"); }
+        for n in SHIPPED {
+            assert!(list(&dir).iter().any(|h| h == n), "{n}");
+        }
         assert_eq!(
             std::fs::read_to_string(path(&dir, DEFAULT_ID)).unwrap(),
             body

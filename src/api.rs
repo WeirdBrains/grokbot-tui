@@ -215,7 +215,11 @@ impl ApiClient for GatewayApi {
     }
     async fn transcript(&self, bot_id: &str, limit: u32) -> gw::Result<Vec<Message>> {
         Ok(messages_from_entries(
-            &self.client.transcript_tail(bot_id, limit, None).await?.entries,
+            &self
+                .client
+                .transcript_tail(bot_id, limit, None)
+                .await?
+                .entries,
         ))
     }
     async fn transcript_history(&self, bot_id: &str, max_entries: u32) -> gw::Result<Vec<Message>> {
@@ -554,10 +558,7 @@ mod tests {
             .send("c61d849e-c1ec-5ec8-add4-078ba3518635", "hi", "n")
             .await
             .unwrap_err();
-        assert!(
-            err.to_string().contains("sessionId"),
-            "{err}"
-        );
+        assert!(err.to_string().contains("sessionId"), "{err}");
         let err = m
             .transcript("c61d849e-c1ec-5ec8-add4-078ba3518635", 10)
             .await

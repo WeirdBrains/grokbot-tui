@@ -342,16 +342,53 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
             bg: Some(r(c::HEADER)),
             ..fg(c::TEXT)
         },
-        s::BRAND | s::MODE_ACTIVE | s::MODE_NORMAL | s::MODE_INSERT | s::SELECTED | s::SELECTION => bold(reverse),
-        s::MODE_COMMAND | s::MODE_VISUAL => bold(StyleSpec { bg: Some(r(c::WARN)), fg: Some(r(c::ON_ACCENT)), ..StyleSpec::default() }),
+        s::BRAND
+        | s::MODE_ACTIVE
+        | s::MODE_NORMAL
+        | s::MODE_INSERT
+        | s::SELECTED
+        | s::SELECTION => bold(reverse),
+        s::MODE_COMMAND | s::MODE_VISUAL => bold(StyleSpec {
+            bg: Some(r(c::WARN)),
+            fg: Some(r(c::ON_ACCENT)),
+            ..StyleSpec::default()
+        }),
         s::CURSOR_ROW | s::MOUSE_OFF | s::LINK_SELECTED => reverse,
-        s::UNREAD_BADGE => bold(StyleSpec { bg: Some(r(c::WARN)), fg: Some(r(c::ON_ACCENT)), ..StyleSpec::default() }),
+        s::UNREAD_BADGE => bold(StyleSpec {
+            bg: Some(r(c::WARN)),
+            fg: Some(r(c::ON_ACCENT)),
+            ..StyleSpec::default()
+        }),
         s::MENU_BAR => fg(c::TEXT),
-        s::MENU_ACTIVE => bold(StyleSpec { bg: Some(r(c::ACCENT)), fg: Some(r(c::ON_ACCENT)), ..StyleSpec::default() }),
-        s::TOOLTIP => StyleSpec { fg: Some(r(c::MODAL_TEXT)), bg: Some(r(c::MODAL_BACKGROUND)), border: Some(r(c::ACCENT)), ..StyleSpec::default() },
-        s::TOAST => StyleSpec { fg: Some(r(c::MODAL_TEXT)), bg: Some(r(c::MODAL_BACKGROUND)), border: Some(r(c::ACCENT)), ..StyleSpec::default() },
-        s::TOAST_WARN => StyleSpec { fg: Some(r(c::ON_ACCENT)), bg: Some(r(c::WARN)), border: Some(r(c::WARN)), ..StyleSpec::default() },
-        s::TOAST_ERROR => StyleSpec { fg: Some(r(c::ON_ACCENT)), bg: Some(r(c::DANGER)), border: Some(r(c::DANGER)), ..StyleSpec::default() },
+        s::MENU_ACTIVE => bold(StyleSpec {
+            bg: Some(r(c::ACCENT)),
+            fg: Some(r(c::ON_ACCENT)),
+            ..StyleSpec::default()
+        }),
+        s::TOOLTIP => StyleSpec {
+            fg: Some(r(c::MODAL_TEXT)),
+            bg: Some(r(c::MODAL_BACKGROUND)),
+            border: Some(r(c::ACCENT)),
+            ..StyleSpec::default()
+        },
+        s::TOAST => StyleSpec {
+            fg: Some(r(c::MODAL_TEXT)),
+            bg: Some(r(c::MODAL_BACKGROUND)),
+            border: Some(r(c::ACCENT)),
+            ..StyleSpec::default()
+        },
+        s::TOAST_WARN => StyleSpec {
+            fg: Some(r(c::ON_ACCENT)),
+            bg: Some(r(c::WARN)),
+            border: Some(r(c::WARN)),
+            ..StyleSpec::default()
+        },
+        s::TOAST_ERROR => StyleSpec {
+            fg: Some(r(c::ON_ACCENT)),
+            bg: Some(r(c::DANGER)),
+            border: Some(r(c::DANGER)),
+            ..StyleSpec::default()
+        },
         // Not bold: some terminals draw bold block glyphs from another font.
         s::TITLE => fg(c::ACCENT),
         s::HEADER_LABEL | s::MODE_INACTIVE | s::MOUSE_ON | s::ENTRY_SYSTEM => fg(c::SUBTLE),
@@ -612,9 +649,15 @@ pub fn vim_mode_style(mode: crate::keymap::Mode) -> Style {
     })
 }
 
-pub fn menu_bar() -> Style { st(slot::MENU_BAR) }
-pub fn menu_active() -> Style { st(slot::MENU_ACTIVE) }
-pub fn tooltip() -> Style { st(slot::TOOLTIP) }
+pub fn menu_bar() -> Style {
+    st(slot::MENU_BAR)
+}
+pub fn menu_active() -> Style {
+    st(slot::MENU_ACTIVE)
+}
+pub fn tooltip() -> Style {
+    st(slot::TOOLTIP)
+}
 pub fn toast(kind: crate::notify::NoticeKind) -> Style {
     use crate::notify::NoticeKind;
     st(match kind {

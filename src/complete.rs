@@ -5,11 +5,11 @@
 
 use crate::app::App;
 use crate::fuzzy;
+use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Clear, Paragraph};
-use ratatui::Frame;
 
 /// One completion candidate shown in the popup.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,7 +182,10 @@ fn candidates(app: &App) -> Option<((usize, usize), String, Vec<Candidate>)> {
     }
     let cur = app.input_cursor.min(input.len());
     // Token = from last whitespace (or after '/') to cursor.
-    let start = input[..cur].rfind(char::is_whitespace).map(|i| i + 1).unwrap_or(1);
+    let start = input[..cur]
+        .rfind(char::is_whitespace)
+        .map(|i| i + 1)
+        .unwrap_or(1);
     let start = start.max(1); // never include the leading '/'
     let query = input[start..cur].to_string();
     let range = (start, cur);
@@ -214,7 +217,10 @@ fn candidates(app: &App) -> Option<((usize, usize), String, Vec<Candidate>)> {
         let cmd = app.registry.find(cmd_name)?;
         let args = rest[cmd_name.len()..].trim_start();
         // Which argument index?
-        let idx = args.split_whitespace().count().saturating_sub(usize::from(!query.is_empty()));
+        let idx = args
+            .split_whitespace()
+            .count()
+            .saturating_sub(usize::from(!query.is_empty()));
         let idx = if query.is_empty() && input[..cur].ends_with(char::is_whitespace) {
             args.split_whitespace().count()
         } else {
@@ -285,7 +291,7 @@ pub fn names(items: impl IntoIterator<Item = impl Into<String>>) -> Vec<Candidat
 mod tests {
     use super::*;
     use crate::app::tests::test_app;
-    
+
     #[test]
     fn tab_completes_command_names_and_cycles() {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -293,7 +299,11 @@ mod tests {
         app.input = "/sw".into();
         app.input_cursor = 3;
         tab(&mut app, false);
-        assert!(app.input.starts_with("/switch") || app.input.contains("switch"), "{}", app.input);
+        assert!(
+            app.input.starts_with("/switch") || app.input.contains("switch"),
+            "{}",
+            app.input
+        );
         assert!(app.completion.is_some());
         let first = app.input.clone();
         tab(&mut app, false);

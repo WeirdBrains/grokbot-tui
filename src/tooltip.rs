@@ -3,10 +3,10 @@
 //!
 //! Adapted from acp-rs-scraper's `src/tui/tooltip.rs` (commit a60c82a).
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 use ratatui::widgets::{Clear, Paragraph};
-use ratatui::Frame;
 use std::time::{Duration, Instant};
 
 /// How long the pointer must sit still on a control before the tip shows.
@@ -172,10 +172,7 @@ pub fn paint(f: &mut Frame, tip: &Tip, anchor: Rect, screen: Rect) {
     let text: String = tip.text.chars().take(cols).collect();
     f.render_widget(
         Paragraph::new(theme::tooltip().span(text)),
-        Rect {
-            height: 1,
-            ..inner
-        },
+        Rect { height: 1, ..inner },
     );
     if inner.height >= 2 {
         let link: String = link.chars().take(cols).collect();

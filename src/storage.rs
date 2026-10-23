@@ -901,11 +901,14 @@ impl Store {
         if text.is_empty() {
             return Ok(());
         }
-        let last: Option<String> = self.conn.query_row(
-            "SELECT text FROM prompt_history WHERE account_id = ?1 ORDER BY id DESC LIMIT 1",
-            params![self.account.id],
-            |r| r.get(0),
-        ).optional()?;
+        let last: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT text FROM prompt_history WHERE account_id = ?1 ORDER BY id DESC LIMIT 1",
+                params![self.account.id],
+                |r| r.get(0),
+            )
+            .optional()?;
         if last.as_deref() == Some(text) {
             return Ok(());
         }
@@ -921,7 +924,6 @@ impl Store {
         )?;
         Ok(())
     }
-
 }
 
 fn user_version(conn: &Connection) -> Result<usize> {

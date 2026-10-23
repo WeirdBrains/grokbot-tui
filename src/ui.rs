@@ -358,7 +358,14 @@ fn draw_toasts(f: &mut Frame, app: &mut App) {
     if n == 0 {
         return;
     }
-    let toasts: Vec<_> = app.notices_board.toasts.iter().rev().take(n).cloned().collect();
+    let toasts: Vec<_> = app
+        .notices_board
+        .toasts
+        .iter()
+        .rev()
+        .take(n)
+        .cloned()
+        .collect();
     let mut y = area.y + 1;
     for t in toasts {
         let w = area.width.saturating_sub(4).clamp(20, 56);
@@ -373,12 +380,15 @@ fn draw_toasts(f: &mut Frame, app: &mut App) {
             break;
         }
         f.render_widget(Clear, r);
-        let block = theme::block(&theme::toast(t.notice.kind))
-            .title(format!(" {} ", t.notice.title));
+        let block =
+            theme::block(&theme::toast(t.notice.kind)).title(format!(" {} ", t.notice.title));
         let inner = block.inner(r);
         f.render_widget(block, r);
         let body: String = t.notice.body.chars().take(inner.width as usize).collect();
-        f.render_widget(Paragraph::new(theme::toast(t.notice.kind).span(body)), inner);
+        f.render_widget(
+            Paragraph::new(theme::toast(t.notice.kind).span(body)),
+            inner,
+        );
         y = y.saturating_add(3);
     }
 }
@@ -581,7 +591,9 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                 app.vim_mode.label()
             )
         }
-        InputMode::Normal => " message or /command · Shift/Alt-Enter newline · F1 help ".to_string(),
+        InputMode::Normal => {
+            " message or /command · Shift/Alt-Enter newline · F1 help ".to_string()
+        }
     };
     let scroll = app.input_scroll;
     // The selected range in char indices (masked prompts never select).
@@ -628,7 +640,11 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     let title_line = if app.keys_are_vim() && matches!(app.mode, InputMode::Normal) {
         Line::from(vec![
             theme::vim_mode_style(app.vim_mode).span(format!(" {} ", app.vim_mode.label())),
-            theme::key_hint().span(title.trim_start_matches(&format!(" {} ", app.vim_mode.label())).to_string()),
+            theme::key_hint().span(
+                title
+                    .trim_start_matches(&format!(" {} ", app.vim_mode.label()))
+                    .to_string(),
+            ),
         ])
     } else {
         Line::from(title)
