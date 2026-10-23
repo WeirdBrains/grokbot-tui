@@ -52,6 +52,13 @@ pub const PREF_MOUSE_CAPTURE: &str = "ui.mouse_capture";
 /// Keybinding scheme: "default" or "vim".
 pub const PREF_KEYS: &str = "ui.keys";
 
+/// How many prompts to keep in the per-account prompt history (global).
+pub const PREF_HISTORY_MAX: &str = "history.max_entries";
+/// Default for [`PREF_HISTORY_MAX`].
+pub const DEFAULT_HISTORY_MAX: usize = 10_000;
+/// Accepted range for [`PREF_HISTORY_MAX`]; values outside it fall back to the default.
+pub const HISTORY_MAX_RANGE: std::ops::RangeInclusive<usize> = 100..=1_000_000;
+
 /// Pref key for the big header title's glyphs: `auto`, `quadrant` or `half` (global).
 pub const PREF_TITLE_GLYPHS: &str = "ui.title_glyphs";
 
@@ -65,6 +72,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_THEME_DOWNLOAD,
     PREF_MOUSE_CAPTURE,
     PREF_KEYS,
+    PREF_HISTORY_MAX,
 ];
 
 /// Which block glyphs draw the big header title (pref `ui.title_glyphs`).
@@ -164,6 +172,8 @@ pub struct Config {
     pub mouse_capture: bool,
     /// Keybinding scheme (`default` or `vim`).
     pub keys: KeysScheme,
+    /// Prompt history cap per account (`history.max_entries`).
+    pub history_max: usize,
 }
 
 impl Default for Config {
@@ -182,6 +192,7 @@ impl Default for Config {
             theme_download: true,
             mouse_capture: true,
             keys: KeysScheme::Default,
+            history_max: DEFAULT_HISTORY_MAX,
         }
     }
 }
@@ -203,6 +214,7 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_THEME_DOWNLOAD, c.theme_download.to_string()),
         (PREF_MOUSE_CAPTURE, c.mouse_capture.to_string()),
         (PREF_KEYS, c.keys.as_str().to_string()),
+        (PREF_HISTORY_MAX, c.history_max.to_string()),
     ]
 }
 
@@ -241,6 +253,10 @@ impl Config {
             keys: o(PREF_KEYS)
                 .and_then(|v| KeysScheme::parse(&v))
                 .unwrap_or(d.keys),
+            history_max: o(PREF_HISTORY_MAX)
+                .and_then(|v| v.trim().replace('_', "").parse().ok())
+                .filter(|n| HISTORY_MAX_RANGE.contains(n))
+                .unwrap_or(d.history_max),
         }
     }
 }
@@ -277,6 +293,12 @@ mod tests {
         assert!(!Config::from_prefs(&m).theme_download);
         m.insert(PREF_THEME_DOWNLOAD.into(), "true".into());
         assert!(Config::from_prefs(&m).theme_download);
+        assert_eq!(c.history_max, DEFAULT_HISTORY_MAX);
+        assert!(is_global(PREF_HISTORY_MAX));
+        m.insert(PREF_HISTORY_MAX.into(), "50000".into());
+        assert_eq!(Config::from_prefs(&m).history_max, 50_000);
+        m.insert(PREF_HISTORY_MAX.into(), "5".into());
+        assert_eq!(Config::from_prefs(&m).history_max, DEFAULT_HISTORY_MAX);
         m.insert(PREF_THEME.into(), "solar-2".into());
         assert_eq!(Config::from_prefs(&m).theme, "solar-2");
         m.insert(PREF_THEME.into(), "../etc/passwd".into());

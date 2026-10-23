@@ -323,7 +323,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.picker.is_some() {
         draw_picker(f, app);
     } else if let Some(s) = app.history_search.as_mut() {
-        crate::history::draw(f, s, &app.prompt_history, f.area());
+        crate::history::draw(f, s, &app.prompt_history, &app.prompt_meta, f.area());
     } else if app.completion.is_some() {
         crate::complete::draw(f, app);
     } else if app.shell.is_some() {
@@ -747,7 +747,7 @@ pub fn empty_state(app: &App) -> Vec<String> {
         v.push("Pick a bot on the left (click, or Tab then ↑/↓ + Enter).".into());
     } else {
         v.push("No messages yet. Type a message and press Enter.".into());
-        v.push("/history reloads the transcript · /help delivery".into());
+        v.push("/reload reloads the transcript · /help delivery".into());
     }
     v
 }
@@ -1003,6 +1003,27 @@ fn entry_lines(
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn renders_history_browser_with_age_and_bot() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        crate::app::tests::mock_login(&mut app, "t");
+        crate::app::tests::type_line(&mut app, "summarize the logs\nand more");
+        app.open_history_browser("summ");
+        for (w, h) in [(120, 30), (30, 8), (10, 4)] {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| draw(f, &mut app)).unwrap();
+            if w == 120 {
+                let buf = term.backend().buffer().clone();
+                let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+                assert!(text.contains("Prompt history (1)"), "{text}");
+                assert!(text.contains("now"), "{text}");
+                assert!(text.contains("Helper"), "{text}");
+                assert!(text.contains("summarize the logs ⏎…"), "{text}");
+            }
+        }
+    }
 
     #[test]
     fn renders_bars() {

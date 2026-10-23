@@ -181,7 +181,20 @@ const V7: &str = "CREATE TABLE prompt_history (
 const V8: &str = "ALTER TABLE bots ADD COLUMN team INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE bots ADD COLUMN viewer_session_id TEXT;";
 
-const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8];
+/// v8 -> v9: remember which bot each prompt went to (shown in `/history`).
+const V9: &str = "ALTER TABLE prompt_history ADD COLUMN bot TEXT;";
+
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9];
+
+/// One remembered prompt (newest-first lists).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptEntry {
+    pub text: String,
+    /// Display name of the bot that was active when it was sent, if any.
+    pub bot: Option<String>,
+    /// UTC `YYYY-MM-DD HH:MM:SS`.
+    pub at: String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginMethod {
@@ -886,20 +899,39 @@ impl Store {
         })
     }
 
-    /// Newest-first prompt history for the active account (capped).
-    pub fn prompt_history(&self, limit: usize) -> Result<Vec<String>> {
+    /// Newest-first prompt history for the active account, at most `limit` entries.
+    pub fn prompt_entries(&self, limit: usize) -> Result<Vec<PromptEntry>> {
         let mut stmt = self.conn.prepare(
-            "SELECT text FROM prompt_history WHERE account_id = ?1 ORDER BY id DESC LIMIT ?2",
+            "SELECT text, bot, created_at FROM prompt_history WHERE account_id = ?1
+             ORDER BY id DESC LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![self.account.id, limit as i64], |r| r.get(0))?;
+        let rows = stmt.query_map(params![self.account.id, limit as i64], |r| {
+            Ok(PromptEntry {
+                text: r.get(0)?,
+                bot: r.get(1)?,
+                at: r.get(2)?,
+            })
+        })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
-    /// Append a prompt, skipping an exact duplicate of the previous entry. Trims to `max` rows.
-    pub fn push_prompt(&self, text: &str, max: usize) -> Result<()> {
+    /// Newest-first prompt texts for the active account (capped).
+    #[cfg(test)]
+    pub fn prompt_history(&self, limit: usize) -> Result<Vec<String>> {
+        Ok(self
+            .prompt_entries(limit)?
+            .into_iter()
+            .map(|e| e.text)
+            .collect())
+    }
+
+    /// Append a prompt (sent to `bot`, if any), skipping an exact duplicate of the previous
+    /// entry. Trims the account's history to the newest `max` rows. Returns whether a row
+    /// was added.
+    pub fn push_prompt(&self, text: &str, bot: Option<&str>, max: usize) -> Result<bool> {
         let text = text.trim_end();
-        if text.is_empty() {
-            return Ok(());
+        if text.trim().is_empty() {
+            return Ok(false);
         }
         let last: Option<String> = self
             .conn
@@ -910,19 +942,28 @@ impl Store {
             )
             .optional()?;
         if last.as_deref() == Some(text) {
-            return Ok(());
+            return Ok(false);
         }
         self.conn.execute(
-            "INSERT INTO prompt_history(account_id, text) VALUES (?1, ?2)",
-            params![self.account.id, text],
+            "INSERT INTO prompt_history(account_id, text, bot) VALUES (?1, ?2, ?3)",
+            params![self.account.id, text, bot],
         )?;
         self.conn.execute(
-            "DELETE FROM prompt_history WHERE account_id = ?1 AND id NOT IN (
-                SELECT id FROM prompt_history WHERE account_id = ?1 ORDER BY id DESC LIMIT ?2
+            "DELETE FROM prompt_history WHERE account_id = ?1 AND id <= (
+                SELECT id FROM prompt_history WHERE account_id = ?1
+                ORDER BY id DESC LIMIT 1 OFFSET ?2
             )",
-            params![self.account.id, max as i64],
+            params![self.account.id, max.max(1) as i64],
         )?;
-        Ok(())
+        Ok(true)
+    }
+
+    /// Forget the active account's prompt history. Returns how many prompts were removed.
+    pub fn clear_prompt_history(&self) -> Result<usize> {
+        Ok(self.conn.execute(
+            "DELETE FROM prompt_history WHERE account_id = ?1",
+            params![self.account.id],
+        )?)
     }
 }
 
@@ -1460,5 +1501,71 @@ mod tests {
             )
             .unwrap();
         assert_eq!(texts(&s, "b"), ["q", "a", "newest"]);
+    }
+}
+
+#[cfg(test)]
+mod prompt_history_store_tests {
+    use super::*;
+
+    #[test]
+    fn prompts_persist_across_reopen_dedupe_trim_and_stay_per_account() {
+        let d = tempfile::tempdir().unwrap();
+        {
+            let s = Store::open(d.path(), None).unwrap();
+            assert!(s.push_prompt("a", Some("Chomp"), 3).unwrap());
+            assert!(
+                !s.push_prompt("a", Some("Chomp"), 3).unwrap(),
+                "consecutive dup"
+            );
+            assert!(!s.push_prompt("   ", None, 3).unwrap(), "blank");
+            for p in ["b", "c", "d"] {
+                s.push_prompt(p, None, 3).unwrap();
+            }
+        }
+        let mut s = Store::open(d.path(), None).unwrap();
+        assert_eq!(
+            s.prompt_history(100).unwrap(),
+            ["d", "c", "b"],
+            "trimmed to 3"
+        );
+        s.push_prompt("a", Some("Chomp"), 100).unwrap();
+        let e = s.prompt_entries(1).unwrap();
+        assert_eq!(e[0].bot.as_deref(), Some("Chomp"));
+        s.add_account("work").unwrap();
+        s.use_account("work").unwrap();
+        assert!(
+            s.prompt_history(100).unwrap().is_empty(),
+            "accounts stay separate"
+        );
+        s.push_prompt("w", None, 100).unwrap();
+        s.use_account("default").unwrap();
+        assert_eq!(s.clear_prompt_history().unwrap(), 4);
+        s.use_account("work").unwrap();
+        assert_eq!(
+            s.prompt_history(100).unwrap(),
+            ["w"],
+            "clear is per account"
+        );
+    }
+
+    #[test]
+    fn v8_history_rows_survive_the_v9_migration() {
+        let d = tempfile::tempdir().unwrap();
+        {
+            let s = Store::open(d.path(), None).unwrap();
+            s.push_prompt("old prompt", None, 100).unwrap();
+            // Roll the schema back to v8 (no `bot` column), as an older release left it.
+            s.conn
+                .execute_batch(
+                    "ALTER TABLE prompt_history DROP COLUMN bot; PRAGMA user_version = 8;",
+                )
+                .unwrap();
+        }
+        let s = Store::open(d.path(), None).unwrap();
+        assert_eq!(s.schema_version().unwrap(), MIGRATIONS.len());
+        let e = s.prompt_entries(10).unwrap();
+        assert_eq!(e[0].text, "old prompt");
+        assert_eq!(e[0].bot, None);
     }
 }

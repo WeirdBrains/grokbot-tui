@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.11.0] - 2026-10-23
+
+### Added
+- **`/history [query]`** (alias `/prompts`): a scrollable browser of every prompt you've
+  sent, newest first, with its age and the bot it went to. Type to fuzzy-filter;
+  ↑/↓, PgUp/PgDn, Home/End and the mouse wheel move; Enter (or clicking the selected row)
+  puts the prompt in the input without sending; Esc closes and keeps your draft. With
+  `ui.keys=vim` it opens in list mode (`j`/`k`, `g`/`G`, Ctrl-d/Ctrl-u, `/` to filter,
+  `q` to close). Tab completes `clear` and words from recent prompts. Also in the Chat menu.
+- **`/history clear`**: forget the active account's prompt history after a confirmation
+  (Cancel is the default).
+- **Pref `history.max_entries`** (global, 100–1000000, default 10000): how many prompts are
+  kept per account. Replaces the fixed 500 cap.
+- Prompt history remembers the bot each prompt went to (schema v9 adds a nullable `bot`
+  column; existing history is kept).
+
+### Changed
+- The transcript reload that used to be `/history` is now **`/reload`** (alias
+  `/transcript`).
+- Up/Down and Ctrl-R re-read history from `context.db` when you start browsing, so prompts
+  sent from another grokbot-tui on the same data dir show up without a restart.
+- A failure to load prompt history is now reported instead of silently showing an empty
+  history.
+
+### Security
+- `/login …` lines are stored in history without their arguments, so a token pasted on
+  the same line never lands in `context.db`.
+
 ## [1.10.2] - 2026-10-23
 
 ### Fixed

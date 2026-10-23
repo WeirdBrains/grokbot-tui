@@ -93,9 +93,22 @@ with a mode badge on the input. Bindings live in `~/.grokbot-tui/keymap.toml`
 
 ## Prompt history and completion
 
-Up/Down in the input walk lines, then the last ~500 prompts for the active account
-(stored in `context.db`). Ctrl-R opens a fuzzy history search (Ctrl-S reverse; Esc keeps
-the draft). Tab after `/` fuzzy-completes slash commands and arguments; Shift-Tab cycles.
+Every prompt and slash command you submit is saved in `context.db` (per account, newest
+first, with the bot it went to and when), so history survives restarts. The newest
+`history.max_entries` are kept (default 10000; `/prefs set history.max_entries 50000`).
+Consecutive duplicates are stored once, and `/login …` lines are saved without their
+arguments so a pasted token never lands in history.
+
+- **Up/Down** in the input walk lines, then your prompt history (also prompts sent from
+  another grokbot-tui on the same data dir).
+- **Ctrl-R** opens a fuzzy history search (Ctrl-S reverse; Esc keeps the draft).
+- **`/history [query]`** (`/prompts`) opens a scrollable browser of every saved prompt with
+  its age and bot. Type to fuzzy-filter; ↑/↓, PgUp/PgDn and the mouse wheel move; Enter or
+  clicking the selected row puts the prompt in the input (it is not sent); Esc closes. With
+  `ui.keys=vim` it opens in list mode: `j`/`k`, `g`/`G`, Ctrl-d/Ctrl-u move, `/` filters,
+  `q` closes. `/history clear` forgets the account's history after a confirmation.
+
+Tab after `/` fuzzy-completes slash commands and arguments; Shift-Tab cycles.
 
 ## Selecting text
 
@@ -195,7 +208,8 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 100 entries):
 | `/whoami` | Show the account's login details (method, gateway, header names, whether a Cursor token is stored, env override) |
 | `/bots` | Refresh and list all bots, including hidden ones and groups |
 | `/bot <name\|id>` (`/use`) | Switch to a bot's chat |
-| `/history` | Fetch the last 200 transcript entries for the active bot |
+| `/history [query]` (`/prompts`) | Browse and fuzzy-search your saved prompts; Enter puts one in the input. `/history clear` forgets them (confirmed) |
+| `/reload` (`/transcript`) | Reload the active bot's full transcript from the gateway |
 | `/account` (`/acct`) | List accounts (`*` = active) |
 | `/account add <alias>` | Create an account |
 | `/account use <alias>` | Switch account: reloads login, bots, chats, top bar |
@@ -288,7 +302,7 @@ matching `GROKBOT_TUI_*` name when that one isn't set, so the new name wins when
 ## Chat sync
 
 Bots come from `listAgents`. Chat text comes from `getAgentTranscriptTail` (there is no separate
-listChats/getChat API). On bot select (and on `/history`), grokbot-tui pages that endpoint via
+listChats/getChat API). On bot select (and on `/reload`), grokbot-tui pages that endpoint via
 `beforeSeq`/`nextBeforeSeq` up to 1000 entries, merges into SQLite, and rebuilds the body from the
 DB so messages from the desktop app show up. While a bot is active it also polls the newest page
 every few seconds (backing off to 15s when idle).

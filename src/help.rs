@@ -33,7 +33,7 @@ Help topics (Enter on a link below opens it):
 Search: /help <keyword> (e.g. /help keyring), or press / in this window.
 
 Commands: /help <command> shows usage, examples and related topics.
-  help login logout whoami bots bot history account prefs memory theme quit",
+  help login logout whoami bots bot history reload account prefs memory theme quit",
         related: &[
             "login",
             "login-desktop",
@@ -192,6 +192,7 @@ in between quits.
   Tab                          After `/`: fuzzy-complete a command or argument (Shift-Tab cycles).
                                Otherwise switch focus between input and sidebar
   Ctrl-R                       Fuzzy search prompt history (Ctrl-S reverse; Esc keeps the draft)
+  /history [query]             Browse all past prompts (persisted; newest first, age + bot)
   PgUp / PgDn, mouse wheel     Scroll the chat (not the prompt history).
                                Only the exact bottom follows new content; scroll up
                                pins the view. '↓ N new' while unread (click / End /
@@ -439,6 +440,7 @@ Global keys
                          (half in macOS Terminal, whose fonts mangle quadrant glyphs;
                          quadrant elsewhere). Over ssh the terminal is unknown, so set
                          half if the title looks broken. Half needs 128+ columns.
+  history.max_entries    Prompts kept per account (100–1000000). Default: 10000.
   active_account         Account opened at startup (set automatically).
 
 Environment variables override the cursor.* / sand.* prefs (see /help env).",
@@ -495,7 +497,7 @@ and where it came from.",
 Bots come from the gateway's listAgents. Messages come from getAgentTranscriptTail
 (there is no separate chat list).
 
-  • Opening a bot (or /history) pages the whole transcript (up to 1000 entries),
+  • Opening a bot (or /reload) pages the whole transcript (up to 1000 entries),
     merges it into ~/.grokbot-tui/context.db and redraws the chat from there — so messages
     from the desktop app appear too.
   • While a bot is open grokbot-tui polls for new messages every ~1 s, backing off to 15 s
@@ -544,7 +546,7 @@ Desktop errors (APP_NOT_FOUND, NOT_SIGNED_IN, SECRET_TOOL_MISSING, KEYCHAIN_LOCK
 
 'host not allowed' — the URL isn't on the allowlist (see /help login gateway).
 
-Chat looks out of date — /history reloads the full transcript.
+Chat looks out of date — /reload reloads the full transcript.
 Team bot in the list but empty chat / send fails — re-login with /login cursor
   or /login desktop (needs a Cursor token) so shared agents get a viewer sessionId.
 No bots — create one in the desktop app, then /bots.
@@ -645,8 +647,21 @@ fn command_extra(
             &["keys"],
         ),
         "history" => (
+            "Browse and search every prompt you've sent (kept in context.db per account, so\n\
+             it survives restarts; newest history.max_entries kept, default 10000).\n\
+             Newest first, with age and bot. Type to fuzzy-filter; ↑/↓, PgUp/PgDn and the\n\
+             mouse wheel move; Enter (or clicking the selected row) puts the prompt in the\n\
+             input without sending; Esc closes and keeps your draft. With ui.keys = vim the\n\
+             list opens in list mode: j/k, g/G, Ctrl-d/Ctrl-u move, / filters, q closes.\n\
+             /history clear forgets the account's history after a confirmation.\n\
+             ↑ in an empty input and Ctrl-R search the same history. /login lines are\n\
+             stored without their arguments.",
+            &["/history", "/history deploy", "/history clear", "/prompts"],
+            &["keys", "prefs"],
+        ),
+        "reload" => (
             "Reload the active bot's full transcript from the gateway.",
-            &["/history"],
+            &["/reload", "/transcript"],
             &["sync"],
         ),
         "account" => (

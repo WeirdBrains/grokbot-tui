@@ -119,11 +119,19 @@ pub fn registry() -> Registry {
             },
             Command {
                 name: "history",
-                aliases: &[],
-                usage: "/history",
-                help: "Reload the active bot's chat history",
-                complete: no_complete,
+                aliases: &["prompts"],
+                usage: "/history [query] | /history clear",
+                help: "Browse and search your past prompts (Enter puts one in the input)",
+                complete: history_complete,
                 run: history,
+            },
+            Command {
+                name: "reload",
+                aliases: &["transcript"],
+                usage: "/reload",
+                help: "Reload the active bot's full chat transcript from the gateway",
+                complete: no_complete,
+                run: reload,
             },
             Command {
                 name: "account",
@@ -419,7 +427,37 @@ fn shell(app: &mut App, args: &str) -> Result<()> {
     Ok(())
 }
 
-fn history(app: &mut App, _: &str) -> Result<()> {
+fn history(app: &mut App, args: &str) -> Result<()> {
+    match args.trim() {
+        "clear" => app.confirm_clear_history(),
+        q => app.open_history_browser(q),
+    }
+    Ok(())
+}
+
+/// `/history` Tab completion: `clear`, then words from your recent prompts.
+fn history_complete(app: &App, idx: usize, _q: &str) -> Vec<crate::complete::Candidate> {
+    if idx != 0 {
+        return vec![];
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut words = vec!["clear".to_string()];
+    seen.insert("clear".to_string());
+    for p in app.prompt_history.iter().take(500) {
+        for w in p.split_whitespace() {
+            let w = w.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '-');
+            if w.chars().count() >= 3 && w.len() <= 40 && seen.insert(w.to_lowercase()) {
+                words.push(w.to_string());
+            }
+        }
+        if words.len() >= 300 {
+            break;
+        }
+    }
+    crate::complete::names(words)
+}
+
+fn reload(app: &mut App, _: &str) -> Result<()> {
     if app.active_bot().is_none() {
         bail!("No active bot")
     }

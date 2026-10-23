@@ -803,6 +803,7 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
             app.picker_moved(before);
         }
+        Event::Mouse(m) if app.history_search.is_some() => app.history_search_mouse(m),
         Event::Mouse(m) if app.editor.is_some() => match m.kind {
             MouseEventKind::Down(MouseButton::Left) => app.editor_click(m.column, m.row),
             MouseEventKind::ScrollUp => app.editor_scroll(-1),

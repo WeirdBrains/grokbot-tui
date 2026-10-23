@@ -508,6 +508,10 @@ pub struct App {
     pub mouse_pos: Option<(u16, u16)>,
     /// Newest-first prompts for the active account (Up/Down, Ctrl-R).
     pub prompt_history: Vec<String>,
+    /// Bot and time for each [`prompt_history`] entry (same order).
+    pub prompt_meta: Vec<crate::storage::PromptEntry>,
+    /// The last prompt-history load error, so it is reported once, not on every key.
+    history_error: Option<String>,
     /// Position in [`prompt_history`] while browsing (`None` = at the draft).
     pub history_idx: Option<usize>,
     /// The input text before browsing history.
@@ -692,6 +696,8 @@ impl App {
             cleared_input: None,
             mouse_pos: None,
             prompt_history: Vec::new(),
+            prompt_meta: Vec::new(),
+            history_error: None,
             history_idx: None,
             history_draft: None,
             history_search: None,
@@ -2224,14 +2230,31 @@ impl App {
             || self.menu.open.is_some()
     }
 
-    /// Load prompt history for the active account.
+    /// Load prompt history for the active account from `context.db`. A failure is shown
+    /// (once) instead of silently leaving history empty.
     pub fn reload_history(&mut self) {
-        self.prompt_history = self
-            .store
-            .prompt_history(crate::history::MAX)
-            .unwrap_or_default();
+        self.refresh_history();
         self.history_idx = None;
         self.history_draft = None;
+    }
+
+    /// Re-read history from the database without resetting browsing state. Picks up prompts
+    /// sent from another grokbot-tui running on the same data dir.
+    fn refresh_history(&mut self) {
+        match self.store.prompt_entries(self.config.history_max) {
+            Ok(entries) => {
+                self.history_error = None;
+                self.prompt_history = entries.iter().map(|e| e.text.clone()).collect();
+                self.prompt_meta = entries;
+            }
+            Err(e) => {
+                let msg = format!("Couldn't load prompt history: {e:#}");
+                if self.history_error.as_deref() != Some(msg.as_str()) {
+                    self.history_error = Some(msg.clone());
+                    self.error(msg);
+                }
+            }
+        }
     }
 
     /// Up in the input: previous line, else older prompt.
@@ -2239,11 +2262,12 @@ impl App {
         if crate::input::up(&self.input, &mut self.input_cursor) {
             return true;
         }
-        if self.prompt_history.is_empty() {
-            return false;
-        }
         let next = match self.history_idx {
             None => {
+                self.refresh_history();
+                if self.prompt_history.is_empty() {
+                    return false;
+                }
                 self.history_draft = Some(self.input.clone());
                 0
             }
@@ -2283,11 +2307,90 @@ impl App {
 
     pub fn open_history_search(&mut self) {
         self.completion = None;
-        self.history_search = Some(crate::history::Search::new(
+        self.refresh_history();
+        let mut search = crate::history::Search::new(
             &self.prompt_history,
             self.input.clone(),
             self.input_cursor,
+        );
+        search.vim = self.config.keys == crate::config::KeysScheme::Vim;
+        self.history_search = Some(search);
+    }
+
+    /// `/history [query]`: browse every remembered prompt (newest first), filtered as you type.
+    pub fn open_history_browser(&mut self, query: &str) {
+        self.completion = None;
+        self.refresh_history();
+        self.history_search = Some(crate::history::Search::browser(
+            &self.prompt_history,
+            query.trim(),
+            self.config.keys == crate::config::KeysScheme::Vim,
+            self.input.clone(),
+            self.input_cursor,
         ));
+    }
+
+    /// `/history clear`: confirm in a picker (Cancel is the default), then forget it all.
+    pub fn confirm_clear_history(&mut self) {
+        use crate::picker::{PickItem, Picker};
+        let n = self.prompt_history.len();
+        let items = vec![
+            PickItem::new("Cancel", "cancel"),
+            PickItem::new(format!("Forget {n} prompts"), "clear").detail("permanent"),
+        ];
+        self.open_picker(
+            Picker::new(
+                format!(
+                    "Clear prompt history for account '{}'?",
+                    self.account().alias
+                ),
+                items,
+                |app, it| {
+                    if it.value == "clear" {
+                        match app.store.clear_prompt_history() {
+                            Ok(n) => {
+                                app.reload_history();
+                                app.info(format!("Prompt history cleared ({n} removed)."));
+                            }
+                            Err(e) => app.error(format!("Couldn't clear prompt history: {e:#}")),
+                        }
+                    } else {
+                        app.info("Prompt history kept.".into());
+                    }
+                },
+            )
+            .with_selected("cancel")
+            .on_cancel(|app| app.info("Prompt history kept.".into())),
+        );
+    }
+
+    /// Mouse in the history overlay: wheel scrolls, click selects / takes.
+    pub fn history_search_mouse(&mut self, m: ratatui::crossterm::event::MouseEvent) {
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+        let Some(s) = self.history_search.as_mut() else {
+            return;
+        };
+        match m.kind {
+            MouseEventKind::ScrollUp => s.wheel(-crate::history::WHEEL_STEP),
+            MouseEventKind::ScrollDown => s.wheel(crate::history::WHEEL_STEP),
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let crate::history::Outcome::Take(text) =
+                    s.click(&self.prompt_history, m.column, m.row)
+                {
+                    self.history_search = None;
+                    self.take_history(text);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn take_history(&mut self, text: String) {
+        self.input = text;
+        self.input_cursor = self.input.len();
+        self.input_anchor = None;
+        self.history_idx = None;
+        self.history_draft = None;
     }
 
     pub fn history_search_key(&mut self, k: ratatui::crossterm::event::KeyEvent) {
@@ -2295,13 +2398,7 @@ impl App {
             return;
         };
         match crate::history::key(&mut search, &self.prompt_history, k) {
-            crate::history::Outcome::Take(text) => {
-                self.input = text;
-                self.input_cursor = self.input.len();
-                self.input_anchor = None;
-                self.history_idx = None;
-                self.history_draft = None;
-            }
+            crate::history::Outcome::Take(text) => self.take_history(text),
             crate::history::Outcome::Cancel => {
                 self.input = search.draft;
                 self.input_cursor = search.draft_cursor.min(self.input.len());
@@ -2570,8 +2667,19 @@ impl App {
         }
     }
 
+    /// Remember a submitted line in the persistent prompt history (secrets redacted).
     pub fn remember_prompt(&mut self, text: &str) {
-        if let Err(e) = self.store.push_prompt(text, crate::history::MAX) {
+        let text = crate::history::redact(text);
+        // Opening the history browser isn't worth remembering; it would bury real prompts.
+        let first = text.split_whitespace().next().unwrap_or("");
+        if matches!(first, "/history" | "/prompts") {
+            return;
+        }
+        let bot = self.active_bot().map(|b| b.name.clone());
+        if let Err(e) = self
+            .store
+            .push_prompt(&text, bot.as_deref(), self.config.history_max)
+        {
             self.error(format!("Couldn't save prompt history: {e:#}"));
             return;
         }
@@ -4607,5 +4715,198 @@ mod perf_probe {
             "PROBE 400 messages, 200x60: draw (layout rebuilt) {cold:?}, draw (cached) {warm:?}, tick {:?}",
             t.elapsed() / n
         );
+    }
+}
+
+#[cfg(test)]
+mod prompt_history_tests {
+    use super::tests::*;
+    use super::*;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn key(app: &mut App, c: KeyCode) {
+        app.history_search_key(KeyEvent::new(c, KeyModifiers::NONE));
+    }
+
+    fn mk(rt: &tokio::runtime::Runtime, dir: &std::path::Path) -> App {
+        let mut app = App::new(Store::open(dir, None).unwrap(), rt.handle().clone(), true).unwrap();
+        app.init();
+        app
+    }
+
+    #[test]
+    fn prompt_history_survives_restart_and_up_recalls_it() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("gb");
+        let mut app = mk(&rt, &dir);
+        mock_login(&mut app, "secret-token-value");
+        type_line(&mut app, "first prompt");
+        type_line(&mut app, "second prompt");
+        type_line(&mut app, "second prompt");
+        let bot = app.active_bot().map(|b| b.name.clone());
+        assert!(bot.is_some());
+        type_line(&mut app, "/quit");
+        drop(app);
+
+        // A brand-new App over the same data dir (= quitting and starting again).
+        let mut app = mk(&rt, &dir);
+        assert_eq!(
+            &app.prompt_history[..3],
+            ["/quit", "second prompt", "first prompt"],
+            "newest first; consecutive duplicate stored once"
+        );
+        assert!(
+            !app.prompt_history
+                .iter()
+                .any(|p| p.contains("secret-token-value")),
+            "the masked token prompt is never remembered"
+        );
+        assert_eq!(app.prompt_meta[1].bot, bot, "bot remembered per prompt");
+        assert!(crate::history::parse_utc(&app.prompt_meta[1].at).is_some());
+        app.input.clear();
+        app.input_cursor = 0;
+        assert!(app.history_up());
+        assert_eq!(app.input, "/quit");
+        assert!(app.history_up());
+        assert_eq!(app.input, "second prompt");
+        assert!(app.history_up());
+        assert_eq!(app.input, "first prompt");
+        assert!(app.history_down());
+        assert!(app.history_down());
+        assert!(app.history_down());
+        assert_eq!(app.input, "", "back to the (empty) draft");
+
+        // Ctrl-R search runs over the persisted history.
+        app.open_history_search();
+        for c in "first".chars() {
+            key(&mut app, KeyCode::Char(c));
+        }
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(app.input, "first prompt");
+        assert!(app.history_search.is_none());
+    }
+
+    #[test]
+    fn up_sees_prompts_from_another_instance_on_the_same_db() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("gb");
+        let mut a = mk(&rt, &dir);
+        let mut b = mk(&rt, &dir);
+        type_line(&mut b, "/whoami");
+        assert!(a.history_up());
+        assert_eq!(a.input, "/whoami");
+    }
+
+    #[test]
+    fn history_command_browses_filters_and_inserts_without_sending() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("gb");
+        let mut app = mk(&rt, &dir);
+        mock_login(&mut app, "tok");
+        type_line(&mut app, "deploy the staging box");
+        type_line(&mut app, "write release notes");
+        drop(app);
+        let mut app = mk(&rt, &dir);
+        let sent_before = app.current_log().len();
+        app.input = "draft".into();
+        app.input_cursor = 5;
+        // Commands aren't remembered until submitted; run it like Enter would.
+        type_line(&mut app, "/history depl");
+        let s = app.history_search.as_ref().expect("browser open");
+        assert!(s.browse);
+        assert_eq!(s.query, "depl");
+        assert_eq!(
+            app.prompt_history[s.selected().unwrap()],
+            "deploy the staging box"
+        );
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(app.input, "deploy the staging box", "inserted, not sent");
+        assert!(app.history_search.is_none());
+        let log: Vec<_> = app.current_log()[sent_before..]
+            .iter()
+            .map(|e| (e.kind, e.text.clone()))
+            .collect();
+        assert!(
+            !log.iter()
+                .any(|(_, t)| t.contains("deploy the staging box")),
+            "nothing sent to the bot: {log:?}"
+        );
+
+        // Esc closes and keeps the draft.
+        app.input = "keep me".into();
+        app.input_cursor = 7;
+        app.open_history_browser("");
+        key(&mut app, KeyCode::Down);
+        key(&mut app, KeyCode::Esc);
+        assert!(app.history_search.is_none());
+        assert_eq!(app.input, "keep me");
+    }
+
+    #[test]
+    fn history_browser_uses_vim_keys_when_enabled() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let d = tempfile::tempdir().unwrap();
+        let mut app = mk(&rt, &d.path().join("gb"));
+        for p in ["one", "two", "three"] {
+            type_line(&mut app, p);
+        }
+        app.config.keys = crate::config::KeysScheme::Vim;
+        app.open_history_browser("");
+        assert!(!app.history_search.as_ref().unwrap().typing);
+        key(&mut app, KeyCode::Char('j'));
+        key(&mut app, KeyCode::Char('j'));
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(app.input, "one");
+    }
+
+    #[test]
+    fn history_clear_asks_first_and_cancel_is_default() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let d = tempfile::tempdir().unwrap();
+        let mut app = mk(&rt, &d.path().join("gb"));
+        type_line(&mut app, "remember me");
+        type_line(&mut app, "/history clear");
+        assert!(app.picker.is_some());
+        assert_eq!(
+            app.prompt_history[0], "remember me",
+            "/history isn't remembered"
+        );
+        app.picker_confirm(); // Cancel is selected by default
+        assert!(app.prompt_history.contains(&"remember me".to_string()));
+        type_line(&mut app, "/history clear");
+        app.picker.as_mut().unwrap().move_by(1);
+        app.picker_confirm();
+        assert!(app.prompt_history.is_empty());
+        assert!(app.store.prompt_history(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn history_tab_completes_clear() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let d = tempfile::tempdir().unwrap();
+        let mut app = mk(&rt, &d.path().join("gb"));
+        app.input = "/history cle".into();
+        app.input_cursor = app.input.len();
+        crate::complete::tab(&mut app, false);
+        assert_eq!(app.input, "/history clear");
+    }
+
+    #[test]
+    fn history_cap_comes_from_prefs() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let d = tempfile::tempdir().unwrap();
+        let mut app = mk(&rt, &d.path().join("gb"));
+        assert_eq!(app.config.history_max, crate::config::DEFAULT_HISTORY_MAX);
+        type_line(&mut app, "/prefs set history.max_entries 100");
+        app.reload_config().unwrap();
+        assert_eq!(app.config.history_max, 100);
+        for i in 0..150 {
+            type_line(&mut app, &format!("/whoami {i}"));
+        }
+        assert_eq!(app.store.prompt_history(10_000).unwrap().len(), 100);
+        assert_eq!(app.prompt_history[0], "/whoami 149");
     }
 }
