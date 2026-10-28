@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.16.0] - 2026-10-28
+
+### Added
+- **Image viewer.** Click an image placeholder in the chat, or use `/view [n]` (alias `/image`,
+  vim NORMAL `O`, keymap action `image.view`, nearest on-screen image first), to open a modal
+  that shows the image as large as the terminal allows with the aspect ratio kept
+  (ratatui-image 11: kitty, sixel or iTerm2 detected at start-up, halfblocks fallback; the
+  Windows console and Alacritty get halfblocks). The title shows the alt text or file name,
+  pixel dimensions, file size, `n/N` and the protocol.
+- Viewer keys: `Esc` / `q` or a click outside close; `o` / `Enter` open in the system viewer;
+  `←`/`→`, `n`/`p`, `h`/`l` step to the previous / next image in the chat.
+- Images load on demand (local paths, `~/`, `file://`, or http/https downloads up to 25 MB)
+  in the background; a missing or undecodable image shows an error with the `o` fallback.
+- Closing the viewer, stepping, and terminal resizes clear the screen before the next draw
+  (plus a kitty delete-all) so no kitty or sixel image ghosts are left.
+- `GROKBOT_TUI_IMAGES=halfblocks` skips the terminal graphics query.
+- Theme part **`image_viewer_info`** (Modals). The viewer frame and title reuse `help_frame`
+  and `help_title`.
+
+### Changed
+- Image placeholders use no-break spaces, so they wrap as one unit and stay one click target;
+  the `<path>` after them is clickable too.
+
 ## [1.15.0] - 2026-10-28
 
 ### Added

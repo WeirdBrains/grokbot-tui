@@ -199,6 +199,11 @@ in between quits.
                                the chat). Terminals with OSC 8 (Ghostty, kitty, WezTerm,
                                Windows Terminal, foot, Alacritty 0.13+) also make them
                                natively clickable; GROKBOT_TUI_NO_HYPERLINKS=1 turns that off.
+  /view [n]                    Image viewer: the image nearest the bottom of the chat (or the
+                               n-th newest), as large as the terminal allows (kitty / sixel /
+                               iTerm2, else halfblocks). Also: click a [🖼 …] placeholder,
+                               vim NORMAL O. In the viewer: Esc/q or click outside close,
+                               o/Enter open externally, ←/→ (n/p, h/l) previous/next image
   /open [n|list]               Open the newest image (then link) in replies with the system
                                viewer (xdg-open / open / Windows handler); vim NORMAL: o.
                                Images show as [🖼 alt · file] placeholders

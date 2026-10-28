@@ -10,6 +10,7 @@ mod emoji;
 mod fuzzy;
 mod help;
 mod history;
+mod imageview;
 mod input;
 mod keyctx;
 mod keymap;
@@ -177,6 +178,7 @@ fn main() -> Result<()> {
     // Raw mode is on and nothing reads input yet: ask the terminal for its background
     // (for the "system" theme mode) before mouse capture and the event loop start.
     app.detected_variant = appearance::detect();
+    app.image_picker = imageview::detect_picker();
     execute!(std::io::stdout(), EnableMouseCapture)?;
     let _ = execute!(std::io::stdout(), EnableBracketedPaste);
     let enhancement = enable_shift_enter();
@@ -262,6 +264,15 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         }
         // Draw after input changed something, else at the UI tick (spinners, replies
         // arriving from background tasks).
+        if app.needs_clear {
+            app.needs_clear = false;
+            if let Some(seq) = imageview::kitty_delete_all(&app.image_picker) {
+                use std::io::Write;
+                let _ = std::io::stdout().write_all(seq.as_bytes());
+            }
+            term.clear()?;
+            dirty = true;
+        }
         if dirty || last_draw.elapsed() >= app::UI_TICK {
             let frame = term.draw(|f| ui::draw(f, app))?;
             if hyperlinks_on() && !app.link_hits.is_empty() {
@@ -610,6 +621,22 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 app.cycle_theme_mode();
                 return true;
             }
+            if app.image_view.is_some() {
+                match k.code {
+                    KeyCode::Esc | KeyCode::Char('q') => app.close_image_view(),
+                    KeyCode::Char('o') | KeyCode::Enter => app.image_open_external(),
+                    KeyCode::Right
+                    | KeyCode::Char('n')
+                    | KeyCode::Char('l')
+                    | KeyCode::Char(' ') => app.image_step(1),
+                    KeyCode::Left
+                    | KeyCode::Char('p')
+                    | KeyCode::Char('h')
+                    | KeyCode::Backspace => app.image_step(-1),
+                    _ => {}
+                }
+                return true;
+            }
             if app.shell.is_some() {
                 match k.code {
                     KeyCode::Esc | KeyCode::Char('q') => app.close_shell(),
@@ -813,6 +840,11 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
             app.picker_moved(before);
         }
+        Event::Mouse(m) if app.image_view.is_some() => {
+            if let MouseEventKind::Down(MouseButton::Left) = m.kind {
+                app.image_view_click(m.column, m.row)
+            }
+        }
         Event::Mouse(m) if app.history_search.is_some() => app.history_search_mouse(m),
         Event::Mouse(m) if app.editor.is_some() => match m.kind {
             MouseEventKind::Down(MouseButton::Left) => app.editor_click(m.column, m.row),
@@ -833,7 +865,8 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             MouseEventKind::ScrollDown => app.scroll_down(3),
             _ => {}
         },
-        Event::Resize(..) => {}
+        // Graphics don't reflow: repaint from scratch so no image ghost survives a resize.
+        Event::Resize(..) => app.needs_clear = true,
         _ => return false,
     }
     true

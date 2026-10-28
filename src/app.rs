@@ -395,6 +395,11 @@ pub enum Event {
         name: String,
         result: gw::Result<()>,
     },
+    /// The image viewer's image finished loading.
+    ImageLoaded {
+        id: u64,
+        result: crate::imageview::Loaded,
+    },
     /// `promptAcceptanceStatus` answer for a send whose outcome was unknown.
     Acceptance {
         epoch: u64,
@@ -468,6 +473,13 @@ pub struct App {
     pub unread_area: Rect,
     /// Links on screen in the last frame (clicks, OSC 8 hyperlinks).
     pub link_hits: Vec<crate::ui::LinkHit>,
+    /// The image viewer modal.
+    pub image_view: Option<crate::imageview::ImageView>,
+    pub image_load_seq: u64,
+    /// Graphics protocol for images (halfblocks until the terminal is queried).
+    pub image_picker: ratatui_image::picker::Picker,
+    /// Clear the terminal before the next draw (image ghosts after the viewer closes).
+    pub needs_clear: bool,
     /// Local notification toasts + settings (1.10.0).
     pub notices_board: crate::notify::NoticeBoard,
     /// Rules deciding toast / mute / drop.
@@ -674,6 +686,10 @@ impl App {
             body_inner_h: 0,
             unread_area: Rect::default(),
             link_hits: vec![],
+            image_view: None,
+            image_load_seq: 0,
+            image_picker: ratatui_image::picker::Picker::halfblocks(),
+            needs_clear: false,
             notices_board: crate::notify::NoticeBoard::new(),
             notify_rules: crate::notify_rules::Ruleset::default(),
             menu: crate::menubar::MenuBar::default(),
@@ -957,6 +973,7 @@ impl App {
                     }
                 }
             }
+            Event::ImageLoaded { id, result } => self.on_image_loaded(id, result),
             Event::Shell { id, cmd, result } => match &mut self.shell {
                 Some(m) if m.id == id => {
                     m.result = Some(result);
@@ -2276,6 +2293,7 @@ impl App {
             || self.history_search.is_some()
             || self.completion.is_some()
             || self.menu.open.is_some()
+            || self.image_view.is_some()
     }
 
     /// Load prompt history for the active account from `context.db`. A failure is shown
@@ -2710,6 +2728,12 @@ impl App {
                 self.input_newline();
                 true
             }
+            "image.view" => {
+                if !self.view_nearest_image() {
+                    self.error("No images in this chat's replies".into());
+                }
+                true
+            }
             "message.open" => {
                 if let Err(e) = crate::commands::open_item(self, "") {
                     self.error(format!("{e:#}"));
@@ -3024,7 +3048,7 @@ impl App {
                 Some(cmd) => {
                     let run = cmd.run;
                     // Help opens a modal; don't echo it into the chat.
-                    if !matches!(cmd.name, "help" | "shell" | "react" | "open")
+                    if !matches!(cmd.name, "help" | "shell" | "react" | "open" | "view")
                         && !(cmd.name == "login" && args.trim().is_empty())
                     {
                         self.push(EntryKind::User, trimmed.clone());
@@ -3104,6 +3128,9 @@ impl App {
             .find(|h| h.y == row && col >= h.x && col < h.x + h.w)
         {
             let url = h.url.clone();
+            if h.image && self.view_image(Some(&url)) {
+                return;
+            }
             match crate::markdown::open_external(&url) {
                 Ok(()) => self.info(format!("Opened {url}")),
                 Err(e) => self.error(format!("Couldn't open {url}: {e}")),

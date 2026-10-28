@@ -335,6 +335,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.menu.open.is_some() {
         crate::menubar::draw_dropdown(f, &mut app.menu, &app.registry, f.area());
     }
+    if app.image_view.is_some() {
+        crate::imageview::draw(f, app);
+    }
     draw_toasts(f, app);
     if let Some(tip) = app.tooltip.tip.clone() {
         crate::tooltip::paint(f, &tip, app.tooltip.tip_at, f.area());
@@ -469,8 +472,21 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             .iter()
             .filter(|e| e.kind == EntryKind::Bot)
             .flat_map(|e| crate::markdown::openables(&e.text))
-            .filter(|o| !o.image && o.label != o.url)
-            .map(|o| (o.label, o.url))
+            .flat_map(|o| {
+                if o.image {
+                    vec![
+                        (
+                            crate::markdown::placeholder(&o.label, &o.url),
+                            o.url.clone(),
+                        ),
+                        (o.url.clone(), o.url),
+                    ]
+                } else if o.label != o.url {
+                    vec![(o.label, o.url)]
+                } else {
+                    vec![]
+                }
+            })
             .collect();
         for (i, e) in app.feed().iter().enumerate() {
             if i > 0 {
@@ -596,6 +612,8 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     app.scroll = scroll;
     // Where this frame's links are, for clicks and OSC 8 (feed lines are one row each).
     app.link_hits.clear();
+    let image_urls: std::collections::HashSet<String> =
+        app.chat_images().into_iter().map(|o| o.url).collect();
     {
         let cache = app.feed_cache.as_ref().expect("built above");
         let mut row = 0usize;
@@ -622,6 +640,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                         y: inner.y + y as u16,
                         w: w as u16,
                         url: url.clone(),
+                        image: image_urls.contains(url),
                     });
                 }
             }
@@ -749,6 +768,8 @@ pub struct LinkHit {
     pub y: u16,
     pub w: u16,
     pub url: String,
+    /// An image (placeholder or image URL): a click opens the viewer.
+    pub image: bool,
 }
 
 /// End of a URL starting at byte 0 of `s`: stops at whitespace, `<>"'` and trailing

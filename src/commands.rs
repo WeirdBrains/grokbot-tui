@@ -134,6 +134,14 @@ pub fn registry() -> Registry {
                 run: react,
             },
             Command {
+                name: "view",
+                aliases: &["image"],
+                usage: "/view [n]",
+                help: "Show an image from the bot's replies in the viewer (newest on screen, or n-th newest; vim O)",
+                complete: no_complete,
+                run: view,
+            },
+            Command {
                 name: "open",
                 aliases: &["img"],
                 usage: "/open [n|list]",
@@ -492,6 +500,28 @@ fn openables(app: &App) -> Vec<crate::markdown::Openable> {
     }
     imgs.extend(links);
     imgs
+}
+
+fn view(app: &mut App, args: &str) -> Result<()> {
+    let a = args.trim();
+    if a.is_empty() {
+        if !app.view_nearest_image() {
+            bail!("No images in this chat's replies")
+        }
+        return Ok(());
+    }
+    let n = a
+        .parse::<usize>()
+        .ok()
+        .filter(|n| *n >= 1)
+        .ok_or_else(|| anyhow::anyhow!("Usage: /view [n]"))?;
+    let imgs = app.chat_images();
+    let Some(o) = imgs.get(n - 1) else {
+        bail!("Only {} images here", imgs.len())
+    };
+    let url = o.url.clone();
+    app.view_image(Some(&url));
+    Ok(())
 }
 
 pub fn open_item(app: &mut App, args: &str) -> Result<()> {

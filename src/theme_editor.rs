@@ -3369,6 +3369,7 @@ mod tests {
                 "md_list_marker",
                 "md_rule",
                 "md_table_border",
+                "image_viewer_info",
                 "image_placeholder",
                 "menu_active",
                 "tooltip",

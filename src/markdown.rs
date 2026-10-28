@@ -641,7 +641,8 @@ pub fn placeholder(alt: &str, url: &str) -> String {
     if parts.is_empty() {
         parts.push("image".into());
     }
-    format!("[🖼 {}]", parts.join(" · "))
+    // No-break spaces: the placeholder wraps as one unit (and stays one click target).
+    format!("[🖼 {}]", parts.join(" · ")).replace(' ', "\u{a0}")
 }
 
 fn looks_like_image(u: &str) -> bool {
@@ -860,15 +861,23 @@ mod tests {
             ]
         );
         assert_eq!(
-            placeholder("a cat", "https://x/cat.png?s=1"),
+            placeholder("a cat", "https://x/cat.png?s=1").replace('\u{a0}', " "),
             "[🖼 a cat · cat.png]"
         );
-        assert_eq!(placeholder("", "https://x/"), "[🖼 x]");
+        assert_eq!(
+            placeholder("", "https://x/").replace('\u{a0}', " "),
+            "[🖼 x]"
+        );
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("p.png");
         std::fs::write(&f, vec![0u8; 2048]).unwrap();
-        assert_eq!(placeholder("", f.to_str().unwrap()), "[🖼 p.png · 2.0 KB]");
-        let rows = plain("![a cat](https://x/cat.png)", 60).join("");
+        assert_eq!(
+            placeholder("", f.to_str().unwrap()).replace('\u{a0}', " "),
+            "[🖼 p.png · 2.0 KB]"
+        );
+        let rows = plain("![a cat](https://x/cat.png)", 60)
+            .join("")
+            .replace('\u{a0}', " ");
         assert_eq!(rows, "[🖼 a cat · cat.png] <https://x/cat.png>");
         assert!(open_external("/definitely/not/here.png").is_err());
     }

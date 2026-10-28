@@ -95,12 +95,21 @@ OSC 8 off. Keyboard: `/open list` then `/open <n>`, or vim `o` for the newest.
 
 ### Images
 
-Images in replies (`![alt](url)` and bare image URLs or paths) show as a placeholder,
-`[🖼 alt · cat.png · 12.0 KB]` (size for local files), followed by the URL. `/open` (vim `o`)
-opens the newest one in your system viewer; `/open list` numbers every image and link. Inline
-terminal graphics (kitty / sixel / iTerm2) are not drawn yet. **Attaching an image to a prompt
-isn't possible:** grokbot_api 1.1's `sendPrompt` takes text only (agent id, prompt, nonce,
-reply-to) and there is no upload method. Theme part: `image_placeholder`.
+Images in replies (`![alt](url)`, bare image URLs and paths) show as a placeholder,
+`[🖼 alt · cat.png · 12.0 KB]` (size for local files), followed by the URL. **Click the
+placeholder** (or `/view`, vim `O`) to open the image viewer: the image as large as the
+terminal allows, aspect ratio kept, with its name, pixel size, file size and position
+(`2/5`) in the title. The graphics protocol is detected at start-up with ratatui-image (kitty,
+sixel, iTerm2; halfblocks everywhere else, e.g. the Windows console or Alacritty);
+`GROKBOT_TUI_IMAGES=halfblocks` skips the terminal query. Viewer keys: `Esc`/`q` or a click
+outside close, `o`/`Enter` open in the system viewer, `←`/`→` (`n`/`p`, `h`/`l`) step through
+the chat's images. Closing or resizing clears the screen (and deletes kitty images) so no image
+ghosts stay. Images are read from disk or downloaded (http/https, up to 25 MB) only when you
+open the viewer. `/open` opens images and links externally; `/open list` numbers them.
+
+**Attaching an image to a prompt isn't possible:** grokbot_api 1.1's `sendPrompt` takes text
+only (agent id, prompt, nonce, reply-to) and there is no upload method. Theme parts:
+`image_placeholder`, `image_viewer_info` (the viewer uses `help_frame` / `help_title`).
 
 ### Emoji and reactions
 

@@ -37,6 +37,7 @@ pub const ACTIONS: &[&str] = &[
     "keymap.reload",
     "message.react",
     "message.open",
+    "image.view",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

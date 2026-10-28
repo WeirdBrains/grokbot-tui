@@ -53,6 +53,7 @@ md_link = { fg = "@accent", underline = true }
 md_list_marker = { fg = "@accent" }
 md_rule = { fg = "@muted" }
 md_table_border = { fg = "@muted" }
+image_viewer_info = { fg = "@subtle" }
 image_placeholder = { fg = "@accent", bg = "@header" }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
@@ -131,6 +132,7 @@ md_link = { fg = "@accent", underline = true }
 md_list_marker = { fg = "@accent" }
 md_rule = { fg = "@muted" }
 md_table_border = { fg = "@muted" }
+image_viewer_info = { fg = "@subtle" }
 image_placeholder = { fg = "@accent", bg = "@header" }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
