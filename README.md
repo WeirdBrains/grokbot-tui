@@ -73,6 +73,17 @@ the input, close an overlay, or ask before quitting; `Ctrl-Shift-C` never quits)
 `F1` help · `F2` pick a bot · `F3` pick an account · `F4` cycle dark/light/system · `F5` pick a theme ·
 `Shift-F5` theme editor · `F6` mouse capture on/off.
 
+### Markdown in replies
+
+Bot replies render as markdown (CommonMark plus GitHub tables, ~~strikethrough~~ and task
+lists): headings, **bold**, *italic*, `inline code`, fenced code blocks (a shaded block with
+the language label; no syntax highlighting yet), bullet and numbered lists with nesting,
+`☑`/`☐` task items, `│` blockquotes, links as `label <url>`, box-drawn tables (columns shrink
+and cells end in `…` when the chat is narrow) and `---` rules. Lines are wrapped before
+drawing, so scrolling and the bottom-follow stay exact. Your own messages and notices stay
+plain text. Theme parts: `md_heading`, `md_code`, `md_code_block`, `md_quote`, `md_link`,
+`md_list_marker`, `md_rule` (also link URLs), `md_table_border`.
+
 ### Emoji and reactions
 
 Type `:` and part of a name, then **Tab**, to pick an emoji (`:tada` → 🎉), using the same

@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.13.0] - 2026-10-28
+
+### Added
+- **Markdown in bot replies** (pulldown-cmark, CommonMark + GFM tables, strikethrough and
+  task lists): headings, bold, italic, strikethrough, inline code, fenced code blocks (shaded
+  block with a language label), bullet and numbered lists with nesting and hanging indents,
+  `☑`/`☐` task items, `│` blockquotes, links shown as `label <url>` (autolinks once),
+  box-drawn tables that shrink and truncate with `…` to fit, `---` rules, and image syntax
+  shown as `🖼 alt <url>`. Before this, replies were shown as raw text with the markup.
+- Replies are rendered already wrapped to the chat width (every line one row; wide emoji and
+  long words are split between graphemes), so scroll math and exact-bottom follow are
+  unchanged. Your messages and notices stay plain.
+- Theme parts (Chat): **`md_heading`**, **`md_code`**, **`md_code_block`**, **`md_quote`**,
+  **`md_link`**, **`md_list_marker`**, **`md_rule`** (rules and link URLs),
+  **`md_table_border`**. Shipped themes set them; older files fall back to built-in defaults.
+  Bold/italic/strikethrough are modifiers on the message style.
+
+### Notes
+- No syntax highlighting in code blocks yet (syntect would add a large dependency and its own
+  theme set); blocks use the `md_code_block` style instead.
+
 ## [1.12.0] - 2026-10-28
 
 ### Added

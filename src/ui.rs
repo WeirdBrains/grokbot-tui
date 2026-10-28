@@ -701,6 +701,18 @@ fn feed_key(feed: &[crate::app::Entry], inner_w: usize, bot: Option<&str>) -> u6
     ] {
         format!("{:?}{:?}", theme::entry(k), theme::entry_label(k)).hash(&mut h);
     }
+    for s in [
+        theme::md_heading(),
+        theme::md_code(),
+        theme::md_code_block(),
+        theme::md_quote(),
+        theme::md_link(),
+        theme::md_list_marker(),
+        theme::md_rule(),
+        theme::md_table_border(),
+    ] {
+        format!("{s:?}").hash(&mut h);
+    }
     h.finish()
 }
 
@@ -1023,6 +1035,26 @@ fn entry_lines(
     };
     let (label, style) = (theme::entry_label(kind), theme::entry(kind));
     let pw = unicode_width::UnicodeWidthStr::width(prefix.as_str());
+    // Bot replies are markdown: rendered pre-wrapped, one screen row per line.
+    if let Some(max) = bubble
+        && kind == EntryKind::Bot
+    {
+        let w = max.saturating_sub(pw).max(max / 3).max(1);
+        let base = ratatui::style::Style::from(&style);
+        return crate::markdown::render(text, w, base)
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut l)| {
+                let p = if i == 0 {
+                    prefix.clone()
+                } else {
+                    " ".repeat(pw)
+                };
+                l.spans.insert(0, label.span(p));
+                l
+            })
+            .collect();
+    }
     let body: Vec<String> = match bubble {
         // Prefix + text stay within the bubble; keep at least a third for text.
         Some(max) => wrap_text(text, max.saturating_sub(pw).max(max / 3).max(1)),

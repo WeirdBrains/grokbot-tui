@@ -214,6 +214,14 @@ style_slots! {
     SELECTION = "selection", "Chat", false, "In-app selected text in the chat body";
     UNREAD_BADGE = "unread_badge", "Chat", false, "'↓ N new' while scrolled up";
     REACTION_PILL = "reaction_pill", "Chat", false, "Reaction pills under a message ( 👍 )";
+    MD_HEADING = "md_heading", "Chat", false, "Markdown headings";
+    MD_CODE = "md_code", "Chat", false, "Markdown `inline code`";
+    MD_CODE_BLOCK = "md_code_block", "Chat", false, "Markdown fenced code blocks";
+    MD_QUOTE = "md_quote", "Chat", false, "Markdown > blockquotes (bar and text)";
+    MD_LINK = "md_link", "Chat", false, "Markdown link labels";
+    MD_LIST_MARKER = "md_list_marker", "Chat", false, "Markdown list bullets, numbers and task boxes";
+    MD_RULE = "md_rule", "Chat", false, "Markdown --- rules and link URLs";
+    MD_TABLE_BORDER = "md_table_border", "Chat", false, "Markdown table borders";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
     MENU_ACTIVE = "menu_active", "Screen and header", false, "Open / focused menu label";
     TOOLTIP = "tooltip", "Modals", true, "Hover tooltip frame and text";
@@ -365,6 +373,23 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
             fg: Some(r(c::TEXT)),
             ..StyleSpec::default()
         },
+        s::MD_HEADING => bold(fg(c::ACCENT)),
+        s::MD_CODE => fg(c::WARN),
+        s::MD_CODE_BLOCK => StyleSpec {
+            bg: Some(r(c::HEADER)),
+            ..fg(c::TEXT)
+        },
+        s::MD_QUOTE => StyleSpec {
+            italic: true,
+            ..fg(c::SUBTLE)
+        },
+        s::MD_LINK => StyleSpec {
+            underline: true,
+            ..fg(c::ACCENT)
+        },
+        s::MD_LIST_MARKER => fg(c::ACCENT),
+        s::MD_RULE => fg(c::MUTED),
+        s::MD_TABLE_BORDER => fg(c::MUTED),
         s::MENU_BAR => fg(c::TEXT),
         s::MENU_ACTIVE => bold(StyleSpec {
             bg: Some(r(c::ACCENT)),
@@ -675,6 +700,30 @@ pub fn toast(kind: crate::notify::NoticeKind) -> Style {
 pub fn unread_badge() -> Style {
     st(slot::UNREAD_BADGE)
 }
+pub fn md_heading() -> Style {
+    st(slot::MD_HEADING)
+}
+pub fn md_code() -> Style {
+    st(slot::MD_CODE)
+}
+pub fn md_code_block() -> Style {
+    st(slot::MD_CODE_BLOCK)
+}
+pub fn md_quote() -> Style {
+    st(slot::MD_QUOTE)
+}
+pub fn md_link() -> Style {
+    st(slot::MD_LINK)
+}
+pub fn md_list_marker() -> Style {
+    st(slot::MD_LIST_MARKER)
+}
+pub fn md_rule() -> Style {
+    st(slot::MD_RULE)
+}
+pub fn md_table_border() -> Style {
+    st(slot::MD_TABLE_BORDER)
+}
 pub fn reaction_pill() -> Style {
     st(slot::REACTION_PILL)
 }
@@ -908,6 +957,7 @@ mod tests {
                 if s.key == "theme_switch"
                     || s.key == "unread_badge"
                     || s.key == "reaction_pill"
+                    || s.key.starts_with("md_")
                     || s.key == "menu_bar"
                     || s.key == "menu_active"
                     || s.key == "tooltip"

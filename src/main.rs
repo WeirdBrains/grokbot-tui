@@ -14,6 +14,7 @@ mod input;
 mod keyctx;
 mod keymap;
 mod keys;
+mod markdown;
 mod menubar;
 mod notify;
 mod notify_rules;
