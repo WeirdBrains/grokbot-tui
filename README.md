@@ -84,6 +84,15 @@ drawing, so scrolling and the bottom-follow stay exact. Your own messages and no
 plain text. Theme parts: `md_heading`, `md_code`, `md_code_block`, `md_quote`, `md_link`,
 `md_list_marker`, `md_rule` (also link URLs), `md_table_border`.
 
+### Links
+
+Links in the chat are clickable: markdown link labels, their `<url>`, and bare `http(s)://`
+URLs (styled with `md_link`). A mouse click (with mouse capture on) opens the link with the
+system opener. Each frame also wraps the links in **OSC 8 hyperlinks**, so Ghostty, kitty,
+WezTerm, Windows Terminal, foot, iTerm2 and Alacritty 0.13+ make them natively clickable
+(e.g. Ctrl/Cmd-click, or with `F6` mouse off). Set `GROKBOT_TUI_NO_HYPERLINKS=1` to turn
+OSC 8 off. Keyboard: `/open list` then `/open <n>`, or vim `o` for the newest.
+
 ### Images
 
 Images in replies (`![alt](url)` and bare image URLs or paths) show as a placeholder,

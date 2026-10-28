@@ -466,6 +466,8 @@ pub struct App {
     pub body_inner_h: u16,
     /// Clickable "↓ N new" badge area (set by the renderer).
     pub unread_area: Rect,
+    /// Links on screen in the last frame (clicks, OSC 8 hyperlinks).
+    pub link_hits: Vec<crate::ui::LinkHit>,
     /// Local notification toasts + settings (1.10.0).
     pub notices_board: crate::notify::NoticeBoard,
     /// Rules deciding toast / mute / drop.
@@ -671,6 +673,7 @@ impl App {
             body_rows: 0,
             body_inner_h: 0,
             unread_area: Rect::default(),
+            link_hits: vec![],
             notices_board: crate::notify::NoticeBoard::new(),
             notify_rules: crate::notify_rules::Ruleset::default(),
             menu: crate::menubar::MenuBar::default(),
@@ -3095,6 +3098,18 @@ impl App {
 
     pub fn click(&mut self, col: u16, row: u16) {
         let at = ratatui::layout::Position::new(col, row);
+        if let Some(h) = self
+            .link_hits
+            .iter()
+            .find(|h| h.y == row && col >= h.x && col < h.x + h.w)
+        {
+            let url = h.url.clone();
+            match crate::markdown::open_external(&url) {
+                Ok(()) => self.info(format!("Opened {url}")),
+                Err(e) => self.error(format!("Couldn't open {url}: {e}")),
+            }
+            return;
+        }
         if self.unread_area.contains(at) {
             self.follow_bottom();
             return;

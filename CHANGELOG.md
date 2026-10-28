@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.15.0] - 2026-10-28
+
+### Added
+- **Clickable links.** Markdown link labels, their `<url>` and bare `http(s)://` URLs in the
+  chat open with the system opener on a mouse click (xdg-open / open / the Windows URL
+  handler, no shell). Bare URLs are now styled with the `md_link` theme part.
+- **OSC 8 hyperlinks:** after each frame the visible links are re-printed from the frame
+  buffer (same characters and colors) inside OSC 8 sequences, so Ghostty, kitty, WezTerm,
+  Windows Terminal, foot, iTerm2 and Alacritty 0.13+ make them natively clickable. ratatui's
+  buffer and width math never see the escapes, and the cursor is saved and restored. Opt out
+  with `GROKBOT_TUI_NO_HYPERLINKS=1`. Control characters in URLs are stripped.
+- Keyboard path: `/open list` numbers every image and link in the replies, `/open <n>` opens
+  one, and vim NORMAL `o` opens the newest.
+
 ## [1.14.0] - 2026-10-28
 
 ### Added

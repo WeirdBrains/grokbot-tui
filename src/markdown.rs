@@ -740,6 +740,9 @@ pub fn open_external(target: &str) -> std::io::Result<()> {
             format!("{file} doesn't exist on this machine"),
         ));
     }
+    if cfg!(test) {
+        return Ok(()); // never launch a viewer from tests
+    }
     let arg = if web { t.as_str() } else { file };
     let mut cmd = if cfg!(windows) {
         let mut c = std::process::Command::new("rundll32");

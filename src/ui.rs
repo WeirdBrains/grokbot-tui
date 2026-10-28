@@ -463,6 +463,15 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     let key = feed_key(app.feed(), inner_w, bot_name.as_deref()) ^ reactions_key(&reactions);
     if app.feed_cache.as_ref().is_none_or(|c| c.key != key) {
         let mut lines: Vec<Line<'static>> = vec![];
+        // Markdown link labels → urls, over the whole feed (labels are matched per line).
+        let labels: Vec<(String, String)> = app
+            .feed()
+            .iter()
+            .filter(|e| e.kind == EntryKind::Bot)
+            .flat_map(|e| crate::markdown::openables(&e.text))
+            .filter(|o| !o.image && o.label != o.url)
+            .map(|o| (o.label, o.url))
+            .collect();
         for (i, e) in app.feed().iter().enumerate() {
             if i > 0 {
                 lines.push(Line::default());
@@ -485,8 +494,22 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                 }
             }
         }
+        let mut links = vec![];
+        let lines: Vec<Line<'static>> = lines
+            .into_iter()
+            .map(|l| {
+                let (l, ls) = line_links(l, &labels);
+                links.push(ls);
+                l
+            })
+            .collect();
         let rows = row_counts(&lines, inner_w);
-        app.feed_cache = Some(FeedCache { key, lines, rows });
+        app.feed_cache = Some(FeedCache {
+            key,
+            lines,
+            rows,
+            links,
+        });
     }
     let mut extra: Vec<Line<'static>> = vec![];
     let cache_empty = app.feed_cache.as_ref().is_some_and(|c| c.lines.is_empty());
@@ -571,6 +594,39 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         body,
     );
     app.scroll = scroll;
+    // Where this frame's links are, for clicks and OSC 8 (feed lines are one row each).
+    app.link_hits.clear();
+    {
+        let cache = app.feed_cache.as_ref().expect("built above");
+        let mut row = 0usize;
+        for ((l, n), ls) in cache.lines.iter().zip(&cache.rows).zip(&cache.links) {
+            let y = row as isize - off as isize;
+            row += n;
+            if ls.is_empty() || *n != 1 || y < 0 || y >= inner_h as isize {
+                continue;
+            }
+            let lw = l.width();
+            let dx = match l.alignment {
+                Some(Alignment::Right) => inner_w.saturating_sub(lw),
+                Some(Alignment::Center) => inner_w.saturating_sub(lw) / 2,
+                _ => 0,
+            };
+            for (a, b, url) in ls {
+                let x = inner.x as usize + dx + a;
+                let w = b
+                    .saturating_sub(*a)
+                    .min((inner.x as usize + inner_w).saturating_sub(x));
+                if w > 0 {
+                    app.link_hits.push(LinkHit {
+                        x: x as u16,
+                        y: inner.y + y as u16,
+                        w: w as u16,
+                        url: url.clone(),
+                    });
+                }
+            }
+        }
+    }
     app.unread_area = Rect::default();
     if !app.follow && app.unread > 0 && body.height > 2 && body.width > 8 {
         let label = format!(" ↓ {} new ", app.unread);
@@ -682,6 +738,113 @@ pub struct FeedCache {
     key: u64,
     lines: Vec<Line<'static>>,
     rows: Vec<usize>,
+    /// Per line: clickable links as (first column, end column, url).
+    links: Vec<Vec<(usize, usize, String)>>,
+}
+
+/// A link drawn on screen this frame: one row, `x..x+w`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkHit {
+    pub x: u16,
+    pub y: u16,
+    pub w: u16,
+    pub url: String,
+}
+
+/// End of a URL starting at byte 0 of `s`: stops at whitespace, `<>"'` and trailing
+/// punctuation (and a `)` with no matching `(` inside).
+fn url_len(s: &str) -> usize {
+    let mut end = s
+        .find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '\'' | '`'))
+        .unwrap_or(s.len());
+    loop {
+        let t = &s[..end];
+        let trim = t.ends_with(['.', ',', ';', ':', '!', '?', ']'])
+            || (t.ends_with(')') && t.matches('(').count() < t.matches(')').count());
+        if !trim || end == 0 {
+            break;
+        }
+        end -= 1;
+    }
+    end
+}
+
+/// Find links in one rendered line: bare `http(s)://` URLs (restyled with `md_link`
+/// unless inside `<…>`, where markdown already shows a labelled link's URL) and the labels
+/// of the entry's markdown links. Returns the restyled line and (col, end col, url).
+pub fn line_links(
+    line: Line<'static>,
+    labels: &[(String, String)],
+) -> (Line<'static>, Vec<(usize, usize, String)>) {
+    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    let mut ranges: Vec<(usize, usize, String, bool)> = vec![];
+    let mut i = 0;
+    while let Some(p) = text[i..].find("http") {
+        let a = i + p;
+        let rest = &text[a..];
+        if (rest.starts_with("http://") || rest.starts_with("https://"))
+            && (a == 0 || !text[..a].ends_with(|c: char| c.is_alphanumeric()))
+        {
+            let n = url_len(rest);
+            if n > 8 {
+                let bracketed = text[..a].ends_with('<');
+                ranges.push((a, a + n, rest[..n].to_string(), !bracketed));
+                i = a + n;
+                continue;
+            }
+        }
+        i = a + 4;
+    }
+    for (label, url) in labels {
+        let l = label.trim();
+        if l.is_empty() {
+            continue;
+        }
+        let mut from = 0;
+        while let Some(p) = text[from..].find(l) {
+            let (a, b) = (from + p, from + p + l.len());
+            if !ranges.iter().any(|r| a < r.1 && r.0 < b) {
+                ranges.push((a, b, url.clone(), false));
+            }
+            from = b;
+        }
+    }
+    if ranges.is_empty() {
+        return (line, vec![]);
+    }
+    ranges.sort_by_key(|r| r.0);
+    let link = ratatui::style::Style::from(&theme::md_link());
+    // Restyle bare URLs: split spans at range edges.
+    let mut spans = vec![];
+    let mut at = 0;
+    for sp in line.spans {
+        let (s0, s1) = (at, at + sp.content.len());
+        at = s1;
+        let mut cuts = vec![s0, s1];
+        for r in ranges.iter().filter(|r| r.3) {
+            for c in [r.0, r.1] {
+                if c > s0 && c < s1 && text.is_char_boundary(c) {
+                    cuts.push(c);
+                }
+            }
+        }
+        cuts.sort_unstable();
+        cuts.dedup();
+        for w in cuts.windows(2) {
+            let piece = text[w[0]..w[1]].to_string();
+            let bare = ranges.iter().any(|r| r.3 && w[0] >= r.0 && w[1] <= r.1);
+            let st = if bare { sp.style.patch(link) } else { sp.style };
+            spans.push(Span::styled(piece, st));
+        }
+    }
+    let col = |b: usize| crate::input::str_width(&text[..b]);
+    let links = ranges
+        .into_iter()
+        .map(|(a, b, u, _)| (col(a), col(b), u))
+        .collect();
+    let mut out = Line::from(spans);
+    out.alignment = line.alignment;
+    (out, links)
 }
 
 /// What the feed's layout depends on: the entries, the width, the bot's name and the
@@ -1122,6 +1285,58 @@ pub(crate) mod tests {
         assert_eq!(app.sidebar_area.y, 2); // compact header + menu
         assert_eq!(app.account_area.y, 0);
         assert_eq!(app.theme_areas.len(), 3);
+    }
+
+    #[test]
+    fn links_are_found_restyled_and_mapped_to_columns() {
+        let l = Line::from(vec![
+            Span::raw("see "),
+            Span::raw("docs <https://d.dev/a> or https://x.io/p?q=1)."),
+        ]);
+        let (out, links) = line_links(l, &[("docs".into(), "https://d.dev/a".into())]);
+        let urls: Vec<_> = links.iter().map(|(a, b, u)| (*a, *b, u.as_str())).collect();
+        assert_eq!(
+            urls,
+            [
+                (4, 8, "https://d.dev/a"),
+                (10, 25, "https://d.dev/a"),
+                (30, 48, "https://x.io/p?q=1")
+            ]
+        );
+        let text: String = out.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "see docs <https://d.dev/a> or https://x.io/p?q=1).");
+        assert!(out.spans.iter().any(|s| {
+            s.content == "https://x.io/p?q=1"
+                && s.style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::UNDERLINED)
+        }));
+    }
+
+    #[test]
+    fn clicking_a_link_opens_it() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        crate::app::tests::mock_login(&mut app, "tok");
+        let bot = app.active_bot().unwrap().id.clone();
+        app.logs.insert(
+            bot,
+            vec![crate::app::Entry {
+                kind: EntryKind::Bot,
+                text: "go to https://example.com/x now".into(),
+            }],
+        );
+        let mut term = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let h = app.link_hits.first().cloned().expect("a link on screen");
+        assert_eq!(h.url, "https://example.com/x");
+        assert_eq!(h.w, 21);
+        app.click(h.x + 3, h.y);
+        assert!(
+            app.notices()
+                .iter()
+                .any(|e| e.text == "Opened https://example.com/x")
+        );
     }
 
     #[test]

@@ -195,6 +195,10 @@ in between quits.
   /history [query]             Browse all past prompts (persisted; newest first, age + bot)
   :name then Tab               Emoji shortcode completion (:thumbsup: → 👍); complete :name:
                                shortcodes are also turned into emoji when you send
+  Click a link                 Opens it (markdown labels, <urls> and bare http(s) URLs in
+                               the chat). Terminals with OSC 8 (Ghostty, kitty, WezTerm,
+                               Windows Terminal, foot, Alacritty 0.13+) also make them
+                               natively clickable; GROKBOT_TUI_NO_HYPERLINKS=1 turns that off.
   /open [n|list]               Open the newest image (then link) in replies with the system
                                viewer (xdg-open / open / Windows handler); vim NORMAL: o.
                                Images show as [🖼 alt · file] placeholders

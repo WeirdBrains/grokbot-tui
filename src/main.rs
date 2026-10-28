@@ -263,7 +263,10 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         // Draw after input changed something, else at the UI tick (spinners, replies
         // arriving from background tasks).
         if dirty || last_draw.elapsed() >= app::UI_TICK {
-            term.draw(|f| ui::draw(f, app))?;
+            let frame = term.draw(|f| ui::draw(f, app))?;
+            if hyperlinks_on() && !app.link_hits.is_empty() {
+                let _ = write_hyperlinks(frame.buffer, &app.link_hits);
+            }
             dirty = false;
             last_draw = std::time::Instant::now();
         }
@@ -856,6 +859,82 @@ fn osc52(text: &str) -> String {
     }
     s.push('\x07');
     s
+}
+
+/// OSC 8 hyperlinks are on unless `GROKBOT_TUI_NO_HYPERLINKS` is set.
+fn hyperlinks_on() -> bool {
+    std::env::var_os("GROKBOT_TUI_NO_HYPERLINKS").is_none()
+}
+
+/// The OSC 8 open sequence for `url` (control characters stripped so a URL can't end the
+/// sequence early or inject others).
+fn osc8_open(url: &str) -> String {
+    let clean: String = url.chars().filter(|c| !c.is_control()).collect();
+    format!("\x1b]8;;{clean}\x1b\\")
+}
+const OSC8_CLOSE: &str = "\x1b]8;;\x1b\\";
+
+/// After ratatui has drawn a frame, re-print each link's cells (same symbols and colors,
+/// taken from the frame buffer) wrapped in OSC 8 so terminals that support hyperlinks
+/// (Ghostty, kitty, WezTerm, Windows Terminal, foot, recent Alacritty, iTerm2) make them
+/// clickable. ratatui's buffer and width math never see the escapes; the cursor is saved
+/// and restored around the pass.
+fn write_hyperlinks(buf: &ratatui::buffer::Buffer, hits: &[ui::LinkHit]) -> std::io::Result<()> {
+    use ratatui::crossterm::{cursor, queue, style};
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    queue!(out, cursor::SavePosition)?;
+    for h in hits {
+        queue!(out, cursor::MoveTo(h.x, h.y))?;
+        out.write_all(osc8_open(&h.url).as_bytes())?;
+        let mut x = h.x;
+        while x < h.x + h.w {
+            let Some(c) = buf.cell((x, h.y)) else { break };
+            let st = c.style();
+            queue!(
+                out,
+                style::SetAttribute(style::Attribute::Reset),
+                style::SetForegroundColor(ratatui::backend::IntoCrossterm::into_crossterm(
+                    st.fg.unwrap_or(ratatui::style::Color::Reset)
+                )),
+                style::SetBackgroundColor(ratatui::backend::IntoCrossterm::into_crossterm(
+                    st.bg.unwrap_or(ratatui::style::Color::Reset)
+                )),
+            )?;
+            for (m, a) in [
+                (ratatui::style::Modifier::BOLD, style::Attribute::Bold),
+                (ratatui::style::Modifier::ITALIC, style::Attribute::Italic),
+                (
+                    ratatui::style::Modifier::UNDERLINED,
+                    style::Attribute::Underlined,
+                ),
+                (
+                    ratatui::style::Modifier::CROSSED_OUT,
+                    style::Attribute::CrossedOut,
+                ),
+                (ratatui::style::Modifier::DIM, style::Attribute::Dim),
+                (
+                    ratatui::style::Modifier::REVERSED,
+                    style::Attribute::Reverse,
+                ),
+            ] {
+                if st.add_modifier.contains(m) {
+                    queue!(out, style::SetAttribute(a))?;
+                }
+            }
+            let sym = c.symbol();
+            out.write_all(sym.as_bytes())?;
+            x += (crate::input::str_width(sym) as u16).max(1);
+        }
+        out.write_all(OSC8_CLOSE.as_bytes())?;
+    }
+    queue!(
+        out,
+        style::SetAttribute(style::Attribute::Reset),
+        style::ResetColor,
+        cursor::RestorePosition
+    )?;
+    out.flush()
 }
 
 /// xterm modifyOtherKeys level 1 on / reset. Level 1 only re-encodes keys with no

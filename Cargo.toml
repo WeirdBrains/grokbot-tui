@@ -1,6 +1,6 @@
 [package]
 name = "grokbot-tui"
-version = "1.14.0"
+version = "1.15.0"
 edition = "2024"
 rust-version = "1.89"
 license = "BSD-3-Clause"
