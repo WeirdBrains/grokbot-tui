@@ -126,6 +126,14 @@ pub fn registry() -> Registry {
                 run: history,
             },
             Command {
+                name: "react",
+                aliases: &["unreact"],
+                usage: "/react <emoji|:code:> [n]",
+                help: "Toggle a reaction on the newest bot message (n = 2 for the one before). Local only: the API has no reactions",
+                complete: react_complete,
+                run: react,
+            },
+            Command {
                 name: "reload",
                 aliases: &["transcript"],
                 usage: "/reload",
@@ -455,6 +463,33 @@ fn history_complete(app: &App, idx: usize, _q: &str) -> Vec<crate::complete::Can
         }
     }
     crate::complete::names(words)
+}
+
+fn react_complete(_: &App, idx: usize, q: &str) -> Vec<crate::complete::Candidate> {
+    if idx != 0 {
+        return vec![];
+    }
+    crate::complete::emoji_candidates(q.trim_start_matches(':'))
+}
+
+fn react(app: &mut App, args: &str) -> Result<()> {
+    let mut it = args.split_whitespace();
+    let Some(arg) = it.next() else {
+        bail!("Usage: /react <emoji|:code:> [n]  e.g. /react :thumbsup:")
+    };
+    let Some(emoji) = crate::emoji::parse_arg(arg) else {
+        bail!("Unknown emoji {arg}. Type : and a name, then Tab, e.g. :thumbsup:")
+    };
+    let nth = match it.next() {
+        Some(n) => n
+            .parse::<usize>()
+            .ok()
+            .filter(|n| *n >= 1)
+            .ok_or_else(|| anyhow::anyhow!("n must be 1 or more"))?,
+        None => 1,
+    };
+    app.react(&emoji, nth)?;
+    Ok(())
 }
 
 fn reload(app: &mut App, _: &str) -> Result<()> {

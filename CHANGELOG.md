@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-28
+
+### Added
+- **Emoji shortcodes:** type `:` plus part of a name and press Tab for the same completion
+  popup slash commands use (`:thumbsu` → 👍). Complete `:name:` shortcodes in a message are
+  turned into emoji when sent (unknown names stay as typed; `12:30` and URLs are untouched).
+- **Reactions:** `/react <emoji|:code:> [n]` (alias `/unreact`) toggles a reaction on the
+  newest bot message (`n` = 2 for the one before). Reactions show as pills under the message
+  (right-aligned under yours). Vim NORMAL `r` (keymap action `message.react`) opens `:react :`.
+  **Local only:** grokbot_api 1.1 has no reaction endpoint and transcript entries carry no
+  reaction data, so reactions are stored in `context.db` (schema v10, per account and bot)
+  and never sent to the gateway.
+- Theme part **`reaction_pill`** (Chat). Shipped themes set it; older theme files fall back to
+  text on the header color.
+
+### Fixed
+- Emoji and other wide or multi-codepoint characters in the prompt: cursor moves, Backspace and
+  Delete step over a whole grapheme (ZWJ families, flags, skin tones, VS16), and wrapping and
+  the cursor column use display width, so the cursor no longer drifts after an emoji.
+- Chat wrapping never splits a grapheme and measures emoji sequences as one wide cell pair.
+
 ## [1.11.1] - 2026-10-28
 
 ### Fixed

@@ -44,6 +44,7 @@ selected = { fg = "@on_accent", bg = "@accent", bold = true }
 cursor_row = { reverse = true }
 selection = { fg = "@on_accent", bg = "@accent", bold = true }
 unread_badge = { fg = "@on_accent", bg = "@warn", bold = true }
+reaction_pill = { fg = "@text", bg = "@header" }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
 tooltip = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
@@ -112,6 +113,7 @@ selected = { fg = "@on_accent", bg = "@accent", bold = true }
 cursor_row = { reverse = true }
 selection = { fg = "@on_accent", bg = "@accent", bold = true }
 unread_badge = { fg = "@on_accent", bg = "@warn", bold = true }
+reaction_pill = { fg = "@text", bg = "@header" }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
 tooltip = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }

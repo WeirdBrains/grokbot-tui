@@ -459,7 +459,8 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     // A blank line separates consecutive messages. The feed's lines and their wrapped
     // heights are cached and only rebuilt when the feed, width, bot name or entry styles
     // change, so a frame doesn't re-wrap the whole transcript.
-    let key = feed_key(app.feed(), inner_w, bot_name.as_deref());
+    let reactions = app.active_reactions().to_vec();
+    let key = feed_key(app.feed(), inner_w, bot_name.as_deref()) ^ reactions_key(&reactions);
     if app.feed_cache.as_ref().is_none_or(|c| c.key != key) {
         let mut lines: Vec<Line<'static>> = vec![];
         for (i, e) in app.feed().iter().enumerate() {
@@ -472,6 +473,17 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                 bot_name.as_deref(),
                 Some(bubble),
             ));
+            if !reactions.is_empty() {
+                let k = crate::emoji::message_key(e.kind as u8, &e.text);
+                let mine: Vec<&str> = reactions
+                    .iter()
+                    .filter(|(mk, _)| *mk == k)
+                    .map(|(_, em)| em.as_str())
+                    .collect();
+                if let Some(l) = reaction_line(&mine, e.kind == EntryKind::User) {
+                    lines.push(l);
+                }
+            }
         }
         let rows = row_counts(&lines, inner_w);
         app.feed_cache = Some(FeedCache { key, lines, rows });
@@ -692,6 +704,35 @@ fn feed_key(feed: &[crate::app::Entry], inner_w: usize, bot: Option<&str>) -> u6
     h.finish()
 }
 
+fn reactions_key(r: &[(String, String)]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    r.hash(&mut h);
+    format!("{:?}", theme::reaction_pill()).hash(&mut h);
+    h.finish()
+}
+
+/// Reaction pills under a message: ` 👍 ` ` 🎉 `, right-aligned under your own messages.
+/// One ordinary line, so it counts in the wrapped-height scroll math like any other.
+pub fn reaction_line(emojis: &[&str], mine: bool) -> Option<Line<'static>> {
+    if emojis.is_empty() {
+        return None;
+    }
+    let mut spans = vec![];
+    for (i, e) in emojis.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(theme::reaction_pill().span(format!(" {e} ")));
+    }
+    let l = Line::from(spans);
+    Some(if mine {
+        l.alignment(Alignment::Right)
+    } else {
+        l
+    })
+}
+
 /// Wrapped height of each line at `width` (what `Paragraph` with `Wrap` would use).
 fn row_counts(lines: &[Line<'static>], width: usize) -> Vec<usize> {
     lines
@@ -895,13 +936,13 @@ fn draw_help(f: &mut Frame, app: &mut App) {
 /// Your message as a clean block: wrapped to `max`, every line padded to the longest
 /// line's width so the block's left and right edges are straight when right-aligned.
 pub fn bubble_block(text: &str, max: usize) -> Vec<String> {
-    use unicode_width::UnicodeWidthStr;
     let lines = wrap_text(text, max);
-    let bw = lines.iter().map(|l| l.width()).max().unwrap_or(0);
+    let width = |l: &str| crate::input::str_width(l);
+    let bw = lines.iter().map(|l| width(l)).max().unwrap_or(0);
     lines
         .into_iter()
         .map(|l| {
-            let pad = bw - l.width();
+            let pad = bw - width(&l);
             l + &" ".repeat(pad)
         })
         .collect()
@@ -916,15 +957,15 @@ pub fn bubble_width(inner_w: usize) -> usize {
 
 /// Word-wrap `text` to `width` display columns (long words are split). Keeps blank lines.
 pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
-    use unicode_width::UnicodeWidthChar;
+    use unicode_segmentation::UnicodeSegmentation;
     let w = width.max(1);
-    let cw = |c: char| c.width().unwrap_or(0);
+    let gw = crate::input::grapheme_width;
     let mut out = vec![];
     for para in text.split('\n') {
         let mut line = String::new();
         let mut lw = 0;
         for word in para.split(' ') {
-            let ww: usize = word.chars().map(cw).sum();
+            let ww = crate::input::str_width(word);
             let sep = usize::from(!line.is_empty() || lw > 0);
             if lw + sep + ww <= w {
                 if sep == 1 {
@@ -939,13 +980,14 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
                 out.push(std::mem::take(&mut line));
                 lw = 0;
             }
-            for c in word.chars() {
-                if lw + cw(c) > w && !line.is_empty() {
+            // Split long words between graphemes (never inside an emoji sequence).
+            for g in word.graphemes(true) {
+                if lw + gw(g) > w && !line.is_empty() {
                     out.push(std::mem::take(&mut line));
                     lw = 0;
                 }
-                line.push(c);
-                lw += cw(c);
+                line.push_str(g);
+                lw += gw(g);
             }
         }
         out.push(line);
@@ -1000,7 +1042,7 @@ fn entry_lines(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
 
@@ -1259,7 +1301,7 @@ mod tests {
         theme::set_variant(theme::Variant::Dark);
     }
 
-    fn screen_rows(term: &Terminal<TestBackend>) -> Vec<String> {
+    pub(crate) fn screen_rows(term: &Terminal<TestBackend>) -> Vec<String> {
         let b = term.backend().buffer();
         (0..b.area.height)
             .map(|y| (0..b.area.width).map(|x| b[(x, y)].symbol()).collect())

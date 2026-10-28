@@ -3360,6 +3360,7 @@ mod tests {
                 "cursor_row",
                 "selection",
                 "unread_badge",
+                "reaction_pill",
                 "menu_active",
                 "tooltip",
                 "toast",

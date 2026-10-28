@@ -73,6 +73,16 @@ the input, close an overlay, or ask before quitting; `Ctrl-Shift-C` never quits)
 `F1` help · `F2` pick a bot · `F3` pick an account · `F4` cycle dark/light/system · `F5` pick a theme ·
 `Shift-F5` theme editor · `F6` mouse capture on/off.
 
+### Emoji and reactions
+
+Type `:` and part of a name, then **Tab**, to pick an emoji (`:tada` → 🎉), using the same
+popup as slash-command completion. Complete `:name:` shortcodes are turned into emoji when you
+send. Emoji (ZWJ families, flags, skin tones, `❤️` with VS16) count as one character and two
+columns in the input and in chat wrapping. `/react 👍` (or `/react :thumbsup:`, vim `r`)
+toggles a reaction pill under the newest bot message. **Reactions are local**: grokbot_api 1.1
+has no reaction endpoint and transcripts carry no reaction data, so they're kept in
+`context.db` (per account and bot) and never sent. Theme part: `reaction_pill`.
+
 ### Newlines in the prompt
 
 Prefer **Ctrl-J** for a newline (works in every terminal). **Ctrl-Enter** inserts a newline
@@ -211,6 +221,7 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 100 entries):
 | `/whoami` | Show the account's login details (method, gateway, header names, whether a Cursor token is stored, env override) |
 | `/bots` | Refresh and list all bots, including hidden ones and groups |
 | `/bot <name\|id>` (`/use`) | Switch to a bot's chat |
+| `/react <emoji\|:code:> [n]` | Toggle a reaction pill on the newest bot message (`n`=2 the one before; vim `r`). Local only: the Grok Bot API has no reaction endpoint |
 | `/history [query]` (`/prompts`) | Browse and fuzzy-search your saved prompts; Enter puts one in the input. `/history clear` forgets them (confirmed) |
 | `/reload` (`/transcript`) | Reload the active bot's full transcript from the gateway |
 | `/account` (`/acct`) | List accounts (`*` = active) |

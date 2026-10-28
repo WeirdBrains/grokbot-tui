@@ -184,7 +184,18 @@ const V8: &str = "ALTER TABLE bots ADD COLUMN team INTEGER NOT NULL DEFAULT 0;
 /// v8 -> v9: remember which bot each prompt went to (shown in `/history`).
 const V9: &str = "ALTER TABLE prompt_history ADD COLUMN bot TEXT;";
 
-const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9];
+/// v9 -> v10: local message reactions (the gateway API has no reaction endpoint, so these
+/// stay on this machine). `msg_key` is [`crate::emoji::message_key`] of the message.
+const V10: &str = "CREATE TABLE IF NOT EXISTS reactions (
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        bot_id TEXT NOT NULL,
+        msg_key TEXT NOT NULL,
+        emoji TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (account_id, bot_id, msg_key, emoji)
+    );";
+
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10];
 
 /// One remembered prompt (newest-first lists).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -928,6 +939,36 @@ impl Store {
     /// Append a prompt (sent to `bot`, if any), skipping an exact duplicate of the previous
     /// entry. Trims the account's history to the newest `max` rows. Returns whether a row
     /// was added.
+    /// Local reactions for one bot's messages: (msg_key, emoji) in the order added.
+    pub fn reactions(&self, bot_id: &str) -> Result<Vec<(String, String)>> {
+        let mut st = self.conn.prepare(
+            "SELECT msg_key, emoji FROM reactions WHERE account_id = ?1 AND bot_id = ?2
+             ORDER BY created_at, rowid",
+        )?;
+        let rows = st
+            .query_map(params![self.account.id, bot_id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Add the reaction, or remove it if it is already there. True when it was added.
+    pub fn toggle_reaction(&self, bot_id: &str, msg_key: &str, emoji: &str) -> Result<bool> {
+        let n = self.conn.execute(
+            "DELETE FROM reactions WHERE account_id = ?1 AND bot_id = ?2 AND msg_key = ?3 AND emoji = ?4",
+            params![self.account.id, bot_id, msg_key, emoji],
+        )?;
+        if n > 0 {
+            return Ok(false);
+        }
+        self.conn.execute(
+            "INSERT INTO reactions(account_id, bot_id, msg_key, emoji) VALUES (?1, ?2, ?3, ?4)",
+            params![self.account.id, bot_id, msg_key, emoji],
+        )?;
+        Ok(true)
+    }
+
     pub fn push_prompt(&self, text: &str, bot: Option<&str>, max: usize) -> Result<bool> {
         let text = text.trim_end();
         if text.trim().is_empty() {
@@ -1547,6 +1588,23 @@ mod prompt_history_store_tests {
             ["w"],
             "clear is per account"
         );
+    }
+
+    #[test]
+    fn reactions_toggle_and_stay_per_account_and_bot() {
+        let d = tempfile::tempdir().unwrap();
+        let mut s = Store::open(d.path(), None).unwrap();
+        assert!(s.toggle_reaction("b1", "k", "👍").unwrap());
+        assert!(s.toggle_reaction("b1", "k", "🎉").unwrap());
+        assert!(s.reactions("b2").unwrap().is_empty());
+        assert!(
+            !s.toggle_reaction("b1", "k", "👍").unwrap(),
+            "second toggle removes"
+        );
+        assert_eq!(s.reactions("b1").unwrap(), [("k".into(), "🎉".into())]);
+        s.add_account("work").unwrap();
+        s.use_account("work").unwrap();
+        assert!(s.reactions("b1").unwrap().is_empty());
     }
 
     #[test]

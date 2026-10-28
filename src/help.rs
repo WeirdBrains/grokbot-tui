@@ -193,6 +193,11 @@ in between quits.
                                Otherwise switch focus between input and sidebar
   Ctrl-R                       Fuzzy search prompt history (Ctrl-S reverse; Esc keeps the draft)
   /history [query]             Browse all past prompts (persisted; newest first, age + bot)
+  :name then Tab               Emoji shortcode completion (:thumbsup: → 👍); complete :name:
+                               shortcodes are also turned into emoji when you send
+  /react <emoji|:code:> [n]    Toggle a reaction pill on the newest bot message (n=2 the one
+                               before; vim NORMAL: r). Stored locally: the Grok Bot API has
+                               no reaction endpoint, so bots and other clients don't see them
   PgUp / PgDn, mouse wheel     Scroll the chat (not the prompt history).
                                Only the exact bottom follows new content; scroll up
                                pins the view. '↓ N new' while unread (click / End /

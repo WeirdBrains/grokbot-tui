@@ -213,6 +213,7 @@ style_slots! {
     CURSOR_ROW = "cursor_row", "Sidebar and lists", false, "Sidebar cursor while the sidebar has focus";
     SELECTION = "selection", "Chat", false, "In-app selected text in the chat body";
     UNREAD_BADGE = "unread_badge", "Chat", false, "'↓ N new' while scrolled up";
+    REACTION_PILL = "reaction_pill", "Chat", false, "Reaction pills under a message ( 👍 )";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
     MENU_ACTIVE = "menu_active", "Screen and header", false, "Open / focused menu label";
     TOOLTIP = "tooltip", "Modals", true, "Hover tooltip frame and text";
@@ -359,6 +360,11 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
             fg: Some(r(c::ON_ACCENT)),
             ..StyleSpec::default()
         }),
+        s::REACTION_PILL => StyleSpec {
+            bg: Some(r(c::HEADER)),
+            fg: Some(r(c::TEXT)),
+            ..StyleSpec::default()
+        },
         s::MENU_BAR => fg(c::TEXT),
         s::MENU_ACTIVE => bold(StyleSpec {
             bg: Some(r(c::ACCENT)),
@@ -669,6 +675,9 @@ pub fn toast(kind: crate::notify::NoticeKind) -> Style {
 pub fn unread_badge() -> Style {
     st(slot::UNREAD_BADGE)
 }
+pub fn reaction_pill() -> Style {
+    st(slot::REACTION_PILL)
+}
 
 pub fn selected() -> Style {
     st(slot::SELECTED)
@@ -898,6 +907,7 @@ mod tests {
             for (i, s) in STYLE_SLOTS.iter().enumerate() {
                 if s.key == "theme_switch"
                     || s.key == "unread_badge"
+                    || s.key == "reaction_pill"
                     || s.key == "menu_bar"
                     || s.key == "menu_active"
                     || s.key == "tooltip"

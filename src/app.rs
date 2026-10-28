@@ -440,6 +440,8 @@ pub struct App {
     /// Chat feed per bot id. Only ever rebuilt from SQLite by `reload_bot_log`;
     /// nothing else writes it.
     pub logs: HashMap<String, Vec<Entry>>,
+    /// Local reactions of the active bot, cached: (bot id, [(msg_key, emoji)]).
+    pub reaction_cache: Option<(String, Vec<(String, String)>)>,
     /// Transient notices (command echoes, info, errors, delivery warnings) keyed by
     /// bot id ("" when no bot is active). Never stored, never mixed into the feed;
     /// rendered in their own section below it.
@@ -655,6 +657,7 @@ impl App {
             active: None,
             sidebar_cursor: 0,
             logs: HashMap::new(),
+            reaction_cache: None,
             notices: HashMap::new(),
             input: String::new(),
             input_cursor: 0,
@@ -2034,6 +2037,48 @@ impl App {
         self.logs.get(&self.key()).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    /// Local reactions for the active bot's messages, (msg_key, emoji).
+    pub fn active_reactions(&mut self) -> &[(String, String)] {
+        let bot = self.key();
+        if self.reaction_cache.as_ref().is_none_or(|(b, _)| *b != bot) {
+            let list = if bot.is_empty() {
+                vec![]
+            } else {
+                self.store.reactions(&bot).unwrap_or_default()
+            };
+            self.reaction_cache = Some((bot, list));
+        }
+        &self.reaction_cache.as_ref().expect("set above").1
+    }
+
+    /// Toggle `emoji` on the `nth` (1 = newest) bot message in the active feed, or the
+    /// newest message of any kind when the bot hasn't replied yet. Local only: the gateway
+    /// API has no reaction endpoint.
+    pub fn react(&mut self, emoji: &str, nth: usize) -> anyhow::Result<bool> {
+        let bot = self.key();
+        if bot.is_empty() {
+            anyhow::bail!("No active bot");
+        }
+        let feed = self.feed();
+        let bots: Vec<&Entry> = feed
+            .iter()
+            .rev()
+            .filter(|e| e.kind == EntryKind::Bot)
+            .collect();
+        let target = if bots.is_empty() {
+            feed.iter().rev().nth(nth.saturating_sub(1))
+        } else {
+            bots.get(nth.saturating_sub(1)).copied()
+        };
+        let Some(e) = target else {
+            anyhow::bail!("No message to react to")
+        };
+        let key = crate::emoji::message_key(e.kind as u8, &e.text);
+        let added = self.store.toggle_reaction(&bot, &key, emoji)?;
+        self.reaction_cache = None;
+        Ok(added)
+    }
+
     /// Transient notices for the active view.
     pub fn notices(&self) -> &[Entry] {
         self.notices
@@ -2662,6 +2707,12 @@ impl App {
                 self.input_newline();
                 true
             }
+            "message.react" => {
+                self.vim_mode = Mode::Command;
+                self.vim_command = Some("react :".to_string());
+                self.focus = Focus::Input;
+                true
+            }
             "input.paste" => true, // terminal paste still works via bracketed paste
             _ => false,
         }
@@ -2964,7 +3015,7 @@ impl App {
                 Some(cmd) => {
                     let run = cmd.run;
                     // Help opens a modal; don't echo it into the chat.
-                    if !matches!(cmd.name, "help" | "shell")
+                    if !matches!(cmd.name, "help" | "shell" | "react")
                         && !(cmd.name == "login" && args.trim().is_empty())
                     {
                         self.push(EntryKind::User, trimmed.clone());
@@ -2989,7 +3040,7 @@ impl App {
                 }
             }
         } else {
-            self.send_chat(trimmed);
+            self.send_chat(crate::emoji::expand(&trimmed));
         }
     }
 
@@ -4675,6 +4726,57 @@ mod perf_probe {
     /// Timing, not a pass/fail check: `cargo test --release -- --ignored draw_cost --nocapture`.
     #[test]
     #[ignore = "timing probe"]
+    fn react_shows_pills_under_the_newest_bot_message_and_toggles() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "tok");
+        let bot = app.active_bot().unwrap().id.clone();
+        app.logs.insert(
+            bot,
+            vec![
+                Entry {
+                    kind: EntryKind::User,
+                    text: "hi".into(),
+                },
+                Entry {
+                    kind: EntryKind::Bot,
+                    text: "hello there".into(),
+                },
+            ],
+        );
+        let draw = |app: &mut App| {
+            let mut term =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 20)).unwrap();
+            term.draw(|f| crate::ui::draw(f, app)).unwrap();
+            crate::ui::tests::screen_rows(&term).join("\n")
+        };
+        app.input = "/react :tada:".into();
+        app.submit();
+        let s = draw(&mut app);
+        assert!(s.contains("🎉"), "{s}");
+        app.input = "/react 🎉".into();
+        app.submit();
+        assert!(!draw(&mut app).contains("🎉"));
+        app.input = "/react nonsense_name_x".into();
+        app.submit();
+        assert!(
+            app.notices()
+                .iter()
+                .any(|e| e.text.contains("Unknown emoji"))
+        );
+    }
+
+    #[test]
+    fn emoji_tab_completion_replaces_the_shortcode() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        app.input = "nice :thumbsu".into();
+        app.input_cursor = app.input.len();
+        crate::complete::tab(&mut app, false);
+        assert_eq!(app.input, "nice 👍");
+    }
+
+    #[test]
     fn draw_cost_with_a_long_chat() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = test_app(&rt);

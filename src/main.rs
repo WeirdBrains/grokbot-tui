@@ -6,6 +6,7 @@ mod commands;
 mod complete;
 mod config;
 mod datadir;
+mod emoji;
 mod fuzzy;
 mod help;
 mod history;
@@ -657,7 +658,12 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 return true;
             }
             match k.code {
-                KeyCode::Tab if !(app.focus == Focus::Input && app.input.starts_with('/')) => {
+                KeyCode::Tab
+                    if !(app.focus == Focus::Input
+                        && (app.input.starts_with('/')
+                            || crate::emoji::shortcode_at(&app.input, app.input_cursor)
+                                .is_some())) =>
+                {
                     app.focus = if app.focus == Focus::Input {
                         Focus::Sidebar
                     } else {

@@ -177,6 +177,14 @@ pub fn rank(query: &str, candidates: &[Candidate]) -> Vec<Candidate> {
 /// The token under the cursor and its candidates.
 fn candidates(app: &App) -> Option<((usize, usize), String, Vec<Candidate>)> {
     let input = &app.input;
+    if let Some((colon, name)) = crate::emoji::shortcode_at(input, app.input_cursor) {
+        let items = emoji_candidates(name);
+        return Some((
+            (colon, app.input_cursor.min(input.len())),
+            format!(":{name}"),
+            items,
+        ));
+    }
     if !input.starts_with('/') {
         return None;
     }
@@ -229,6 +237,17 @@ fn candidates(app: &App) -> Option<((usize, usize), String, Vec<Candidate>)> {
         (cmd.complete)(app, idx, &query)
     };
     Some((range, query, items))
+}
+
+/// `:shortcode` completions: the emoji replaces the whole `:partial` token.
+pub fn emoji_candidates(name: &str) -> Vec<Candidate> {
+    crate::emoji::search(name, 50)
+        .into_iter()
+        .map(|(code, e)| Candidate {
+            replace: e.to_string(),
+            label: format!(":{code}: {e}"),
+        })
+        .collect()
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {

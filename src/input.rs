@@ -1,5 +1,5 @@
 //! Multi-line input editing and layout. The buffer is a `String`; the cursor is a byte
-//! offset kept on a char boundary. Layout char-wraps each line to the box width.
+//! offset kept on a grapheme boundary. Layout wraps each line by display width.
 
 /// Most visual rows the input box grows to before it scrolls.
 pub const MAX_INPUT_ROWS: usize = 10;
@@ -20,14 +20,45 @@ fn line_end(s: &str, cur: usize) -> usize {
     s[cur..].find('\n').map(|i| cur + i).unwrap_or(s.len())
 }
 
-/// Byte offset of char column `col` in the line starting at `start` (clamped to line end).
+/// Display width of one grapheme cluster (emoji ZWJ sequences, flags, VS16 → 2). Never 0
+/// so the cursor always advances.
+pub fn grapheme_width(g: &str) -> usize {
+    use unicode_width::UnicodeWidthStr;
+    g.width().max(1)
+}
+
+/// Display width of a line, grapheme by grapheme.
+pub fn str_width(s: &str) -> usize {
+    use unicode_segmentation::UnicodeSegmentation;
+    s.graphemes(true).map(grapheme_width).sum()
+}
+
+/// Byte offset at display column `col` in the line starting at `start` (clamped to line
+/// end; a wide grapheme straddling `col` snaps to its start).
 fn at_col(s: &str, start: usize, col: usize) -> usize {
+    use unicode_segmentation::UnicodeSegmentation;
     let end = line_end(s, start);
-    s[start..end]
-        .char_indices()
-        .nth(col)
-        .map(|(i, _)| start + i)
-        .unwrap_or(end)
+    let mut w = 0;
+    for (i, g) in s[start..end].grapheme_indices(true) {
+        let gw = grapheme_width(g);
+        if w + gw > col {
+            return start + i;
+        }
+        w += gw;
+    }
+    end
+}
+
+/// Byte offset of the grapheme boundary before `cur`.
+fn prev_boundary(s: &str, cur: usize) -> Option<usize> {
+    use unicode_segmentation::UnicodeSegmentation;
+    s[..cur].grapheme_indices(true).next_back().map(|(i, _)| i)
+}
+
+/// Byte length of the grapheme starting at `cur`.
+fn next_len(s: &str, cur: usize) -> Option<usize> {
+    use unicode_segmentation::UnicodeSegmentation;
+    s[cur..].graphemes(true).next().map(str::len)
 }
 
 pub fn insert(s: &mut String, cur: &mut usize, text: &str) {
@@ -37,9 +68,10 @@ pub fn insert(s: &mut String, cur: &mut usize, text: &str) {
     *cur += text.len();
 }
 
+/// Deletes the whole grapheme before the cursor (an emoji ZWJ family is one keypress).
 pub fn backspace(s: &mut String, cur: &mut usize) {
     *cur = clamp(s, *cur);
-    if let Some((i, _)) = s[..*cur].char_indices().next_back() {
+    if let Some(i) = prev_boundary(s, *cur) {
         s.replace_range(i..*cur, "");
         *cur = i;
     }
@@ -47,22 +79,22 @@ pub fn backspace(s: &mut String, cur: &mut usize) {
 
 pub fn delete(s: &mut String, cur: &mut usize) {
     *cur = clamp(s, *cur);
-    if let Some(ch) = s[*cur..].chars().next() {
-        s.replace_range(*cur..*cur + ch.len_utf8(), "");
+    if let Some(n) = next_len(s, *cur) {
+        s.replace_range(*cur..*cur + n, "");
     }
 }
 
 pub fn left(s: &str, cur: &mut usize) {
     *cur = clamp(s, *cur);
-    if let Some((i, _)) = s[..*cur].char_indices().next_back() {
+    if let Some(i) = prev_boundary(s, *cur) {
         *cur = i;
     }
 }
 
 pub fn right(s: &str, cur: &mut usize) {
     *cur = clamp(s, *cur);
-    if let Some(ch) = s[*cur..].chars().next() {
-        *cur += ch.len_utf8();
+    if let Some(n) = next_len(s, *cur) {
+        *cur += n;
     }
 }
 
@@ -81,7 +113,7 @@ pub fn up(s: &str, cur: &mut usize) -> bool {
     if start == 0 {
         return false;
     }
-    let col = s[start..c].chars().count();
+    let col = str_width(&s[start..c]);
     *cur = at_col(s, line_start(s, start - 1), col);
     true
 }
@@ -93,22 +125,45 @@ pub fn down(s: &str, cur: &mut usize) -> bool {
     if end == s.len() {
         return false;
     }
-    let col = s[line_start(s, c)..c].chars().count();
+    let col = str_width(&s[line_start(s, c)..c]);
     *cur = at_col(s, end + 1, col);
     true
 }
 
-/// Visual layout of the buffer char-wrapped at `width` columns.
+/// Visual layout of the buffer wrapped at `width` columns.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
     /// Visual rows, top to bottom.
     pub rows: Vec<String>,
-    /// Cursor (row, column) in `rows`.
+    /// Cursor (row, display column) in `rows`.
     pub cursor: (usize, usize),
 }
 
-/// Char-wrap each logical line to `width`. A line of length L takes `L / width + 1` rows,
-/// so the cursor at the end of a full row has a row to sit on.
+/// One logical line split into rows of at most `w` display columns, never splitting a
+/// grapheme. Returns (byte start, byte end) per row. A row that is exactly full gets an
+/// empty row after it so the cursor at its end has somewhere to sit.
+fn wrap_line(line: &str, w: usize) -> Vec<(usize, usize)> {
+    use unicode_segmentation::UnicodeSegmentation;
+    let mut out = vec![];
+    let (mut a, mut cw) = (0, 0);
+    for (i, g) in line.grapheme_indices(true) {
+        let gw = grapheme_width(g);
+        if cw + gw > w && cw > 0 {
+            out.push((a, i));
+            a = i;
+            cw = 0;
+        }
+        cw += gw;
+    }
+    out.push((a, line.len()));
+    if cw >= w {
+        out.push((line.len(), line.len()));
+    }
+    out
+}
+
+/// Wrap each logical line to `width` display columns (grapheme-aware: wide emoji take
+/// two cells and are never split).
 pub fn layout(s: &str, cur: usize, width: usize) -> Layout {
     let w = width.max(1);
     let cur = clamp(s, cur);
@@ -116,17 +171,17 @@ pub fn layout(s: &str, cur: usize, width: usize) -> Layout {
     let mut cursor = (0, 0);
     let mut off = 0;
     for line in s.split('\n') {
-        let chars: Vec<char> = line.chars().collect();
         let first = rows.len();
-        let n = chars.len() / w + 1;
-        for r in 0..n {
-            let a = (r * w).min(chars.len());
-            let b = ((r + 1) * w).min(chars.len());
-            rows.push(chars[a..b].iter().collect());
-        }
-        if cur >= off && cur <= off + line.len() {
-            let col = line[..cur - off].chars().count();
-            cursor = (first + col / w, col % w);
+        let parts = wrap_line(line, w);
+        let in_line = cur >= off && cur <= off + line.len();
+        for (r, &(a, b)) in parts.iter().enumerate() {
+            rows.push(line[a..b].to_string());
+            let local = cur.wrapping_sub(off);
+            // The cursor sits on the row whose range holds it; at a full row's end it
+            // moves to the next row.
+            if in_line && local >= a && (local < b || (local == b && r + 1 == parts.len())) {
+                cursor = (first + r, str_width(&line[a..local]));
+            }
         }
         off += line.len() + 1;
     }
@@ -140,11 +195,10 @@ pub fn row_starts(s: &str, width: usize) -> Vec<usize> {
     let mut out = vec![];
     let mut off = 0;
     for line in s.split('\n') {
-        let n = line.chars().count();
-        for r in 0..(n / w + 1) {
-            out.push(off + r * w);
+        for (a, _) in wrap_line(line, w) {
+            out.push(off + line[..a].chars().count());
         }
-        off += n + 1;
+        off += line.chars().count() + 1;
     }
     out
 }
@@ -168,6 +222,29 @@ pub fn scroll_for(prev: usize, cursor_row: usize, total: usize, visible: usize) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn emoji_graphemes_are_one_step_and_two_cells() {
+        use super::*;
+        // family (ZWJ), flag, heart with VS16, thumbs up with skin tone.
+        let fam = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+        let s = format!("a{fam}\u{1F1FA}\u{1F1F8}\u{2764}\u{FE0F}\u{1F44D}\u{1F3FD}b");
+        let mut c = s.len();
+        left(&s, &mut c); // before b
+        left(&s, &mut c); // before 👍🏽
+        assert_eq!(&s[c..c + 8], "\u{1F44D}\u{1F3FD}");
+        let l = layout(&s, s.len(), 80);
+        assert_eq!(l.cursor, (0, 1 + 2 + 2 + 2 + 2 + 1));
+        // wrapping never splits a grapheme: width 3 → "a👨‍👩‍👧" then "🇺🇸❤️"...
+        let l = layout(&s, 0, 3);
+        assert_eq!(l.rows[0], format!("a{fam}"));
+        assert_eq!(l.rows[1], "\u{1F1FA}\u{1F1F8}");
+        let mut t = s.clone();
+        let mut c = 1 + fam.len();
+        backspace(&mut t, &mut c);
+        assert_eq!(c, 1);
+        assert!(t.starts_with("a\u{1F1FA}"));
+    }
+
     use super::*;
 
     #[test]

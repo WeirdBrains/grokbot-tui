@@ -13,6 +13,7 @@
 
 [mode.normal]
 "i" = "mode.insert"
+"r" = "message.react"
 "a" = "mode.insert_end"
 "v" = "mode.visual"
 ":" = "mode.command"
