@@ -195,6 +195,9 @@ in between quits.
   /history [query]             Browse all past prompts (persisted; newest first, age + bot)
   :name then Tab               Emoji shortcode completion (:thumbsup: → 👍); complete :name:
                                shortcodes are also turned into emoji when you send
+  /open [n|list]               Open the newest image (then link) in replies with the system
+                               viewer (xdg-open / open / Windows handler); vim NORMAL: o.
+                               Images show as [🖼 alt · file] placeholders
   /react <emoji|:code:> [n]    Toggle a reaction pill on the newest bot message (n=2 the one
                                before; vim NORMAL: r). Stored locally: the Grok Bot API has
                                no reaction endpoint, so bots and other clients don't see them

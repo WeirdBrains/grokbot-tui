@@ -84,6 +84,15 @@ drawing, so scrolling and the bottom-follow stay exact. Your own messages and no
 plain text. Theme parts: `md_heading`, `md_code`, `md_code_block`, `md_quote`, `md_link`,
 `md_list_marker`, `md_rule` (also link URLs), `md_table_border`.
 
+### Images
+
+Images in replies (`![alt](url)` and bare image URLs or paths) show as a placeholder,
+`[🖼 alt · cat.png · 12.0 KB]` (size for local files), followed by the URL. `/open` (vim `o`)
+opens the newest one in your system viewer; `/open list` numbers every image and link. Inline
+terminal graphics (kitty / sixel / iTerm2) are not drawn yet. **Attaching an image to a prompt
+isn't possible:** grokbot_api 1.1's `sendPrompt` takes text only (agent id, prompt, nonce,
+reply-to) and there is no upload method. Theme part: `image_placeholder`.
+
 ### Emoji and reactions
 
 Type `:` and part of a name, then **Tab**, to pick an emoji (`:tada` → 🎉), using the same
@@ -232,6 +241,7 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 100 entries):
 | `/whoami` | Show the account's login details (method, gateway, header names, whether a Cursor token is stored, env override) |
 | `/bots` | Refresh and list all bots, including hidden ones and groups |
 | `/bot <name\|id>` (`/use`) | Switch to a bot's chat |
+| `/open [n\|list]` (`/img`) | Open the newest image (then link) from the bot's replies in the system viewer (`xdg-open`, `open`, or the Windows URL handler; vim `o`). `list` numbers them |
 | `/react <emoji\|:code:> [n]` | Toggle a reaction pill on the newest bot message (`n`=2 the one before; vim `r`). Local only: the Grok Bot API has no reaction endpoint |
 | `/history [query]` (`/prompts`) | Browse and fuzzy-search your saved prompts; Enter puts one in the input. `/history clear` forgets them (confirmed) |
 | `/reload` (`/transcript`) | Reload the active bot's full transcript from the gateway |

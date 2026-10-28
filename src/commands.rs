@@ -134,6 +134,14 @@ pub fn registry() -> Registry {
                 run: react,
             },
             Command {
+                name: "open",
+                aliases: &["img"],
+                usage: "/open [n|list]",
+                help: "Open the newest image or link in the bot's replies (n = 2 the one before; list numbers them; vim o)",
+                complete: open_complete,
+                run: open_item,
+            },
+            Command {
                 name: "reload",
                 aliases: &["transcript"],
                 usage: "/reload",
@@ -463,6 +471,68 @@ fn history_complete(app: &App, idx: usize, _q: &str) -> Vec<crate::complete::Can
         }
     }
     crate::complete::names(words)
+}
+
+fn open_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(["list"])
+    } else {
+        vec![]
+    }
+}
+
+/// Images first, then links, newest reply first.
+fn openables(app: &App) -> Vec<crate::markdown::Openable> {
+    let mut imgs = vec![];
+    let mut links = vec![];
+    for e in app.feed().iter().rev().filter(|e| e.kind == EntryKind::Bot) {
+        for o in crate::markdown::openables(&e.text) {
+            if o.image { imgs.push(o) } else { links.push(o) }
+        }
+    }
+    imgs.extend(links);
+    imgs
+}
+
+pub fn open_item(app: &mut App, args: &str) -> Result<()> {
+    let items = openables(app);
+    if items.is_empty() {
+        bail!("No images or links in this chat's replies")
+    }
+    let a = args.trim();
+    if a == "list" {
+        let list: Vec<String> = items
+            .iter()
+            .enumerate()
+            .take(20)
+            .map(|(i, o)| {
+                format!(
+                    "{:>2}. {} {}  {}",
+                    i + 1,
+                    if o.image { "🖼" } else { "🔗" },
+                    o.label,
+                    o.url
+                )
+            })
+            .collect();
+        app.info(format!("Open with /open <n>:\n{}", list.join("\n")));
+        return Ok(());
+    }
+    let n = if a.is_empty() {
+        1
+    } else {
+        a.parse::<usize>()
+            .ok()
+            .filter(|n| *n >= 1)
+            .ok_or_else(|| anyhow::anyhow!("Usage: /open [n|list]"))?
+    };
+    let Some(o) = items.get(n - 1) else {
+        bail!("Only {} images/links here (/open list)", items.len())
+    };
+    crate::markdown::open_external(&o.url)
+        .map_err(|e| anyhow::anyhow!("Couldn't open {}: {e}", o.url))?;
+    app.info(format!("Opened {}", o.url));
+    Ok(())
 }
 
 fn react_complete(_: &App, idx: usize, q: &str) -> Vec<crate::complete::Candidate> {

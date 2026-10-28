@@ -710,6 +710,7 @@ fn feed_key(feed: &[crate::app::Entry], inner_w: usize, bot: Option<&str>) -> u6
         theme::md_list_marker(),
         theme::md_rule(),
         theme::md_table_border(),
+        theme::image_placeholder(),
     ] {
         format!("{s:?}").hash(&mut h);
     }

@@ -222,6 +222,7 @@ style_slots! {
     MD_LIST_MARKER = "md_list_marker", "Chat", false, "Markdown list bullets, numbers and task boxes";
     MD_RULE = "md_rule", "Chat", false, "Markdown --- rules and link URLs";
     MD_TABLE_BORDER = "md_table_border", "Chat", false, "Markdown table borders";
+    IMAGE_PLACEHOLDER = "image_placeholder", "Chat", false, "[🖼 image] placeholder in replies (/open opens it)";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
     MENU_ACTIVE = "menu_active", "Screen and header", false, "Open / focused menu label";
     TOOLTIP = "tooltip", "Modals", true, "Hover tooltip frame and text";
@@ -390,6 +391,10 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
         s::MD_LIST_MARKER => fg(c::ACCENT),
         s::MD_RULE => fg(c::MUTED),
         s::MD_TABLE_BORDER => fg(c::MUTED),
+        s::IMAGE_PLACEHOLDER => StyleSpec {
+            bg: Some(r(c::HEADER)),
+            ..fg(c::ACCENT)
+        },
         s::MENU_BAR => fg(c::TEXT),
         s::MENU_ACTIVE => bold(StyleSpec {
             bg: Some(r(c::ACCENT)),
@@ -724,6 +729,9 @@ pub fn md_rule() -> Style {
 pub fn md_table_border() -> Style {
     st(slot::MD_TABLE_BORDER)
 }
+pub fn image_placeholder() -> Style {
+    st(slot::IMAGE_PLACEHOLDER)
+}
 pub fn reaction_pill() -> Style {
     st(slot::REACTION_PILL)
 }
@@ -958,6 +966,7 @@ mod tests {
                     || s.key == "unread_badge"
                     || s.key == "reaction_pill"
                     || s.key.starts_with("md_")
+                    || s.key == "image_placeholder"
                     || s.key == "menu_bar"
                     || s.key == "menu_active"
                     || s.key == "tooltip"

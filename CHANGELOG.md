@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.14.0] - 2026-10-28
+
+### Added
+- **Images in replies:** `![alt](url)` renders as a themed placeholder,
+  `[🖼 alt · cat.png · 12.0 KB]` (size for local files), followed by the URL. One row like
+  any other line, so scroll math and the jump-to-new badge are unchanged.
+- **`/open [n|list]`** (alias `/img`, vim NORMAL `o`, keymap action `message.open`): open the
+  newest image in the bot's replies, then links, with the system handler (`xdg-open` on
+  Linux, `open` on macOS, `rundll32 url.dll,FileProtocolHandler` on Windows; spawned without a
+  shell). Bare image URLs and paths count too. `list` numbers them; missing local files are
+  reported instead of launched.
+- Theme part **`image_placeholder`** (Chat).
+
+### Not supported (API)
+- **Image attachments on prompts:** grokbot_api 1.1 `SendPrompt` has only `agent_id`,
+  `prompt`, `client_nonce` and `reply_to_id`, and the client has no upload method, so there
+  is no way to send an image. No `/attach` was added rather than fake it.
+- Inline terminal graphics (kitty / sixel / iTerm2 via ratatui-image) are not drawn yet; the
+  placeholder plus `/open` is the fallback for every terminal.
+
 ## [1.13.0] - 2026-10-28
 
 ### Added

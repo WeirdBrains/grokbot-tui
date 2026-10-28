@@ -37,7 +37,7 @@ struct R {
     heading: bool,
     code: Option<(String, String)>,
     link: Option<(usize, String)>,
-    image: Option<String>,
+    image: Option<(usize, String)>,
     table: Option<Table>,
     /// Just after a gap or a container start: the next block needs no gap.
     fresh: bool,
@@ -466,11 +466,9 @@ impl R {
                 self.push_style(|s| s.patch(l));
             }
             Tag::Image { dest_url, .. } => {
-                self.image = Some(dest_url.to_string());
-                let st = rs(theme::md_list_marker());
-                self.inline.push(("🖼 ".into(), st));
-                let l = rs(theme::md_link());
-                self.push_style(|s| s.patch(l));
+                self.image = Some((self.inline.len(), dest_url.to_string()));
+                let st = self.cur();
+                self.push_style(|_| st);
             }
             Tag::Table(_) => {
                 self.flush();
@@ -523,7 +521,11 @@ impl R {
             }
             TagEnd::Image => {
                 self.styles.pop();
-                if let Some(url) = self.image.take() {
+                if let Some((at, url)) = self.image.take() {
+                    let alt = segs_text(&self.inline[at.min(self.inline.len())..]);
+                    self.inline.truncate(at);
+                    self.inline
+                        .push((placeholder(&alt, &url), rs(theme::image_placeholder())));
                     self.inline
                         .push((format!(" <{url}>"), rs(theme::md_rule())));
                 }
@@ -601,26 +603,162 @@ pub fn render(text: &str, width: usize, base: Style) -> Vec<Line<'static>> {
         .collect()
 }
 
-/// Image URLs in `text` (markdown `![alt](url)`), in order, with their alt text.
-#[allow(dead_code)] // used by the image renderer
-pub fn images(text: &str) -> Vec<(String, String)> {
-    let mut out = vec![];
-    let mut cur: Option<(String, String)> = None;
-    for ev in Parser::new_ext(text, Options::empty()) {
+/// The last path segment of a URL or path, without query or fragment.
+pub fn file_name(url: &str) -> &str {
+    let u = url.split(['?', '#']).next().unwrap_or(url);
+    u.trim_end_matches('/')
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(u)
+}
+
+/// Human size: 512 B, 3.4 KB, 1.2 MB.
+pub fn human_size(n: u64) -> String {
+    match n {
+        0..1024 => format!("{n} B"),
+        1024..1_048_576 => format!("{:.1} KB", n as f64 / 1024.0),
+        _ => format!("{:.1} MB", n as f64 / 1_048_576.0),
+    }
+}
+
+/// The text shown in place of an image: `[🖼 alt · file.png · 12.0 KB]`. The size is only
+/// known for local files. Terminal graphics (kitty/sixel/iTerm2) are not drawn yet.
+pub fn placeholder(alt: &str, url: &str) -> String {
+    let name = file_name(url);
+    let mut parts = vec![];
+    if !alt.trim().is_empty() {
+        parts.push(alt.trim().to_string());
+    }
+    if !name.is_empty() && name != alt.trim() {
+        parts.push(name.to_string());
+    }
+    let local = url.strip_prefix("file://").unwrap_or(url);
+    if !local.contains("://")
+        && let Ok(m) = std::fs::metadata(local)
+    {
+        parts.push(human_size(m.len()));
+    }
+    if parts.is_empty() {
+        parts.push("image".into());
+    }
+    format!("[🖼 {}]", parts.join(" · "))
+}
+
+fn looks_like_image(u: &str) -> bool {
+    let name = file_name(u).to_ascii_lowercase();
+    [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"]
+        .iter()
+        .any(|e| name.ends_with(e))
+}
+
+/// Something in a reply that `/open` can open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Openable {
+    pub url: String,
+    pub label: String,
+    pub image: bool,
+}
+
+/// Images (`![alt](url)` and bare image URLs) and links in `text`, in order, no duplicates.
+pub fn openables(text: &str) -> Vec<Openable> {
+    let mut out: Vec<Openable> = vec![];
+    let mut cur: Option<(String, String, bool)> = None;
+    let push = |out: &mut Vec<Openable>, o: Openable| {
+        if !o.url.is_empty() && !out.iter().any(|x| x.url == o.url) {
+            out.push(o);
+        }
+    };
+    for ev in Parser::new_ext(text, Options::ENABLE_TABLES) {
         match ev {
             Event::Start(Tag::Image { dest_url, .. }) => {
-                cur = Some((dest_url.to_string(), String::new()))
+                cur = Some((dest_url.to_string(), String::new(), true))
             }
-            Event::Text(t) => {
-                if let Some((_, alt)) = cur.as_mut() {
-                    alt.push_str(&t);
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                cur = Some((
+                    dest_url.to_string(),
+                    String::new(),
+                    looks_like_image(&dest_url),
+                ))
+            }
+            Event::Text(t) | Event::Code(t) => match cur.as_mut() {
+                Some((_, l, _)) => l.push_str(&t),
+                None => {
+                    for w in t.split_whitespace() {
+                        let w = w.trim_matches(|c: char| {
+                            matches!(c, '(' | ')' | ',' | '.' | '"' | '\'')
+                        });
+                        let web = w.starts_with("http://") || w.starts_with("https://");
+                        if (web || w.starts_with('/') || w.starts_with("~/")) && looks_like_image(w)
+                        {
+                            push(
+                                &mut out,
+                                Openable {
+                                    url: w.into(),
+                                    label: file_name(w).into(),
+                                    image: true,
+                                },
+                            );
+                        } else if web {
+                            push(
+                                &mut out,
+                                Openable {
+                                    url: w.into(),
+                                    label: w.into(),
+                                    image: false,
+                                },
+                            );
+                        }
+                    }
+                }
+            },
+            Event::End(TagEnd::Image) | Event::End(TagEnd::Link) => {
+                if let Some((url, label, image)) = cur.take() {
+                    push(&mut out, Openable { url, label, image });
                 }
             }
-            Event::End(TagEnd::Image) => out.extend(cur.take()),
             _ => {}
         }
     }
     out
+}
+
+/// Open a URL or local file with the system handler, without a shell: `xdg-open` (Linux and
+/// BSD), `open` (macOS), `rundll32 url.dll,FileProtocolHandler` (Windows).
+pub fn open_external(target: &str) -> std::io::Result<()> {
+    let t = if let Some(rest) = target.strip_prefix("~/") {
+        dirs::home_dir()
+            .map(|h| h.join(rest).to_string_lossy().into_owned())
+            .unwrap_or_else(|| target.to_string())
+    } else {
+        target.to_string()
+    };
+    let web = t.starts_with("http://") || t.starts_with("https://");
+    let file = t.strip_prefix("file://").unwrap_or(&t);
+    if !web && !std::path::Path::new(file).exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("{file} doesn't exist on this machine"),
+        ));
+    }
+    let arg = if web { t.as_str() } else { file };
+    let mut cmd = if cfg!(windows) {
+        let mut c = std::process::Command::new("rundll32");
+        c.args(["url.dll,FileProtocolHandler", arg]);
+        c
+    } else if cfg!(target_os = "macos") {
+        let mut c = std::process::Command::new("open");
+        c.arg(arg);
+        c
+    } else {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(arg);
+        c
+    };
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
 }
 
 #[cfg(test)]
@@ -704,13 +842,31 @@ mod tests {
     }
 
     #[test]
-    fn image_urls_are_found() {
+    fn images_and_links_are_found_and_shown_as_placeholders() {
+        let o = openables(
+            "see ![a cat](https://x/cat.png?s=1), [docs](https://d.dev) and /tmp/b.jpg or https://e.dev/x.webp",
+        );
+        let urls: Vec<(&str, bool)> = o.iter().map(|o| (o.url.as_str(), o.image)).collect();
         assert_eq!(
-            images("see ![a cat](https://x/cat.png) and ![](/tmp/b.jpg)"),
+            urls,
             [
-                ("https://x/cat.png".to_string(), "a cat".to_string()),
-                ("/tmp/b.jpg".to_string(), String::new())
+                ("https://x/cat.png?s=1", true),
+                ("https://d.dev", false),
+                ("/tmp/b.jpg", true),
+                ("https://e.dev/x.webp", true)
             ]
         );
+        assert_eq!(
+            placeholder("a cat", "https://x/cat.png?s=1"),
+            "[🖼 a cat · cat.png]"
+        );
+        assert_eq!(placeholder("", "https://x/"), "[🖼 x]");
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("p.png");
+        std::fs::write(&f, vec![0u8; 2048]).unwrap();
+        assert_eq!(placeholder("", f.to_str().unwrap()), "[🖼 p.png · 2.0 KB]");
+        let rows = plain("![a cat](https://x/cat.png)", 60).join("");
+        assert_eq!(rows, "[🖼 a cat · cat.png] <https://x/cat.png>");
+        assert!(open_external("/definitely/not/here.png").is_err());
     }
 }

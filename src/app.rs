@@ -2707,6 +2707,12 @@ impl App {
                 self.input_newline();
                 true
             }
+            "message.open" => {
+                if let Err(e) = crate::commands::open_item(self, "") {
+                    self.error(format!("{e:#}"));
+                }
+                true
+            }
             "message.react" => {
                 self.vim_mode = Mode::Command;
                 self.vim_command = Some("react :".to_string());
@@ -3015,7 +3021,7 @@ impl App {
                 Some(cmd) => {
                     let run = cmd.run;
                     // Help opens a modal; don't echo it into the chat.
-                    if !matches!(cmd.name, "help" | "shell" | "react")
+                    if !matches!(cmd.name, "help" | "shell" | "react" | "open")
                         && !(cmd.name == "login" && args.trim().is_empty())
                     {
                         self.push(EntryKind::User, trimmed.clone());
@@ -4764,6 +4770,29 @@ mod perf_probe {
                 .iter()
                 .any(|e| e.text.contains("Unknown emoji"))
         );
+    }
+
+    #[test]
+    fn open_list_numbers_images_before_links() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "tok");
+        let bot = app.active_bot().unwrap().id.clone();
+        app.logs.insert(
+            bot,
+            vec![Entry {
+                kind: EntryKind::Bot,
+                text: "[docs](https://d.dev) ![cat](https://x/cat.png)".into(),
+            }],
+        );
+        app.input = "/open list".into();
+        app.submit();
+        let t = &app.notices().last().unwrap().text;
+        assert!(t.contains(" 1. 🖼 cat  https://x/cat.png"), "{t}");
+        assert!(t.contains(" 2. 🔗 docs  https://d.dev"), "{t}");
+        app.input = "/open 9".into();
+        app.submit();
+        assert!(app.notices().last().unwrap().text.contains("Only 2"));
     }
 
     #[test]
