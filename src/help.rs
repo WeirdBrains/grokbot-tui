@@ -204,7 +204,12 @@ in between quits.
 
 Input focused (multi-line)
   Enter                     Send message or run /command
-  Shift/Alt/Ctrl-Enter      New line when the terminal reports modifiers (kitty protocol
+  Ctrl-Enter                New line. On Windows (conhost / Windows Terminal) this is the
+                            one that always works; on Linux it needs a terminal that reports
+                            modifiers (kitty, Ghostty, foot, WezTerm, xterm modifyOtherKeys).
+                            Terminals that send Ctrl-Enter as Ctrl-J still get a newline;
+                            ones that send plain Enter (e.g. Alacritty by default) send.
+  Shift/Alt-Enter           New line when the terminal reports modifiers (kitty protocol
                             / modifyOtherKeys). Remap via keymap `input.newline`.
   Ctrl-J                    New line (works everywhere, including macOS Terminal.app)
   \\ then Enter             New line (strip the backslash) when modifiers are unavailable

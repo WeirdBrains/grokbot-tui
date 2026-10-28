@@ -75,8 +75,11 @@ the input, close an overlay, or ask before quitting; `Ctrl-Shift-C` never quits)
 
 ### Newlines in the prompt
 
-Prefer **Ctrl-J** for a newline (works in every terminal). Shift/Alt/Ctrl-Enter work when
-the terminal reports modifiers. A trailing `\` then Enter also inserts a newline.
+Prefer **Ctrl-J** for a newline (works in every terminal). **Ctrl-Enter** inserts a newline
+on Windows (conhost and Windows Terminal always report it) and in Linux terminals that report
+modifiers (kitty, Ghostty, foot, WezTerm; Alacritty needs a binding such as
+`{ key = "Enter", mods = "Control", chars = "\n" }`, which arrives as Ctrl-J). Shift/Alt-Enter
+work when the terminal reports modifiers. A trailing `\` then Enter also inserts a newline.
 **macOS Terminal.app** sends plain Enter for Shift/Ctrl-Enter; enable “Use Option as Meta
 key” for Option-Enter, or use Ctrl-J / `\`+Enter.
 

@@ -165,6 +165,38 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_enter_variants_are_newlines_plain_enter_sends() {
+        use ratatui::crossterm::event::KeyEventKind;
+        // Windows console: VK_RETURN + LEFT_CTRL_PRESSED → Enter with CONTROL.
+        let win =
+            KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::CONTROL, KeyEventKind::Press);
+        assert!(is_newline_key(&win));
+        // kitty / Ghostty / xterm modifyOtherKeys: CSI 13;5u → Enter with CONTROL (+ maybe SHIFT).
+        assert!(is_newline_key(&KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT
+        )));
+        // Raw-mode LF (terminals mapping Ctrl-Enter to ^J) → Ctrl-J.
+        assert!(is_newline_key(&KeyEvent::new(
+            KeyCode::Char('j'),
+            KeyModifiers::CONTROL
+        )));
+        assert!(is_newline_key(&KeyEvent::new(
+            KeyCode::Char('\n'),
+            KeyModifiers::CONTROL
+        )));
+        // Plain Enter (and plain 'j') must still submit / type.
+        assert!(!is_newline_key(&KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE
+        )));
+        assert!(!is_newline_key(&KeyEvent::new(
+            KeyCode::Char('j'),
+            KeyModifiers::NONE
+        )));
+    }
+
+    #[test]
     fn newline_chord_names() {
         assert!(is_newline_chord("ctrl-j"));
         assert!(is_newline_chord("alt-enter"));

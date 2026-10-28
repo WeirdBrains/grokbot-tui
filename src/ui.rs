@@ -592,7 +592,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             )
         }
         InputMode::Normal => {
-            " message or /command · Shift/Alt-Enter newline · F1 help ".to_string()
+            " message or /command · Ctrl/Shift/Alt-Enter newline · F1 help ".to_string()
         }
     };
     let scroll = app.input_scroll;

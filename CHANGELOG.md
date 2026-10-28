@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.11.1] - 2026-10-28
+
+### Fixed
+- **Ctrl-Enter** is now listed everywhere newline keys are shown (input placeholder, `/help
+  keys`, README). It already inserted a newline; on Windows it is the one modifier-Enter that
+  conhost and Windows Terminal always report, so the hint now says so. Linux terminals that
+  send Ctrl-Enter as Ctrl-J also get a newline; ones that send plain Enter still send.
+- Tests pin the Ctrl-Enter variants (Windows `Enter+CONTROL`, kitty/modifyOtherKeys CSI-u,
+  raw LF as Ctrl-J) and that plain Enter still submits.
+
 ## [1.11.0] - 2026-10-23
 
 ### Added
