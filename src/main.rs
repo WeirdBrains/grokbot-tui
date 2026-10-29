@@ -807,7 +807,12 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 {
                     app.open_history_search();
                 }
-                KeyCode::Tab if app.focus == Focus::Input && app.input.starts_with('/') => {
+                KeyCode::Tab
+                    if app.focus == Focus::Input
+                        && (app.input.starts_with('/')
+                            || crate::emoji::shortcode_at(&app.input, app.input_cursor)
+                                .is_some()) =>
+                {
                     crate::complete::tab(app, false);
                 }
                 KeyCode::BackTab if app.focus == Focus::Input && app.completion.is_some() => {
@@ -1491,5 +1496,130 @@ mod event_batch_tests {
             app.picker.is_some(),
             "the click opened the theme picker in the same frame"
         );
+    }
+}
+
+#[cfg(test)]
+mod completion_cycle_tests {
+    use super::*;
+    use ratatui::crossterm::event::KeyEvent;
+
+    fn key(app: &mut App, c: KeyCode) {
+        handle_event(app, Event::Key(KeyEvent::new(c, KeyModifiers::NONE)));
+    }
+    fn typed(app: &mut App, s: &str) {
+        for c in s.chars() {
+            key(app, KeyCode::Char(c));
+        }
+    }
+    fn app() -> (App, tempfile::TempDir, tokio::runtime::Runtime) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (a, d) = crate::app::tests::test_app(&rt);
+        (a, d, rt)
+    }
+    fn names(app: &App) -> Vec<String> {
+        app.registry
+            .commands
+            .iter()
+            .flat_map(|c| std::iter::once(c.name).chain(c.aliases.iter().copied()))
+            .map(|n| format!("/{n}"))
+            .collect()
+    }
+
+    #[test]
+    fn bare_slash_tab_cycling_always_shows_exactly_one_command() {
+        let (mut a, _d, _rt) = app();
+        typed(&mut a, "/");
+        let all = names(&a);
+        let mut seen = vec![];
+        for _ in 0..12 {
+            key(&mut a, KeyCode::Tab);
+            assert!(all.contains(&a.input), "not one command: {:?}", a.input);
+            assert_eq!(a.input_cursor, a.input.len());
+            seen.push(a.input.clone());
+        }
+        seen.dedup();
+        assert!(
+            seen.len() > 5,
+            "Tab cycles through different commands: {seen:?}"
+        );
+    }
+
+    #[test]
+    fn partial_prefix_cycles_wraps_and_shift_tab_returns_to_the_original() {
+        let (mut a, _d, _rt) = app();
+        typed(&mut a, "/th");
+        key(&mut a, KeyCode::Tab);
+        let first = a.input.clone();
+        assert!(first.starts_with("/th"), "{first}");
+        let n = a.completion.as_ref().unwrap().items.len();
+        // n-1 more Tabs reach the last item, one more is the original, one more wraps.
+        for _ in 0..n {
+            key(&mut a, KeyCode::Tab);
+        }
+        assert_eq!(a.input, "/th", "the original token is part of the cycle");
+        key(&mut a, KeyCode::Tab);
+        assert_eq!(a.input, first, "wraps to the first item");
+        key(&mut a, KeyCode::BackTab);
+        assert_eq!(a.input, "/th", "Shift-Tab goes back to what was typed");
+        key(&mut a, KeyCode::Down);
+        assert_eq!(a.input, first, "arrows swap the same span");
+    }
+
+    #[test]
+    fn argument_completion_replaces_only_the_argument() {
+        let (mut a, _d, _rt) = app();
+        typed(&mut a, "/keymap ");
+        key(&mut a, KeyCode::Tab);
+        let one = a.input.clone();
+        key(&mut a, KeyCode::Tab);
+        let two = a.input.clone();
+        for s in [&one, &two] {
+            assert!(s.starts_with("/keymap "), "{s}");
+            assert_eq!(s.matches(' ').count(), 1, "one argument, not appended: {s}");
+        }
+        assert_ne!(one, two);
+        // Typing ends the cycle; the next Tab starts from what's there now.
+        key(&mut a, KeyCode::Char('x'));
+        assert!(a.input.ends_with('x'));
+    }
+
+    #[test]
+    fn emoji_shortcode_cycling_swaps_the_glyph() {
+        let (mut a, _d, _rt) = app();
+        typed(&mut a, "hi :fi");
+        key(&mut a, KeyCode::Tab);
+        let one = a.input.clone();
+        key(&mut a, KeyCode::Tab);
+        let two = a.input.clone();
+        key(&mut a, KeyCode::Tab);
+        let three = a.input.clone();
+        for s in [&one, &two, &three] {
+            assert!(s.starts_with("hi "), "{s}");
+            assert_eq!(
+                crate::input::str_width(s),
+                5,
+                "exactly one emoji after 'hi ': {s:?}"
+            );
+        }
+        assert_ne!(one, two);
+        key(&mut a, KeyCode::BackTab);
+        key(&mut a, KeyCode::BackTab);
+        key(&mut a, KeyCode::BackTab);
+        assert_eq!(a.input, "hi :fi");
+    }
+
+    #[test]
+    fn vim_command_mode_tab_cycles_without_appending() {
+        let (mut a, _d, _rt) = app();
+        a.config.keys = crate::config::KeysScheme::Vim;
+        a.vim_mode = crate::keymap::Mode::Command;
+        a.vim_command = Some(String::new());
+        let all = names(&a);
+        for _ in 0..6 {
+            a.vim_action("command.complete");
+            let c = format!("/{}", a.vim_command.clone().unwrap());
+            assert!(all.contains(&c), "{c}");
+        }
     }
 }

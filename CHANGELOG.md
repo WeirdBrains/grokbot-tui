@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.16.1] - 2026-10-28
+
+### Fixed
+- **Tab completion cycling appended instead of replacing** (e.g. `/` then Tab Tab Tab gave
+  `/mousemousemouse`, notably in vim `:` command mode). The popup now remembers the token's
+  span and the text you typed when the cycle starts, and every Tab, Shift-Tab, ↑ or ↓
+  swaps only that span. One step past the last candidate restores what you typed (so
+  Shift-Tab from the first candidate gets it back) and the cycle wraps. Typing any other key
+  ends the cycle; the next Tab starts from what's there. Enter accepts.
+- Tab with the popup open now cycles (it used to close the popup and re-open it on the same
+  first candidate). Shared code, so this covers command names, arguments (`/switch`,
+  `/theme`, `/history`, `/keymap`, `/react` …) and `:shortcode:` emoji.
+- `:shortcode` + Tab in a plain message did nothing in the app (only `/` lines reached the
+  completer); it now opens the emoji popup.
+- Regression tests: bare `/` cycled 12 times is always exactly one command, prefix cycling with
+  wrap-around and Shift-Tab back to the original, argument completion, emoji cycling, and vim
+  command-mode cycling.
+
 ## [1.16.0] - 2026-10-28
 
 ### Added

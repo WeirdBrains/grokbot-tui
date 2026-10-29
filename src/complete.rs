@@ -27,41 +27,62 @@ pub struct Popup {
     pub range: (usize, usize),
     pub draft: String,
     pub draft_cursor: usize,
+    /// The token as typed when the cycle started (cursor == items.len() restores it).
     pub query: String,
     pub list_area: Rect,
+    /// The token's span in `draft`.
+    pub orig_range: (usize, usize),
 }
 
 impl Popup {
+    /// Cycle through the candidates plus one extra slot (index `items.len()`) that stands
+    /// for the token as originally typed, so Shift-Tab from the first item gets it back.
     pub fn move_by(&mut self, d: i32) {
         if self.items.is_empty() {
             return;
         }
-        let n = self.items.len() as i32;
+        let n = self.items.len() as i32 + 1;
         self.cursor = (self.cursor as i32 + d).rem_euclid(n) as usize;
     }
 
-    pub fn selected(&self) -> Option<&Candidate> {
-        self.items.get(self.cursor)
+    /// The text the current position puts in the token span.
+    fn text(&self) -> String {
+        match self.items.get(self.cursor) {
+            Some(c) => c.replace.clone(),
+            None => {
+                let (a, b) = self.orig_range;
+                self.draft.get(a..b).unwrap_or("").to_string()
+            }
+        }
+    }
+
+    /// Replace only the token span with the current choice and remember the new span.
+    fn apply_current(&mut self, app_input: &mut String, cursor: &mut usize) {
+        let t = self.text();
+        let (a, b) = self.range;
+        let b = b.min(app_input.len());
+        let a = a.min(b);
+        app_input.replace_range(a..b, &t);
+        *cursor = a + t.len();
+        self.range = (a, a + t.len());
     }
 }
 
-fn apply(app: &mut App, c: &Candidate, range: (usize, usize)) {
-    let (a, b) = range;
-    let b = b.min(app.input.len());
-    let a = a.min(b);
-    app.input.replace_range(a..b, &c.replace);
-    app.input_cursor = a + c.replace.len();
+/// Step the open popup by `d` and swap the token span for the new choice.
+fn cycle(app: &mut App, d: i32) {
+    let Some(mut p) = app.completion.take() else {
+        return;
+    };
+    p.move_by(d);
+    p.apply_current(&mut app.input, &mut app.input_cursor);
     app.input_anchor = None;
+    app.completion = Some(p);
 }
 
 /// Tab (`back` = Shift-Tab): open or cycle the popup.
 pub fn tab(app: &mut App, back: bool) {
-    if let Some(p) = app.completion.as_mut() {
-        p.move_by(if back { -1 } else { 1 });
-        if let Some(c) = p.selected().cloned() {
-            let r = p.range;
-            apply(app, &c, r);
-        }
+    if app.completion.is_some() {
+        cycle(app, if back { -1 } else { 1 });
         return;
     }
     let Some((range, query, items)) = candidates(app) else {
@@ -80,19 +101,19 @@ pub fn tab(app: &mut App, back: bool) {
     if ranked.is_empty() {
         return;
     }
-    let draft = app.input.clone();
-    let draft_cursor = app.input_cursor;
-    let c0 = ranked[0].clone();
-    apply(app, &c0, range);
-    app.completion = Some(Popup {
+    let mut p = Popup {
         items: ranked,
         cursor: 0,
         range,
-        draft,
-        draft_cursor,
+        draft: app.input.clone(),
+        draft_cursor: app.input_cursor,
         query,
         list_area: Rect::default(),
-    });
+        orig_range: range,
+    };
+    p.apply_current(&mut app.input, &mut app.input_cursor);
+    app.input_anchor = None;
+    app.completion = Some(p);
 }
 
 pub fn refilter(app: &mut App) {
@@ -106,9 +127,13 @@ pub fn refilter(app: &mut App) {
     if ranked.is_empty() {
         return;
     }
+    // Typing ended the old cycle: the token as it is now is the new original.
     p.items = ranked;
-    p.cursor = 0;
+    p.cursor = p.items.len();
     p.range = range;
+    p.orig_range = range;
+    p.draft = app.input.clone();
+    p.draft_cursor = app.input_cursor;
     p.query = query;
     app.completion = Some(p);
 }
@@ -128,28 +153,12 @@ pub fn key(app: &mut App, k: KeyEvent) {
                 app.input_cursor = p.draft_cursor.min(app.input.len());
             }
         }
-        KeyCode::Enter | KeyCode::Tab => {
+        KeyCode::Enter => {
             app.completion = None;
         }
-        KeyCode::BackTab => tab(app, true),
-        KeyCode::Up => {
-            if let Some(p) = app.completion.as_mut() {
-                p.move_by(-1);
-                if let Some(c) = p.selected().cloned() {
-                    let r = p.range;
-                    apply(app, &c, r);
-                }
-            }
-        }
-        KeyCode::Down => {
-            if let Some(p) = app.completion.as_mut() {
-                p.move_by(1);
-                if let Some(c) = p.selected().cloned() {
-                    let r = p.range;
-                    apply(app, &c, r);
-                }
-            }
-        }
+        KeyCode::Tab => cycle(app, 1),
+        KeyCode::BackTab | KeyCode::Up => cycle(app, -1),
+        KeyCode::Down => cycle(app, 1),
         KeyCode::Char(c) if !ctrl => {
             app.input_insert(&c.to_string());
             refilter(app);
