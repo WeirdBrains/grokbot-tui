@@ -40,6 +40,8 @@ pub const ACTIONS: &[&str] = &[
     "message.open",
     "message.download",
     "image.view",
+    "message.open_other",
+    "browser.open",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

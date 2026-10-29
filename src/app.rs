@@ -406,6 +406,12 @@ pub enum Event {
         dest: std::path::PathBuf,
         result: std::result::Result<u64, String>,
     },
+    /// A built-in browser page load finished.
+    BrowserLoaded {
+        id: u64,
+        url: String,
+        result: std::result::Result<crate::browser::Fetched, String>,
+    },
     /// An attachment upload finished.
     Uploaded {
         id: u64,
@@ -504,6 +510,16 @@ pub struct App {
     pub chip_hits: Vec<crate::ui::LinkHit>,
     /// Per bot: (message key, attachments) for messages that carry files, in feed order.
     pub msg_attachments: HashMap<String, Vec<(String, Vec<crate::api::Attachment>)>>,
+    /// The built-in text browser modal (1.20.0).
+    pub browser: Option<crate::browser::Browser>,
+    /// URLs visited in the browser this session, newest first (`/browse` completion).
+    pub browser_visited: Vec<String>,
+    /// Running over SSH (`GROKBOT_TUI_FORCE_SSH` overrides).
+    pub ssh: bool,
+    /// A remote system-open waiting for its confirming repeat.
+    pub ssh_confirm: Option<(String, std::time::Instant)>,
+    /// The current click had Ctrl/Alt held: links use the other opener.
+    pub click_other: bool,
     /// The image viewer modal.
     pub image_view: Option<crate::imageview::ImageView>,
     pub image_load_seq: u64,
@@ -724,6 +740,11 @@ impl App {
             attach: Default::default(),
             chip_hits: vec![],
             msg_attachments: HashMap::new(),
+            browser: None,
+            browser_visited: vec![],
+            ssh: crate::ssh::detect(),
+            ssh_confirm: None,
+            click_other: false,
             image_view: None,
             image_load_seq: 0,
             image_picker: ratatui_image::picker::Picker::halfblocks(),
@@ -1018,6 +1039,7 @@ impl App {
             }
             Event::ImageLoaded { id, result } => self.on_image_loaded(id, result),
             Event::Uploaded { id, result } => self.on_uploaded(id, result),
+            Event::BrowserLoaded { id, url, result } => self.on_browser_loaded(id, url, result),
             Event::AttachResolved {
                 paths,
                 then,
@@ -2378,6 +2400,7 @@ impl App {
             || self.completion.is_some()
             || self.menu.open.is_some()
             || self.image_view.is_some()
+            || self.browser.is_some()
             || self.react_picker.is_some()
             || self.download.is_some()
     }
@@ -2824,6 +2847,16 @@ impl App {
                 if let Err(e) = crate::commands::open_item(self, "") {
                     self.error(format!("{e:#}"));
                 }
+                true
+            }
+            "message.open_other" => {
+                if let Err(e) = crate::commands::open_item_with(self, "", true) {
+                    self.error(format!("{e:#}"));
+                }
+                true
+            }
+            "browser.open" => {
+                self.open_browser(None);
                 true
             }
             "message.download" => {
@@ -3290,13 +3323,11 @@ impl App {
             .find(|h| h.y == row && col >= h.x && col < h.x + h.w)
         {
             let url = h.url.clone();
-            if h.image && self.view_image(Some(&url)) {
+            let other = std::mem::take(&mut self.click_other);
+            if h.image && !other && self.view_image(Some(&url)) {
                 return;
             }
-            match crate::markdown::open_external(&url) {
-                Ok(()) => self.info(format!("Opened {url}")),
-                Err(e) => self.error(format!("Couldn't open {url}: {e}")),
-            }
+            self.open_link(&url, other);
             return;
         }
         if self.unread_area.contains(at) {

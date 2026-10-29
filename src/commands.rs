@@ -142,6 +142,22 @@ pub fn registry() -> Registry {
                 run: attach,
             },
             Command {
+                name: "browse",
+                aliases: &["web"],
+                usage: "/browse [url]",
+                help: "Open the built-in text browser (no JavaScript, no cookies). Tab completes recent URLs",
+                complete: browse_complete,
+                run: browse,
+            },
+            Command {
+                name: "links",
+                aliases: &[],
+                usage: "/links [builtin|system|toggle]",
+                help: "Where links open: the built-in browser (default) or the system browser (links.open_with)",
+                complete: links_complete,
+                run: links,
+            },
+            Command {
                 name: "detach",
                 aliases: &["unattach"],
                 usage: "/detach [n|all]",
@@ -591,7 +607,61 @@ pub fn download(app: &mut App, args: &str) -> Result<()> {
     Ok(())
 }
 
+fn browse_complete(app: &App, idx: usize, q: &str) -> Vec<crate::complete::Candidate> {
+    if idx != 0 {
+        return vec![];
+    }
+    app.browser_visited
+        .iter()
+        .filter(|u| u.contains(q))
+        .take(20)
+        .map(|u| crate::complete::Candidate {
+            replace: u.clone(),
+            label: u.clone(),
+        })
+        .collect()
+}
+
+fn browse(app: &mut App, args: &str) -> Result<()> {
+    let a = args.trim();
+    if a.is_empty() {
+        app.open_browser(None);
+    } else {
+        let url = if a.contains("://") {
+            a.to_string()
+        } else {
+            format!("https://{a}")
+        };
+        app.open_browser(Some(&url));
+    }
+    Ok(())
+}
+
+fn links_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(["builtin", "system", "toggle"])
+    } else {
+        vec![]
+    }
+}
+
+fn links(app: &mut App, args: &str) -> Result<()> {
+    use crate::config::OpenWith;
+    let w = match args.trim() {
+        "" | "toggle" => app.config.open_with.other(),
+        a => OpenWith::parse(a)
+            .ok_or_else(|| anyhow::anyhow!("Usage: /links [builtin|system|toggle]"))?,
+    };
+    app.set_open_with(w);
+    Ok(())
+}
+
 pub fn open_item(app: &mut App, args: &str) -> Result<()> {
+    open_item_with(app, args, false)
+}
+
+/// `/open`; `other` uses the opener `links.open_with` doesn't pick (vim `x`).
+pub fn open_item_with(app: &mut App, args: &str, other: bool) -> Result<()> {
     let items = openables(app);
     if items.is_empty() {
         bail!("No images or links in this chat's replies")
@@ -626,9 +696,11 @@ pub fn open_item(app: &mut App, args: &str) -> Result<()> {
     let Some(o) = items.get(n - 1) else {
         bail!("Only {} images/links here (/open list)", items.len())
     };
-    crate::markdown::open_external(&o.url)
-        .map_err(|e| anyhow::anyhow!("Couldn't open {}: {e}", o.url))?;
-    app.info(format!("Opened {}", o.url));
+    let (url, image) = (o.url.clone(), o.image);
+    if image && !other && app.view_image(Some(&url)) {
+        return Ok(());
+    }
+    app.open_link(&url, other);
     Ok(())
 }
 

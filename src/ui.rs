@@ -242,6 +242,9 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
                 theme::top_bar(),
             ));
             segs.push(mouse_seg(app));
+            if app.ssh {
+                segs.push(seg("   SSH", theme::ssh_indicator()));
+            }
             if app.mock {
                 segs.push(seg("   [MOCK]", theme::mock_tag()));
             }
@@ -290,6 +293,9 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
             ];
             render_segs(f, app, rows[2], segs);
             let mut segs = vec![mouse_seg(app)];
+            if app.ssh {
+                segs.push(seg("  SSH", theme::ssh_indicator()));
+            }
             if app.mock {
                 segs.push(seg("   [MOCK]", theme::mock_tag()));
             }
@@ -337,6 +343,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     if let Some(p) = app.react_picker.as_mut() {
         crate::emojipicker::draw(f, p);
+    }
+    if let Some(b) = app.browser.as_mut() {
+        crate::browser::draw(f, b, app.ssh);
     }
     if let Some(m) = app.download.as_mut() {
         crate::download::draw(f, m);
@@ -1524,11 +1533,13 @@ pub(crate) mod tests {
         let h = app.link_hits.first().cloned().expect("a link on screen");
         assert_eq!(h.url, "https://example.com/x");
         assert_eq!(h.w, 21);
+        app.ssh = false;
         app.click(h.x + 3, h.y);
-        assert!(
-            app.notices()
-                .iter()
-                .any(|e| e.text == "Opened https://example.com/x")
+        // links.open_with = builtin (default): the built-in browser loads it.
+        let b = app.browser.as_ref().expect("browser opened");
+        assert_eq!(
+            b.status,
+            crate::browser::Status::Loading("https://example.com/x".into())
         );
     }
 

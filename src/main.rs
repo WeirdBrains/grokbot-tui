@@ -3,6 +3,7 @@ mod api;
 mod app;
 mod appearance;
 mod attach;
+mod browser;
 mod commands;
 mod complete;
 mod config;
@@ -18,6 +19,7 @@ mod input;
 mod keyctx;
 mod keymap;
 mod keys;
+mod links;
 #[cfg(test)]
 mod live_attach_test;
 mod markdown;
@@ -26,6 +28,7 @@ mod notify;
 mod notify_rules;
 mod picker;
 mod select;
+mod ssh;
 mod storage;
 mod theme;
 mod theme_editor;
@@ -657,6 +660,10 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 }
                 return true;
             }
+            if app.browser.is_some() {
+                app.browser_key(k);
+                return true;
+            }
             if app.shell.is_some() {
                 match k.code {
                     KeyCode::Esc | KeyCode::Char('q') => app.close_shell(),
@@ -870,6 +877,7 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 app.image_view_click(m.column, m.row)
             }
         }
+        Event::Mouse(m) if app.browser.is_some() && app.download.is_none() => app.browser_mouse(m),
         Event::Mouse(m) if app.history_search.is_some() => app.history_search_mouse(m),
         Event::Mouse(m) if app.react_picker.is_some() => app.react_picker_mouse(m),
         Event::Mouse(m) if app.download.is_some() => app.download_mouse(m),
@@ -884,7 +892,12 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             MouseEventKind::ScrollDown if app.shell.is_some() => app.shell_scroll(3),
             MouseEventKind::Down(MouseButton::Left) if app.shell.is_some() => {}
             MouseEventKind::Down(MouseButton::Left) if app.help.is_none() => {
-                app.click(m.column, m.row)
+                // Ctrl/Alt-click: the other opener (links.open_with).
+                app.click_other = m
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+                app.click(m.column, m.row);
+                app.click_other = false;
             }
             MouseEventKind::ScrollUp if app.help.is_some() => app.help_scroll(-3),
             MouseEventKind::ScrollDown if app.help.is_some() => app.help_scroll(3),

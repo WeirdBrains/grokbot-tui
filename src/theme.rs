@@ -228,6 +228,12 @@ style_slots! {
     IMAGE_PLACEHOLDER = "image_placeholder", "Chat", false, "[🖼 image] placeholder in replies (/open opens it)";
     ATTACH_CHIP = "attach_chip", "Chat", false, "Attachment chips above the input and under sent prompts";
     ATTACH_CHIP_ERROR = "attach_chip_error", "Chat", false, "An attachment chip whose upload failed";
+    BROWSER_FRAME = "browser_frame", "Modals", true, "Built-in browser: frame";
+    BROWSER_URL = "browser_url", "Modals", false, "Built-in browser: the URL bar";
+    BROWSER_LINK_NUMBER = "browser_link_number", "Modals", false, "Built-in browser: [n] link numbers";
+    BROWSER_HEADING = "browser_heading", "Modals", false, "Built-in browser: page headings";
+    BROWSER_STATUS = "browser_status", "Modals", false, "Built-in browser: title / loading indicator";
+    SSH_INDICATOR = "ssh_indicator", "Screen and header", false, "The SSH badge (links open in the built-in browser)";
     DOWNLOAD_PATH = "download_path", "Modals", false, "Download modal: the save-path field";
     DOWNLOAD_DIR = "download_dir", "Modals", false, "Download modal: directories in the folder browser";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
@@ -417,6 +423,21 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
         s::ATTACH_CHIP_ERROR => StyleSpec {
             bg: Some(r(c::HEADER)),
             ..fg(c::DANGER)
+        },
+        s::BROWSER_FRAME => fg(c::ACCENT),
+        s::BROWSER_URL => StyleSpec {
+            bg: Some(r(c::HEADER)),
+            ..fg(c::TEXT)
+        },
+        s::BROWSER_LINK_NUMBER => fg(c::WARN),
+        s::BROWSER_HEADING => StyleSpec {
+            bold: true,
+            ..fg(c::ACCENT)
+        },
+        s::BROWSER_STATUS => fg(c::SUBTLE),
+        s::SSH_INDICATOR => StyleSpec {
+            bold: true,
+            ..fg(c::WARN)
         },
         s::MENU_BAR => fg(c::TEXT),
         s::MENU_ACTIVE => bold(StyleSpec {
@@ -764,6 +785,24 @@ pub fn attach_chip() -> Style {
 pub fn attach_chip_error() -> Style {
     st(slot::ATTACH_CHIP_ERROR)
 }
+pub fn browser_frame() -> Style {
+    st(slot::BROWSER_FRAME)
+}
+pub fn browser_url() -> Style {
+    st(slot::BROWSER_URL)
+}
+pub fn browser_link_number() -> Style {
+    st(slot::BROWSER_LINK_NUMBER)
+}
+pub fn browser_heading() -> Style {
+    st(slot::BROWSER_HEADING)
+}
+pub fn browser_status() -> Style {
+    st(slot::BROWSER_STATUS)
+}
+pub fn ssh_indicator() -> Style {
+    st(slot::SSH_INDICATOR)
+}
 pub fn download_button() -> Style {
     st(slot::DOWNLOAD_BUTTON)
 }
@@ -1012,6 +1051,8 @@ mod tests {
                     || s.key == "react_button"
                     || s.key.starts_with("download_")
                     || s.key.starts_with("attach_")
+                    || s.key.starts_with("browser_")
+                    || s.key == "ssh_indicator"
                     || s.key.starts_with("md_")
                     || s.key.starts_with("image_")
                     || s.key == "menu_bar"

@@ -128,13 +128,21 @@ impl App {
 
     /// Preview a local image (a staged attachment) in the viewer.
     pub fn view_local_image(&mut self, path: &str) {
-        self.image_view = Some(ImageView {
-            items: vec![Openable {
+        self.view_image_items(
+            vec![Openable {
                 url: path.to_string(),
                 label: path.to_string(),
                 image: true,
             }],
-            idx: 0,
+            0,
+        );
+    }
+
+    /// Open the viewer on arbitrary images (browser `[🖼]` placeholders).
+    pub fn view_image_items(&mut self, items: Vec<Openable>, idx: usize) {
+        self.image_view = Some(ImageView {
+            items,
+            idx,
             state: ViewState::Loading,
             area: Rect::default(),
             load_id: 0,
@@ -235,16 +243,8 @@ impl App {
         let Some(url) = self.image_view.as_ref().map(|v| v.items[v.idx].url.clone()) else {
             return;
         };
-        // Presigned attachment URLs carry a signature: name the host only.
-        let shown = if url.contains('?') {
-            grokbot_api::attachments::url_host(&url)
-        } else {
-            url.clone()
-        };
-        match crate::markdown::open_external(&url) {
-            Ok(()) => self.info(format!("Opened {shown}")),
-            Err(e) => self.error(format!("Couldn't open {shown}: {e}")),
-        }
+        // Presigned URLs show the host only; in SSH this asks first.
+        self.open_system(&url);
     }
 
     /// Mouse click while the viewer is open: outside closes it.

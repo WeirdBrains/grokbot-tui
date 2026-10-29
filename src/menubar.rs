@@ -33,6 +33,11 @@ pub const MENUS: &[Menu] = &[
         items: &["login", "logout", "whoami", "account", "switch"],
     },
     Menu {
+        label: "Web",
+        hint: 'w',
+        items: &["browse", "links"],
+    },
+    Menu {
         label: "Theme",
         hint: 't',
         items: &["theme"],

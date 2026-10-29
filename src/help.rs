@@ -195,17 +195,34 @@ in between quits.
   /history [query]             Browse all past prompts (persisted; newest first, age + bot)
   :name then Tab               Emoji shortcode completion (:thumbsup: → 👍); complete :name:
                                shortcodes are also turned into emoji when you send
-  Click a link                 Opens it (markdown labels, <urls> and bare http(s) URLs in
-                               the chat). Terminals with OSC 8 (Ghostty, kitty, WezTerm,
-                               Windows Terminal, foot, Alacritty 0.13+) also make them
-                               natively clickable; GROKBOT_TUI_NO_HYPERLINKS=1 turns that off.
+  Click a link                 Opens it in the built-in browser (links.open_with = builtin,
+                               the default) or the system browser (= system; /links toggles,
+                               menu Web). Ctrl/Alt-click or vim NORMAL x uses the other one.
+                               Terminal OSC 8 hyperlinks (Ghostty, kitty, WezTerm, Windows
+                               Terminal, foot, Alacritty 0.13+; Ctrl/Cmd-click in the
+                               terminal) always go to the system browser: the terminal opens
+                               them, not grokbot-tui. GROKBOT_TUI_NO_HYPERLINKS=1 turns them off.
+  /browse [url] (/web)         Built-in text browser: no JavaScript, no cookies, 5 MiB / 20 s
+                               cap. Tab completes recent URLs; vim NORMAL b. In it: e, Ctrl-L
+                               or : edit the URL; j/k ↑/↓ PgUp/PgDn g/G Ctrl-d/u wheel scroll;
+                               Tab/Shift-Tab pick a link, Enter or click follows, a number then
+                               Enter jumps to [n]; H/L or Alt-←/→ back/forward; r reload;
+                               / n N search; o system browser; y copy URL; d download;
+                               Esc/q close. [🖼 …] images open the image viewer.
+  SSH                          Over SSH (SSH_CONNECTION/SSH_CLIENT/SSH_TTY or a parent sshd;
+                               GROKBOT_TUI_FORCE_SSH=0/1 overrides) the header shows SSH and
+                               links always use the built-in browser (links.ssh_behavior =
+                               builtin; respect_pref follows links.open_with). Anything that
+                               would open an app on the remote machine (o, /open, Ctrl-click,
+                               the viewer's o) warns and needs repeating within 5 s.
   /view [n]                    Image viewer: the image nearest the bottom of the chat (or the
                                n-th newest), as large as the terminal allows (kitty / sixel /
                                iTerm2, else halfblocks). Also: click a [🖼 …] placeholder,
                                vim NORMAL O. In the viewer: Esc/q or click outside close,
                                o/Enter open externally, ←/→ (n/p, h/l) previous/next image
-  /open [n|list]               Open the newest image (then link) in replies with the system
-                               viewer (xdg-open / open / Windows handler); vim NORMAL: o.
+  /open [n|list]               Open the newest image (then link) in replies: images in the
+                               viewer, links per links.open_with (system: xdg-open / open /
+                               Windows handler); vim NORMAL: o (x: the other opener).
                                Images show as [🖼 alt · file] placeholders
   /react <emoji|:code:> [n]    Toggle a reaction pill on the newest bot message (n=2 the one
                                before; vim NORMAL: r). Tab completes the emoji (on the

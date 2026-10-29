@@ -18,6 +18,8 @@
 "o" = "message.open"
 "d" = "message.download"
 "shift-o" = "image.view"
+"x" = "message.open_other"
+"b" = "browser.open"
 "a" = "mode.insert_end"
 "v" = "mode.visual"
 ":" = "mode.command"

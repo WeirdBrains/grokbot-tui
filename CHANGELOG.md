@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.20.0] - 2026-10-29
+
+### Added
+- Built-in text browser (`/browse [url]`, alias `/web`, vim NORMAL `b`, menu **Web**): an
+  in-process modal with no JavaScript and no cookies (reqwest, 10 redirects, 20 s timeout,
+  5 MiB cap, `grokbot-tui/<version> (text browser)` User-Agent). HTML renders through
+  html2text's rich output (headings, bold/italic, code, lists, quotes) with numbered `[n]`
+  links. Images become `[🖼 alt]` placeholders that open the image viewer. Text, markdown and
+  JSON render as text; other types offer download or the system opener.
+- Browser keys: editable URL bar (`e`, Ctrl-L, `:open <url>`), j/k, arrows, PgUp/PgDn, g/G,
+  Ctrl-d/u and wheel scrolling, Tab/Shift-Tab link cycling, Enter/click to follow, number then
+  Enter to jump, H/L and Alt-←/→ history, `r` reload, `/` `n` `N` search, `o` system browser,
+  `y` copy URL, `d` download, Esc/`q` close. Per-session history; `/browse` Tab completes
+  recent URLs.
+- Pref `links.open_with = builtin|system` (global, default **builtin**), `/links
+  builtin|system|toggle` and the Web menu. Ctrl/Alt-click and vim NORMAL `x`
+  (`message.open_other`) use the other opener. Chat link clicks and `/open` follow the pref.
+- SSH detection (`SSH_CONNECTION`, `SSH_CLIENT`, `SSH_TTY`, parent `sshd` on Linux;
+  `GROKBOT_TUI_FORCE_SSH=0|1`). In SSH the header shows **SSH**, links use the built-in browser
+  (pref `links.ssh_behavior = builtin|respect_pref`, default builtin) and anything that would
+  open an app on the remote machine warns and needs repeating within 5 s.
+- Keymap actions `browser.open` (`b`) and `message.open_other` (`x`).
+- Theme parts `browser_frame`, `browser_url`, `browser_link_number`, `browser_heading`,
+  `browser_status`, `ssh_indicator` in all shipped themes (with built-in fallbacks).
+
+### Changed
+- The image viewer's external open goes through the same opener (SSH confirmation; presigned
+  URLs show the host only).
+
 ## [1.19.0] - 2026-10-29
 
 ### Added

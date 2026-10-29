@@ -59,6 +59,12 @@ image_viewer_info = { fg = "@subtle" }
 image_placeholder = { fg = "@accent", bg = "@header" }
 attach_chip = { fg = "@accent", bg = "@header" }
 attach_chip_error = { fg = "@danger", bg = "@header" }
+browser_frame = { fg = "@accent" }
+browser_url = { fg = "@text", bg = "@header" }
+browser_link_number = { fg = "@warn" }
+browser_heading = { fg = "@accent", bold = true }
+browser_status = { fg = "@subtle" }
+ssh_indicator = { fg = "@warn", bold = true }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }
@@ -144,6 +150,12 @@ image_viewer_info = { fg = "@subtle" }
 image_placeholder = { fg = "@accent", bg = "@header" }
 attach_chip = { fg = "@accent", bg = "@header" }
 attach_chip_error = { fg = "@danger", bg = "@header" }
+browser_frame = { fg = "@accent" }
+browser_url = { fg = "@text", bg = "@header" }
+browser_link_number = { fg = "@warn" }
+browser_heading = { fg = "@accent", bold = true }
+browser_status = { fg = "@subtle" }
+ssh_indicator = { fg = "@warn", bold = true }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }

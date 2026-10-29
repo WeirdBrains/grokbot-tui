@@ -64,6 +64,41 @@ pub const PREF_DOWNLOAD_MAX_MB: &str = "downloads.max_mb";
 /// Default for [`PREF_DOWNLOAD_MAX_MB`].
 pub const DEFAULT_DOWNLOAD_MAX_MB: u64 = 25;
 
+/// Where links open: `builtin` (the in-app text browser) or `system` (global).
+pub const PREF_LINKS_OPEN_WITH: &str = "links.open_with";
+/// In an SSH session: `builtin` (always the built-in browser) or `respect_pref` (global).
+pub const PREF_LINKS_SSH_BEHAVIOR: &str = "links.ssh_behavior";
+
+/// `links.open_with`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OpenWith {
+    #[default]
+    Builtin,
+    System,
+}
+
+impl OpenWith {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "builtin" | "built-in" | "internal" => Some(Self::Builtin),
+            "system" | "external" => Some(Self::System),
+            _ => None,
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Builtin => "builtin",
+            Self::System => "system",
+        }
+    }
+    pub fn other(self) -> Self {
+        match self {
+            Self::Builtin => Self::System,
+            Self::System => Self::Builtin,
+        }
+    }
+}
+
 /// Pref key for the big header title's glyphs: `auto`, `quadrant` or `half` (global).
 pub const PREF_TITLE_GLYPHS: &str = "ui.title_glyphs";
 
@@ -79,6 +114,8 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_KEYS,
     PREF_HISTORY_MAX,
     PREF_DOWNLOAD_MAX_MB,
+    PREF_LINKS_OPEN_WITH,
+    PREF_LINKS_SSH_BEHAVIOR,
 ];
 
 /// Which block glyphs draw the big header title (pref `ui.title_glyphs`).
@@ -182,6 +219,10 @@ pub struct Config {
     pub history_max: usize,
     /// Download size cap in MB (`downloads.max_mb`, 1..=4096).
     pub download_max_mb: u64,
+    /// Where links open (`links.open_with`).
+    pub open_with: OpenWith,
+    /// In SSH, links always use the built-in browser (`links.ssh_behavior = builtin`).
+    pub ssh_builtin: bool,
 }
 
 impl Default for Config {
@@ -202,6 +243,8 @@ impl Default for Config {
             keys: KeysScheme::Default,
             history_max: DEFAULT_HISTORY_MAX,
             download_max_mb: DEFAULT_DOWNLOAD_MAX_MB,
+            open_with: OpenWith::Builtin,
+            ssh_builtin: true,
         }
     }
 }
@@ -225,6 +268,8 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_KEYS, c.keys.as_str().to_string()),
         (PREF_HISTORY_MAX, c.history_max.to_string()),
         (PREF_DOWNLOAD_MAX_MB, c.download_max_mb.to_string()),
+        (PREF_LINKS_OPEN_WITH, c.open_with.as_str().to_string()),
+        (PREF_LINKS_SSH_BEHAVIOR, "builtin".to_string()),
     ]
 }
 
@@ -271,6 +316,12 @@ impl Config {
                 .and_then(|v| v.trim().parse().ok())
                 .filter(|n| (1..=4096).contains(n))
                 .unwrap_or(d.download_max_mb),
+            open_with: o(PREF_LINKS_OPEN_WITH)
+                .and_then(|v| OpenWith::parse(&v))
+                .unwrap_or(d.open_with),
+            ssh_builtin: o(PREF_LINKS_SSH_BEHAVIOR)
+                .map(|v| !matches!(v.trim(), "respect_pref" | "respect-pref" | "pref"))
+                .unwrap_or(d.ssh_builtin),
         }
     }
 }
@@ -293,6 +344,15 @@ mod tests {
         assert_eq!(c.theme_mode, crate::theme::Mode::System);
         m.insert(PREF_THEME_MODE.into(), "light".into());
         assert_eq!(Config::from_prefs(&m).theme_mode, crate::theme::Mode::Light);
+        assert_eq!(c.open_with, OpenWith::Builtin);
+        assert!(c.ssh_builtin);
+        assert!(is_global(PREF_LINKS_OPEN_WITH));
+        m.insert(PREF_LINKS_OPEN_WITH.into(), "system".into());
+        m.insert(PREF_LINKS_SSH_BEHAVIOR.into(), "respect_pref".into());
+        assert_eq!(Config::from_prefs(&m).open_with, OpenWith::System);
+        assert!(!Config::from_prefs(&m).ssh_builtin);
+        m.remove(PREF_LINKS_OPEN_WITH);
+        m.remove(PREF_LINKS_SSH_BEHAVIOR);
         m.insert(PREF_THEME_MODE.into(), "purple".into());
         assert_eq!(
             Config::from_prefs(&m).theme_mode,
