@@ -6,6 +6,7 @@ mod commands;
 mod complete;
 mod config;
 mod datadir;
+mod download;
 mod emoji;
 mod emojipicker;
 mod fuzzy;
@@ -562,6 +563,10 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 app.react_picker_key(k);
                 return true;
             }
+            if app.download.is_some() {
+                app.download_key(k);
+                return true;
+            }
             if k.code == KeyCode::F(10)
                 || (k.code == KeyCode::Char('m')
                     && k.modifiers.contains(KeyModifiers::ALT)
@@ -857,6 +862,7 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
         }
         Event::Mouse(m) if app.history_search.is_some() => app.history_search_mouse(m),
         Event::Mouse(m) if app.react_picker.is_some() => app.react_picker_mouse(m),
+        Event::Mouse(m) if app.download.is_some() => app.download_mouse(m),
         Event::Mouse(m) if app.editor.is_some() => match m.kind {
             MouseEventKind::Down(MouseButton::Left) => app.editor_click(m.column, m.row),
             MouseEventKind::ScrollUp => app.editor_scroll(-1),

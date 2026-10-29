@@ -400,6 +400,12 @@ pub enum Event {
         id: u64,
         result: crate::imageview::Loaded,
     },
+    /// A `/download` transfer finished.
+    Downloaded {
+        url: String,
+        dest: std::path::PathBuf,
+        result: std::result::Result<u64, String>,
+    },
     /// `promptAcceptanceStatus` answer for a send whose outcome was unknown.
     Acceptance {
         epoch: u64,
@@ -477,6 +483,10 @@ pub struct App {
     pub react_hits: Vec<crate::ui::LinkHit>,
     /// The emoji picker modal.
     pub react_picker: Option<crate::emojipicker::EmojiPicker>,
+    /// The download modal (`[⤓]`, `/download`, vim `d`).
+    pub download: Option<crate::download::DownloadModal>,
+    /// Download buttons on screen (url = what to download).
+    pub download_hits: Vec<crate::ui::LinkHit>,
     /// The image viewer modal.
     pub image_view: Option<crate::imageview::ImageView>,
     pub image_load_seq: u64,
@@ -692,6 +702,8 @@ impl App {
             link_hits: vec![],
             react_hits: vec![],
             react_picker: None,
+            download: None,
+            download_hits: vec![],
             image_view: None,
             image_load_seq: 0,
             image_picker: ratatui_image::picker::Picker::halfblocks(),
@@ -980,6 +992,7 @@ impl App {
                 }
             }
             Event::ImageLoaded { id, result } => self.on_image_loaded(id, result),
+            Event::Downloaded { url, dest, result } => self.on_downloaded(url, dest, result),
             Event::Shell { id, cmd, result } => match &mut self.shell {
                 Some(m) if m.id == id => {
                     m.result = Some(result);
@@ -2324,6 +2337,7 @@ impl App {
             || self.menu.open.is_some()
             || self.image_view.is_some()
             || self.react_picker.is_some()
+            || self.download.is_some()
     }
 
     /// Load prompt history for the active account from `context.db`. A failure is shown
@@ -2770,6 +2784,12 @@ impl App {
                 }
                 true
             }
+            "message.download" => {
+                if let Err(e) = crate::commands::download(self, "") {
+                    self.error(format!("{e:#}"));
+                }
+                true
+            }
             "message.react_picker" => {
                 if !self.open_react_picker(1) {
                     self.error("No message to react to".into());
@@ -3084,8 +3104,10 @@ impl App {
                 Some(cmd) => {
                     let run = cmd.run;
                     // Help opens a modal; don't echo it into the chat.
-                    if !matches!(cmd.name, "help" | "shell" | "react" | "open" | "view")
-                        && !(cmd.name == "login" && args.trim().is_empty())
+                    if !matches!(
+                        cmd.name,
+                        "help" | "shell" | "react" | "open" | "view" | "download"
+                    ) && !(cmd.name == "login" && args.trim().is_empty())
                     {
                         self.push(EntryKind::User, trimmed.clone());
                     }
@@ -3165,6 +3187,15 @@ impl App {
         {
             let k = h.url.clone();
             self.open_react_picker_for(k);
+            return;
+        }
+        if let Some(h) = self
+            .download_hits
+            .iter()
+            .find(|h| h.y == row && col >= h.x && col < h.x + h.w)
+        {
+            let url = h.url.clone();
+            self.open_download(&url);
             return;
         }
         if let Some(h) = self

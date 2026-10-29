@@ -214,6 +214,13 @@ in between quits.
                                emoji picker: type to search (vim: / first), arrows/hjkl or
                                wheel move, Enter or click toggles, Esc/click outside closes. Stored locally: the Grok Bot API has
                                no reaction endpoint, so bots and other clients don't see them
+  /download [n|list]           Save an image or file from the bot's replies (newest; n=2 the
+                               one before; vim NORMAL: d; alias /save). Replies with images or
+                               file links get [⤓] name buttons; click one to open the modal:
+                               path prefilled ~/Downloads/<name>, Tab completes paths, Down
+                               browses folders (arrows/hjkl, Enter/l opens, h parent).
+                               Overwrites and new folders are confirmed. Remote files stream
+                               in the background (cap: downloads.max_mb); local files copy
   PgUp / PgDn, mouse wheel     Scroll the chat (not the prompt history).
                                Only the exact bottom follows new content; scroll up
                                pins the view. '↓ N new' while unread (click / End /
@@ -467,6 +474,7 @@ Global keys
                          quadrant elsewhere). Over ssh the terminal is unknown, so set
                          half if the title looks broken. Half needs 128+ columns.
   history.max_entries    Prompts kept per account (100–1000000). Default: 10000.
+  downloads.max_mb       Largest /download in MB (1–4096). Default: 25.
   active_account         Account opened at startup (set automatically).
 
 Environment variables override the cursor.* / sand.* prefs (see /help env).",

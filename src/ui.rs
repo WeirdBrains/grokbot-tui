@@ -338,6 +338,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if let Some(p) = app.react_picker.as_mut() {
         crate::emojipicker::draw(f, p);
     }
+    if let Some(m) = app.download.as_mut() {
+        crate::download::draw(f, m);
+    }
     if app.image_view.is_some() {
         crate::imageview::draw(f, app);
     }
@@ -495,6 +498,8 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         let mut buttons: Vec<Option<String>> = vec![];
         // A message with no reactions puts its button in the blank line after it.
         let mut pending: Option<(String, bool)> = None;
+        // (line index, download buttons on it).
+        let mut dl: Vec<(usize, Vec<ColHit>)> = vec![];
         for (i, e) in app.feed().iter().enumerate() {
             if i > 0 {
                 match pending.take() {
@@ -511,6 +516,13 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             let body = entry_lines(e.kind, &e.text, bot_name.as_deref(), Some(bubble));
             buttons.extend(std::iter::repeat_n(None, body.len()));
             lines.extend(body);
+            if e.kind == EntryKind::Bot {
+                for (l, hits) in download_lines(&e.text, bubble) {
+                    dl.push((lines.len(), hits));
+                    lines.push(l);
+                    buttons.push(None);
+                }
+            }
             let k = crate::emoji::message_key(e.kind as u8, &e.text);
             let mine_side = e.kind == EntryKind::User;
             let mine: Vec<&str> = reactions
@@ -540,7 +552,12 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             })
             .collect();
         let rows = row_counts(&lines, inner_w);
+        let mut downloads = vec![vec![]; lines.len()];
+        for (i, h) in dl {
+            downloads[i] = h;
+        }
         app.feed_cache = Some(FeedCache {
+            downloads,
             key,
             lines,
             rows,
@@ -634,22 +651,37 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     // Where this frame's links are, for clicks and OSC 8 (feed lines are one row each).
     app.link_hits.clear();
     app.react_hits.clear();
+    app.download_hits.clear();
     let image_urls: std::collections::HashSet<String> =
         app.chat_images().into_iter().map(|o| o.url).collect();
     {
         let cache = app.feed_cache.as_ref().expect("built above");
         let mut row = 0usize;
-        for (((l, n), ls), btn) in cache
+        for ((((l, n), ls), btn), dls) in cache
             .lines
             .iter()
             .zip(&cache.rows)
             .zip(&cache.links)
             .zip(&cache.buttons)
+            .zip(&cache.downloads)
         {
             let y = row as isize - off as isize;
             row += n;
-            if (ls.is_empty() && btn.is_none()) || *n != 1 || y < 0 || y >= inner_h as isize {
+            if (ls.is_empty() && btn.is_none() && dls.is_empty())
+                || *n != 1
+                || y < 0
+                || y >= inner_h as isize
+            {
                 continue;
+            }
+            for (a, b, url) in dls {
+                app.download_hits.push(LinkHit {
+                    x: (inner.x as usize + a) as u16,
+                    y: inner.y + y as u16,
+                    w: (b - a) as u16,
+                    url: url.clone(),
+                    image: false,
+                });
             }
             let lw = l.width();
             let dx = match l.alignment {
@@ -799,6 +831,8 @@ pub struct FeedCache {
     links: Vec<Vec<(usize, usize, String)>>,
     /// Per line: the message key whose react button ends this line.
     buttons: Vec<Option<String>>,
+    /// Per line: download buttons (start col, end col, url).
+    downloads: Vec<Vec<ColHit>>,
 }
 
 /// A link drawn on screen this frame: one row, `x..x+w`.
@@ -969,6 +1003,44 @@ pub fn reaction_line(emojis: &[&str], mine: bool) -> Option<Line<'static>> {
     } else {
         l
     })
+}
+
+/// A clickable column range on a line: (start col, end col, url).
+type ColHit = (usize, usize, String);
+
+/// `[⤓] name` chips for a reply's images and files, wrapped to `width`; each line with
+/// its buttons' column ranges and URLs.
+fn download_lines(text: &str, width: usize) -> Vec<(Line<'static>, Vec<ColHit>)> {
+    let mut out = vec![];
+    let mut spans: Vec<Span<'static>> = vec![];
+    let mut hits = vec![];
+    let mut col = 0usize;
+    for o in crate::download::downloadables(text) {
+        let label = format!(
+            "{} {}",
+            crate::download::BUTTON,
+            crate::download::save_name(&o.url)
+        );
+        let w = crate::input::str_width(&label);
+        if col > 0 && col + 2 + w > width {
+            out.push((
+                Line::from(std::mem::take(&mut spans)),
+                std::mem::take(&mut hits),
+            ));
+            col = 0;
+        }
+        if col > 0 {
+            spans.push(Span::raw("  "));
+            col += 2;
+        }
+        spans.push(theme::download_button().span(label));
+        hits.push((col, col + w, o.url));
+        col += w;
+    }
+    if !spans.is_empty() {
+        out.push((Line::from(spans), hits));
+    }
+    out
 }
 
 /// The react button drawn after a message (or after its reaction pills).

@@ -46,6 +46,7 @@ selection = { fg = "@on_accent", bg = "@accent", bold = true }
 unread_badge = { fg = "@on_accent", bg = "@warn", bold = true }
 reaction_pill = { fg = "@text", bg = "@header" }
 react_button = { fg = "@muted" }
+download_button = { fg = "@accent" }
 md_heading = { fg = "@accent", bold = true }
 md_code = { fg = "@warn" }
 md_code_block = { fg = "@text", bg = "@header" }
@@ -56,6 +57,8 @@ md_rule = { fg = "@muted" }
 md_table_border = { fg = "@muted" }
 image_viewer_info = { fg = "@subtle" }
 image_placeholder = { fg = "@accent", bg = "@header" }
+download_path = { fg = "@text", bg = "@header" }
+download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
 tooltip = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
@@ -126,6 +129,7 @@ selection = { fg = "@on_accent", bg = "@accent", bold = true }
 unread_badge = { fg = "@on_accent", bg = "@warn", bold = true }
 reaction_pill = { fg = "@text", bg = "@header" }
 react_button = { fg = "@muted" }
+download_button = { fg = "@accent" }
 md_heading = { fg = "@accent", bold = true }
 md_code = { fg = "@warn" }
 md_code_block = { fg = "@text", bg = "@header" }
@@ -136,6 +140,8 @@ md_rule = { fg = "@muted" }
 md_table_border = { fg = "@muted" }
 image_viewer_info = { fg = "@subtle" }
 image_placeholder = { fg = "@accent", bg = "@header" }
+download_path = { fg = "@text", bg = "@header" }
+download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
 tooltip = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }

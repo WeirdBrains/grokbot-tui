@@ -16,6 +16,7 @@
 "r" = "message.react"
 "shift-r" = "message.react_picker"
 "o" = "message.open"
+"d" = "message.download"
 "shift-o" = "image.view"
 "a" = "mode.insert_end"
 "v" = "mode.visual"

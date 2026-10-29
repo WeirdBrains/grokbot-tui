@@ -125,6 +125,21 @@ searchable emoji grid (by shortcode and name; recent and on-message first, then 
 has no reaction endpoint and transcripts carry no reaction data, so they're kept in
 `context.db` (per account and bot) and never sent. Theme part: `reaction_pill`.
 
+### Downloads
+
+Bot replies with images or file links (`.pdf`, `.zip`, `.csv`…; not web pages) get a row of
+`[⤓] name` buttons (theme part `download_button`). Click one, run `/download [n|list]`
+(alias `/save`), or press vim `d` (`message.download`) to open the download modal. Its path
+is prefilled with `~/Downloads/<name>` (or `~/<name>` without a Downloads folder). Tab
+completes paths, and Down moves into a folder browser (arrows/hjkl, Enter/l opens a folder,
+h goes to the parent). Overwriting a file and creating missing folders are confirmed first.
+Remote files stream in the background into `<name>.part` and are renamed when done. Local
+files are copied. The size is capped by `downloads.max_mb` (default 25). The result shows as
+a notification. Theme parts: `download_path`, `download_dir`.
+
+Sending attachments isn't supported: the Grok Bot gateway API has no upload method (see the
+CHANGELOG for 1.18.0).
+
 ### Newlines in the prompt
 
 Prefer **Ctrl-J** for a newline (works in every terminal). **Ctrl-Enter** inserts a newline

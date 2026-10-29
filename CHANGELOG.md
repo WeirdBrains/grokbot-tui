@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.18.0] - 2026-10-28
+
+### Added
+- Download buttons: bot replies with images or file links get a row of `[⤓] name` buttons
+  (theme part `download_button`). Clicking one, `/download [n|list]` (alias `/save`), or vim
+  `d` (keymap action `message.download`) opens the download modal.
+- Download modal: a path field prefilled with `~/Downloads/<name>` (falling back to `~`), Tab
+  and Shift-Tab path completion (fuzzy; Esc restores what you typed), and a folder browser
+  (Down to enter; arrows/hjkl; Enter/l opens a folder; h/← parent; click works too).
+  Overwrites and missing parent folders are confirmed (y/n). `~` is expanded.
+- Remote files (http/https) stream in the background to `<file>.part` and are renamed when
+  complete, so a failed download leaves nothing behind. Local files are copied. Success or
+  failure shows as a notification.
+- Pref `downloads.max_mb` (global, 1–4096, default 25) caps download size.
+- Theme parts `download_button`, `download_path`, `download_dir` in every shipped theme.
+
+### Not added: attachments
+- `/attach` was not implemented because no upload mechanism was found. grokbot_api 1.1.0
+  `sendPrompt` takes only `agentId`, `prompt`, `clientNonce`, `replyToId` and `sessionId`.
+  None of the crate's methods or guides, nor the reference gateway client, mentions an
+  upload, attachment, file, media or blob call.
+
 ## [1.17.0] - 2026-10-28
 
 ### Added

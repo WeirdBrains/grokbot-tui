@@ -142,6 +142,14 @@ pub fn registry() -> Registry {
                 run: view,
             },
             Command {
+                name: "download",
+                aliases: &["save"],
+                usage: "/download [n|list]",
+                help: "Save an image or file from the bot's replies (newest, or n-th newest; list numbers them; [⤓] or vim d)",
+                complete: open_complete,
+                run: download,
+            },
+            Command {
                 name: "open",
                 aliases: &["img"],
                 usage: "/open [n|list]",
@@ -521,6 +529,49 @@ fn view(app: &mut App, args: &str) -> Result<()> {
     };
     let url = o.url.clone();
     app.view_image(Some(&url));
+    Ok(())
+}
+
+pub fn download(app: &mut App, args: &str) -> Result<()> {
+    let items = app.chat_downloads();
+    if items.is_empty() {
+        bail!("No images or files in this chat's replies")
+    }
+    let a = args.trim();
+    if a == "list" {
+        let list: Vec<String> = items
+            .iter()
+            .enumerate()
+            .take(20)
+            .map(|(i, o)| {
+                format!(
+                    "{:>2}. {} {}  {}",
+                    i + 1,
+                    if o.image { "🖼" } else { "📄" },
+                    crate::download::save_name(&o.url),
+                    o.url
+                )
+            })
+            .collect();
+        app.info(format!("Save with /download <n>:\n{}", list.join("\n")));
+        return Ok(());
+    }
+    let n = if a.is_empty() {
+        1
+    } else {
+        a.parse::<usize>()
+            .ok()
+            .filter(|n| *n >= 1)
+            .ok_or_else(|| anyhow::anyhow!("Usage: /download [n|list]"))?
+    };
+    let Some(o) = items.get(n - 1) else {
+        bail!(
+            "Only {} downloadable items here (/download list)",
+            items.len()
+        )
+    };
+    let url = o.url.clone();
+    app.open_download(&url);
     Ok(())
 }
 

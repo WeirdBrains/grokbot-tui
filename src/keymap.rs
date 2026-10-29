@@ -38,6 +38,7 @@ pub const ACTIONS: &[&str] = &[
     "message.react",
     "message.react_picker",
     "message.open",
+    "message.download",
     "image.view",
 ];
 

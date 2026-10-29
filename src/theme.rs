@@ -215,6 +215,7 @@ style_slots! {
     UNREAD_BADGE = "unread_badge", "Chat", false, "'↓ N new' while scrolled up";
     REACTION_PILL = "reaction_pill", "Chat", false, "Reaction pills under a message ( 👍 )";
     REACT_BUTTON = "react_button", "Chat", false, "The [☺+] react button after each message";
+    DOWNLOAD_BUTTON = "download_button", "Chat", false, "The [⤓] download button under replies with images or files";
     MD_HEADING = "md_heading", "Chat", false, "Markdown headings";
     MD_CODE = "md_code", "Chat", false, "Markdown `inline code`";
     MD_CODE_BLOCK = "md_code_block", "Chat", false, "Markdown fenced code blocks";
@@ -225,6 +226,8 @@ style_slots! {
     MD_TABLE_BORDER = "md_table_border", "Chat", false, "Markdown table borders";
     IMAGE_VIEWER_INFO = "image_viewer_info", "Modals", false, "Image viewer: dimensions, size, n/N, protocol";
     IMAGE_PLACEHOLDER = "image_placeholder", "Chat", false, "[🖼 image] placeholder in replies (/open opens it)";
+    DOWNLOAD_PATH = "download_path", "Modals", false, "Download modal: the save-path field";
+    DOWNLOAD_DIR = "download_dir", "Modals", false, "Download modal: directories in the folder browser";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
     MENU_ACTIVE = "menu_active", "Screen and header", false, "Open / focused menu label";
     TOOLTIP = "tooltip", "Modals", true, "Hover tooltip frame and text";
@@ -372,6 +375,12 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
             ..StyleSpec::default()
         }),
         s::REACT_BUTTON => fg(c::MUTED),
+        s::DOWNLOAD_BUTTON => fg(c::ACCENT),
+        s::DOWNLOAD_PATH => StyleSpec {
+            bg: Some(r(c::HEADER)),
+            ..fg(c::TEXT)
+        },
+        s::DOWNLOAD_DIR => bold(fg(c::ACCENT)),
         s::REACTION_PILL => StyleSpec {
             bg: Some(r(c::HEADER)),
             fg: Some(r(c::TEXT)),
@@ -739,6 +748,15 @@ pub fn image_viewer_info() -> Style {
 pub fn image_placeholder() -> Style {
     st(slot::IMAGE_PLACEHOLDER)
 }
+pub fn download_button() -> Style {
+    st(slot::DOWNLOAD_BUTTON)
+}
+pub fn download_path() -> Style {
+    st(slot::DOWNLOAD_PATH)
+}
+pub fn download_dir() -> Style {
+    st(slot::DOWNLOAD_DIR)
+}
 pub fn react_button() -> Style {
     st(slot::REACT_BUTTON)
 }
@@ -976,6 +994,7 @@ mod tests {
                     || s.key == "unread_badge"
                     || s.key == "reaction_pill"
                     || s.key == "react_button"
+                    || s.key.starts_with("download_")
                     || s.key.starts_with("md_")
                     || s.key.starts_with("image_")
                     || s.key == "menu_bar"

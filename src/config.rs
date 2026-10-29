@@ -59,6 +59,11 @@ pub const DEFAULT_HISTORY_MAX: usize = 10_000;
 /// Accepted range for [`PREF_HISTORY_MAX`]; values outside it fall back to the default.
 pub const HISTORY_MAX_RANGE: std::ops::RangeInclusive<usize> = 100..=1_000_000;
 
+/// Download size cap in MB (global, `downloads.max_mb`).
+pub const PREF_DOWNLOAD_MAX_MB: &str = "downloads.max_mb";
+/// Default for [`PREF_DOWNLOAD_MAX_MB`].
+pub const DEFAULT_DOWNLOAD_MAX_MB: u64 = 25;
+
 /// Pref key for the big header title's glyphs: `auto`, `quadrant` or `half` (global).
 pub const PREF_TITLE_GLYPHS: &str = "ui.title_glyphs";
 
@@ -73,6 +78,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_MOUSE_CAPTURE,
     PREF_KEYS,
     PREF_HISTORY_MAX,
+    PREF_DOWNLOAD_MAX_MB,
 ];
 
 /// Which block glyphs draw the big header title (pref `ui.title_glyphs`).
@@ -174,6 +180,8 @@ pub struct Config {
     pub keys: KeysScheme,
     /// Prompt history cap per account (`history.max_entries`).
     pub history_max: usize,
+    /// Download size cap in MB (`downloads.max_mb`, 1..=4096).
+    pub download_max_mb: u64,
 }
 
 impl Default for Config {
@@ -193,6 +201,7 @@ impl Default for Config {
             mouse_capture: true,
             keys: KeysScheme::Default,
             history_max: DEFAULT_HISTORY_MAX,
+            download_max_mb: DEFAULT_DOWNLOAD_MAX_MB,
         }
     }
 }
@@ -215,6 +224,7 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_MOUSE_CAPTURE, c.mouse_capture.to_string()),
         (PREF_KEYS, c.keys.as_str().to_string()),
         (PREF_HISTORY_MAX, c.history_max.to_string()),
+        (PREF_DOWNLOAD_MAX_MB, c.download_max_mb.to_string()),
     ]
 }
 
@@ -257,6 +267,10 @@ impl Config {
                 .and_then(|v| v.trim().replace('_', "").parse().ok())
                 .filter(|n| HISTORY_MAX_RANGE.contains(n))
                 .unwrap_or(d.history_max),
+            download_max_mb: o(PREF_DOWNLOAD_MAX_MB)
+                .and_then(|v| v.trim().parse().ok())
+                .filter(|n| (1..=4096).contains(n))
+                .unwrap_or(d.download_max_mb),
         }
     }
 }
