@@ -67,6 +67,9 @@ jobs:
           "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
           "VCPKGRS_TRIPLET=x64-windows-static-md" | Out-File -FilePath $env:GITHUB_ENV -Append
           "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # Static avcodec uses Media Foundation (mfenc/mf_utils); vcpkg doesn't list
+          # these system libraries, so link them explicitly.
+          "RUSTFLAGS=-C link-arg=mfuuid.lib -C link-arg=strmiids.lib -C link-arg=mfplat.lib -C link-arg=ole32.lib" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Build (Linux/macOS, FFmpeg from source, static)
         if: runner.os != 'Windows'
         run: cargo build --profile dist --locked --features ffmpeg-static --target ${{ matrix.target }}
