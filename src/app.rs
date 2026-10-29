@@ -406,6 +406,17 @@ pub enum Event {
         dest: std::path::PathBuf,
         result: std::result::Result<u64, String>,
     },
+    /// An attachment upload finished.
+    Uploaded {
+        id: u64,
+        result: gw::Result<gw::UploadedAttachment>,
+    },
+    /// Presigned reads for attachments came back.
+    AttachResolved {
+        paths: Vec<String>,
+        then: crate::attach::Then,
+        result: gw::Result<Vec<gw::AttachmentRead>>,
+    },
     /// `promptAcceptanceStatus` answer for a send whose outcome was unknown.
     Acceptance {
         epoch: u64,
@@ -487,6 +498,12 @@ pub struct App {
     pub download: Option<crate::download::DownloadModal>,
     /// Download buttons on screen (url = what to download).
     pub download_hits: Vec<crate::ui::LinkHit>,
+    /// Staged attachments, the queued prompt, resolved reads.
+    pub attach: crate::attach::Attachments,
+    /// Chip hit areas above the input (`v<n>` preview, `x<n>` remove).
+    pub chip_hits: Vec<crate::ui::LinkHit>,
+    /// Per bot: (message key, attachments) for messages that carry files, in feed order.
+    pub msg_attachments: HashMap<String, Vec<(String, Vec<crate::api::Attachment>)>>,
     /// The image viewer modal.
     pub image_view: Option<crate::imageview::ImageView>,
     pub image_load_seq: u64,
@@ -704,6 +721,9 @@ impl App {
             react_picker: None,
             download: None,
             download_hits: vec![],
+            attach: Default::default(),
+            chip_hits: vec![],
+            msg_attachments: HashMap::new(),
             image_view: None,
             image_load_seq: 0,
             image_picker: ratatui_image::picker::Picker::halfblocks(),
@@ -788,6 +808,11 @@ impl App {
     }
 
     // ------------------------------------------------------------ tasks & events
+
+    /// A sender for tasks that report back themselves (they must count in `inflight`).
+    pub(crate) fn event_sender(&self) -> mpsc::UnboundedSender<Event> {
+        self.tx.clone()
+    }
 
     pub(crate) fn spawn<F: Future<Output = Event> + Send + 'static>(&mut self, fut: F) {
         self.inflight += 1;
@@ -992,6 +1017,12 @@ impl App {
                 }
             }
             Event::ImageLoaded { id, result } => self.on_image_loaded(id, result),
+            Event::Uploaded { id, result } => self.on_uploaded(id, result),
+            Event::AttachResolved {
+                paths,
+                then,
+                result,
+            } => self.on_attach_resolved(paths, then, result),
             Event::Downloaded { url, dest, result } => self.on_downloaded(url, dest, result),
             Event::Shell { id, cmd, result } => match &mut self.shell {
                 Some(m) if m.id == id => {
@@ -1771,7 +1802,7 @@ impl App {
     }
 
     /// Id, viewer session, and team flag for the active bot (for gateway routing).
-    fn active_bot_route(&self) -> Option<(String, Option<String>, bool)> {
+    pub(crate) fn active_bot_route(&self) -> Option<(String, Option<String>, bool)> {
         self.active_bot()
             .map(|b| (b.id.clone(), b.viewer_session_id.clone(), b.team))
     }
@@ -1823,13 +1854,24 @@ impl App {
     /// don't wipe them and don't duplicate them.
     fn reload_bot_log(&mut self, bot_id: &str) {
         let old_len = self.logs.get(bot_id).map(|v| v.len()).unwrap_or(0);
-        let entries: Vec<Entry> = self
-            .store
-            .messages(bot_id)
-            .unwrap_or_default()
+        let msgs = self.store.messages(bot_id).unwrap_or_default();
+        let atts: Vec<(String, Vec<crate::api::Attachment>)> = msgs
             .iter()
-            .map(entry_from_msg)
+            .filter(|m| !m.attachments.is_empty())
+            .map(|m| {
+                let e = entry_from_msg(m);
+                (
+                    crate::emoji::message_key(e.kind as u8, &e.text),
+                    m.attachments.clone(),
+                )
+            })
             .collect();
+        if atts.is_empty() {
+            self.msg_attachments.remove(bot_id);
+        } else {
+            self.msg_attachments.insert(bot_id.to_string(), atts);
+        }
+        let entries: Vec<Entry> = msgs.iter().map(entry_from_msg).collect();
         let new_len = entries.len();
         self.logs.insert(bot_id.to_string(), entries);
         if self.active_bot().is_some_and(|b| b.id == bot_id) && !self.follow && new_len > old_len {
@@ -3106,7 +3148,14 @@ impl App {
                     // Help opens a modal; don't echo it into the chat.
                     if !matches!(
                         cmd.name,
-                        "help" | "shell" | "react" | "open" | "view" | "download"
+                        "help"
+                            | "shell"
+                            | "react"
+                            | "open"
+                            | "view"
+                            | "download"
+                            | "attach"
+                            | "detach"
                     ) && !(cmd.name == "login" && args.trim().is_empty())
                     {
                         self.push(EntryKind::User, trimmed.clone());
@@ -3152,11 +3201,15 @@ impl App {
             );
             return;
         }
+        let Some(attachments) = self.take_attachments_for_send(&text) else {
+            return;
+        };
         let nonce = uuid::Uuid::new_v4().to_string();
         let mine = Message {
             role: Role::User,
             text: text.clone(),
             remote_id: Some(format!("pending:{nonce}")),
+            attachments: attachments.clone(),
         };
         if let Err(e) = self.store.append_message(&bot, &mine) {
             self.error(format!("Could not save message: {e:#}"));
@@ -3168,7 +3221,7 @@ impl App {
         let epoch = self.epoch;
         self.spawn(async move {
             api.bind_viewer_session(&bot, session.as_deref());
-            let result = api.send(&bot, &text, &nonce).await;
+            let result = api.send_with(&bot, &text, &nonce, &attachments).await;
             Event::Sent {
                 epoch,
                 bot,
@@ -3190,12 +3243,45 @@ impl App {
             return;
         }
         if let Some(h) = self
+            .chip_hits
+            .iter()
+            .find(|h| h.y == row && col >= h.x && col < h.x + h.w)
+        {
+            let act = h.url.clone();
+            let n: usize = act[1..].parse().unwrap_or(0);
+            if act.starts_with('x') {
+                self.detach(n);
+            } else if let Some(s) = n.checked_sub(1).and_then(|i| self.attach.staged.get(i)) {
+                let p = s.path.display().to_string();
+                match &s.state {
+                    crate::attach::State::Failed(e) => {
+                        let e = format!("{}: {e}", s.name);
+                        self.error(e)
+                    }
+                    _ if s.kind == gw::AttachmentKind::Image => {
+                        self.view_local_image(&p);
+                    }
+                    _ => {
+                        let t = format!("{} · {}", s.name, p);
+                        self.info(t)
+                    }
+                }
+            }
+            return;
+        }
+        if let Some(h) = self
             .download_hits
             .iter()
             .find(|h| h.y == row && col >= h.x && col < h.x + h.w)
         {
             let url = h.url.clone();
-            self.open_download(&url);
+            if let Some(path) = url.strip_prefix(crate::attach::DL_SCHEME) {
+                self.open_attachment(path, crate::attach::Then::Download);
+            } else if let Some(path) = url.strip_prefix(crate::attach::SCHEME) {
+                self.open_attachment(path, crate::attach::Then::Open);
+            } else {
+                self.open_download(&url);
+            }
             return;
         }
         if let Some(h) = self
@@ -3376,7 +3462,7 @@ pub mod tests {
     }
 
     /// Run the event loop until idle (and once more after `extra` for delayed replies).
-    fn settle(app: &mut App) {
+    pub fn settle(app: &mut App) {
         for _ in 0..5 {
             app.tick();
             app.wait_idle(WAIT);
@@ -3437,6 +3523,7 @@ pub mod tests {
                             role: crate::api::Role::Bot,
                             text: format!("line {i} {}", "x".repeat(20)),
                             remote_id: Some(format!("m{i}")),
+                            attachments: vec![],
                         },
                     )
                     .unwrap();
@@ -3652,6 +3739,7 @@ pub mod tests {
                     role: Role::Bot,
                     text: "written elsewhere".into(),
                     remote_id: Some("x1".into()),
+                    attachments: vec![],
                 },
             )
             .unwrap();
@@ -3888,11 +3976,13 @@ pub mod tests {
                         role: crate::api::Role::Bot,
                         text: "answer one".into(),
                         remote_id: Some("b1".into()),
+                        attachments: vec![],
                     },
                     crate::api::Message {
                         role: crate::api::Role::User,
                         text: "q".into(),
                         remote_id: Some("u1".into()),
+                        attachments: vec![],
                     },
                 ],
                 true,

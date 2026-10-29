@@ -118,7 +118,28 @@ impl App {
                 }
             }
         }
+        for o in self.attachment_openables() {
+            if o.image && !out.iter().any(|x| x.url == o.url) {
+                out.push(o);
+            }
+        }
         out
+    }
+
+    /// Preview a local image (a staged attachment) in the viewer.
+    pub fn view_local_image(&mut self, path: &str) {
+        self.image_view = Some(ImageView {
+            items: vec![Openable {
+                url: path.to_string(),
+                label: path.to_string(),
+                image: true,
+            }],
+            idx: 0,
+            state: ViewState::Loading,
+            area: Rect::default(),
+            load_id: 0,
+        });
+        self.start_image_load();
     }
 
     /// Open the viewer on `url` (or the newest image). False when the chat has none.
@@ -214,9 +235,15 @@ impl App {
         let Some(url) = self.image_view.as_ref().map(|v| v.items[v.idx].url.clone()) else {
             return;
         };
+        // Presigned attachment URLs carry a signature: name the host only.
+        let shown = if url.contains('?') {
+            grokbot_api::attachments::url_host(&url)
+        } else {
+            url.clone()
+        };
         match crate::markdown::open_external(&url) {
-            Ok(()) => self.info(format!("Opened {url}")),
-            Err(e) => self.error(format!("Couldn't open {url}: {e}")),
+            Ok(()) => self.info(format!("Opened {shown}")),
+            Err(e) => self.error(format!("Couldn't open {shown}: {e}")),
         }
     }
 

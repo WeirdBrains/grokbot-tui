@@ -57,6 +57,8 @@ md_rule = { fg = "@muted" }
 md_table_border = { fg = "@muted" }
 image_viewer_info = { fg = "@subtle" }
 image_placeholder = { fg = "@accent", bg = "@header" }
+attach_chip = { fg = "@accent", bg = "@header" }
+attach_chip_error = { fg = "@danger", bg = "@header" }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }
@@ -140,6 +142,8 @@ md_rule = { fg = "@muted" }
 md_table_border = { fg = "@muted" }
 image_viewer_info = { fg = "@subtle" }
 image_placeholder = { fg = "@accent", bg = "@header" }
+attach_chip = { fg = "@accent", bg = "@header" }
+attach_chip_error = { fg = "@danger", bg = "@header" }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }

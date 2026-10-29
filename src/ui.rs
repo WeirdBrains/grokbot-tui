@@ -413,13 +413,39 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     let vis = crate::input::visible_rows(il.rows.len());
     app.input_scroll = crate::input::scroll_for(app.input_scroll, il.cursor.0, il.rows.len(), vis);
     let header = header_kind(f.area());
-    let [top, menu_row, mid, bottom] = Layout::vertical([
+    let chips_h = u16::from(!app.attach.staged.is_empty());
+    let [top, menu_row, mid, chips_row, bottom] = Layout::vertical([
         Constraint::Length(header.rows()),
         Constraint::Length(1),
         Constraint::Min(3),
+        Constraint::Length(chips_h),
         Constraint::Length(vis as u16 + 2),
     ])
     .areas(f.area());
+    app.chip_hits.clear();
+    if chips_h > 0 {
+        let (line, hits) = crate::attach::chip_line(app);
+        let x0 = chips_row.x + 1;
+        for (a, b, act) in hits {
+            if x0 as usize + b <= (chips_row.x + chips_row.width) as usize {
+                app.chip_hits.push(LinkHit {
+                    x: x0 + a as u16,
+                    y: chips_row.y,
+                    w: (b - a) as u16,
+                    url: act,
+                    image: false,
+                });
+            }
+        }
+        f.render_widget(
+            Paragraph::new(line),
+            Rect {
+                x: x0,
+                width: chips_row.width.saturating_sub(1),
+                ..chips_row
+            },
+        );
+    }
     let [side, body] = Layout::horizontal([
         Constraint::Length(app.config.sidebar_width),
         Constraint::Min(10),
@@ -469,7 +495,14 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     // heights are cached and only rebuilt when the feed, width, bot name or entry styles
     // change, so a frame doesn't re-wrap the whole transcript.
     let reactions = app.active_reactions().to_vec();
-    let key = feed_key(app.feed(), inner_w, bot_name.as_deref()) ^ reactions_key(&reactions);
+    let key = feed_key(app.feed(), inner_w, bot_name.as_deref()) ^ reactions_key(&reactions) ^ {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for a in app.feed_attachments() {
+            (a.path, a.name).hash(&mut h);
+        }
+        h.finish()
+    };
     if app.feed_cache.as_ref().is_none_or(|c| c.key != key) {
         let mut lines: Vec<Line<'static>> = vec![];
         // Markdown link labels → urls, over the whole feed (labels are matched per line).
@@ -516,6 +549,16 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             let body = entry_lines(e.kind, &e.text, bot_name.as_deref(), Some(bubble));
             buttons.extend(std::iter::repeat_n(None, body.len()));
             lines.extend(body);
+            if e.kind == EntryKind::User {
+                let k = crate::emoji::message_key(e.kind as u8, &e.text);
+                let atts = app.entry_attachments(&k);
+                if !atts.is_empty() {
+                    let (l, hits) = crate::attach::sent_line(&atts, inner_w);
+                    dl.push((lines.len(), hits));
+                    lines.push(l);
+                    buttons.push(None);
+                }
+            }
             if e.kind == EntryKind::Bot {
                 for (l, hits) in download_lines(&e.text, bubble) {
                     dl.push((lines.len(), hits));
@@ -1810,11 +1853,13 @@ pub(crate) mod tests {
                         role: crate::api::Role::User,
                         text: long.clone(),
                         remote_id: Some("u1".into()),
+                        attachments: vec![],
                     },
                     crate::api::Message {
                         role: crate::api::Role::Bot,
                         text: long.clone(),
                         remote_id: Some("b1".into()),
+                        attachments: vec![],
                     },
                 ],
                 true,
@@ -1939,6 +1984,7 @@ pub(crate) mod tests {
                         role: crate::api::Role::Bot,
                         text,
                         remote_id: Some(format!("r{i}")),
+                        attachments: vec![],
                     },
                 )
                 .unwrap();
@@ -1950,6 +1996,7 @@ pub(crate) mod tests {
                     role: crate::api::Role::Bot,
                     text: "NEWEST-LINE".into(),
                     remote_id: Some("rz".into()),
+                    attachments: vec![],
                 },
             )
             .unwrap();
@@ -2038,6 +2085,7 @@ pub(crate) mod tests {
                         role: crate::api::Role::Bot,
                         text: (*t).into(),
                         remote_id: Some(format!("p{i}")),
+                        attachments: vec![],
                     },
                 )
                 .unwrap();

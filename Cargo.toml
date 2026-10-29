@@ -1,6 +1,6 @@
 [package]
 name = "grokbot-tui"
-version = "1.18.0"
+version = "1.19.0"
 edition = "2024"
 rust-version = "1.89"
 license = "BSD-3-Clause"
@@ -50,7 +50,7 @@ name = "grokbot-tui"
 path = "src/main.rs"
 
 [dependencies]
-grokbot_api = { version = "1.1", features = ["desktop-session"] }
+grokbot_api = { version = "1.2", features = ["desktop-session"] }
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 ratatui-lipgloss = "1.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "process", "fs", "io-util"] }
@@ -77,6 +77,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 [target."cfg(unix)".dependencies]
 # Terminal background query (OSC 11) for the "system" theme mode.
 libc = "0.2"
+
 
 [dev-dependencies]
 tempfile = "3"

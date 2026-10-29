@@ -144,6 +144,8 @@ pub enum Confirm {
 
 pub struct DownloadModal {
     pub url: String,
+    /// Display/save name when the URL's own name is meaningless (presigned attachments).
+    pub name: Option<String>,
     pub path: String,
     /// Tab cycling: (candidates, index, the text before the first Tab).
     pub comp: Option<(Vec<String>, usize, String)>,
@@ -162,6 +164,7 @@ impl DownloadModal {
         let path = default_path(&url);
         let mut m = Self {
             url,
+            name: None,
             path,
             comp: None,
             entries: vec![],
@@ -183,7 +186,23 @@ impl DownloadModal {
         }
     }
 
-    fn refresh(&mut self) {
+    /// The file name to save as.
+    pub fn save_as(&self) -> String {
+        self.name.clone().unwrap_or_else(|| save_name(&self.url))
+    }
+
+    /// The URL as shown: presigned URLs (with a query) show only their host.
+    pub fn shown_url(&self) -> String {
+        match &self.name {
+            Some(n) => format!(
+                "{n} (from {})",
+                grokbot_api::attachments::url_host(&self.url)
+            ),
+            None => self.url.clone(),
+        }
+    }
+
+    pub(crate) fn refresh(&mut self) {
         let d = self.dir_text();
         let dir = if d.is_empty() {
             PathBuf::from(".")
@@ -217,7 +236,7 @@ impl DownloadModal {
             None => self.path.as_str(),
         };
         if f.is_empty() {
-            save_name(&self.url)
+            self.save_as()
         } else {
             f.to_string()
         }
@@ -279,7 +298,7 @@ impl DownloadModal {
     pub fn target(&self) -> PathBuf {
         let p = expand(&self.path);
         if self.path.ends_with('/') || p.is_dir() {
-            p.join(save_name(&self.url))
+            p.join(self.save_as())
         } else {
             p
         }
@@ -456,7 +475,7 @@ pub fn draw(f: &mut Frame, m: &mut DownloadModal) {
     f.render_widget(
         Paragraph::new(Line::from(vec![
             theme::key_hint().span("from: "),
-            theme::modal_text().span(m.url.clone()),
+            theme::modal_text().span(m.shown_url()),
         ])),
         row(0),
     );
@@ -626,11 +645,25 @@ impl App {
                 }
             }
         }
+        for o in self.attachment_openables() {
+            if !out.iter().any(|x| x.url == o.url) {
+                out.push(o);
+            }
+        }
         out
     }
 
     pub fn open_download(&mut self, url: &str) {
         self.download = Some(DownloadModal::new(url.to_string()));
+    }
+
+    /// Download modal for a presigned URL, saving as `name`.
+    pub fn open_download_named(&mut self, url: &str, name: &str) {
+        let mut m = DownloadModal::new(url.to_string());
+        m.path = default_path(name);
+        m.name = Some(name.to_string());
+        m.refresh();
+        self.download = Some(m);
     }
 
     fn finish_download(&mut self, o: Outcome) {
@@ -642,12 +675,9 @@ impl App {
                     return;
                 };
                 let cap = self.config.download_max_mb * 1024 * 1024;
+                let name = m.save_as();
                 let url = m.url;
-                self.info(format!(
-                    "Downloading {} → {}…",
-                    save_name(&url),
-                    dest.display()
-                ));
+                self.info(format!("Downloading {name} → {}…", dest.display()));
                 self.spawn(async move {
                     let result = fetch(url.clone(), dest.clone(), mk, cap).await;
                     Event::Downloaded { url, dest, result }

@@ -21,18 +21,110 @@ pub struct Bot {
     pub viewer_session_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Role {
+    #[default]
     User,
     Bot,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Message {
     pub role: Role,
     pub text: String,
     /// Transcript entry id, or `pending:<nonce>` for a local send not yet seen in the transcript.
     pub remote_id: Option<String>,
+    /// Files sent with the prompt (store aliases or box paths).
+    pub attachments: Vec<Attachment>,
+}
+
+/// A file attached to a message: the alias/path the backend knows it by and its name.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct Attachment {
+    pub path: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+}
+
+impl Attachment {
+    pub fn is_image(&self) -> bool {
+        self.content_type
+            .as_deref()
+            .is_some_and(|c| c.starts_with("image/"))
+            || gw::AttachmentKind::from_name(&self.name) == gw::AttachmentKind::Image
+    }
+}
+
+/// Bytes uploaded so far, shared with the UI while an upload runs.
+pub type Progress = std::sync::Arc<AtomicU64>;
+
+/// Attachments recorded on a raw transcript entry. The key is undocumented, so this
+/// accepts `attachmentPaths` + `attachmentNames`, or an `attachments` array of strings
+/// or objects (`path`/`alias`, `name`/`fileName`, `sizeBytes`, `contentType`).
+pub fn attachments_from_raw(raw: &serde_json::Value) -> Vec<Attachment> {
+    use serde_json::Value;
+    let strs = |v: Option<&Value>| -> Vec<String> {
+        v.and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let base = |p: &str| p.rsplit(['/', '\\']).next().unwrap_or(p).to_string();
+    for (pk, nk) in [
+        ("attachmentPaths", "attachmentNames"),
+        ("attachment_paths", "attachment_names"),
+    ] {
+        let paths = strs(raw.get(pk));
+        if !paths.is_empty() {
+            let names = strs(raw.get(nk));
+            return paths
+                .into_iter()
+                .enumerate()
+                .map(|(i, p)| Attachment {
+                    name: names.get(i).cloned().unwrap_or_else(|| base(&p)),
+                    path: p,
+                    ..Default::default()
+                })
+                .collect();
+        }
+    }
+    let Some(arr) = raw.get("attachments").and_then(Value::as_array) else {
+        return vec![];
+    };
+    let s = |v: &Value, ks: &[&str]| {
+        ks.iter()
+            .find_map(|k| v.get(*k).and_then(Value::as_str).filter(|s| !s.is_empty()))
+            .map(str::to_string)
+    };
+    arr.iter()
+        .filter_map(|a| match a {
+            Value::String(p) => Some(Attachment {
+                name: base(p),
+                path: p.clone(),
+                ..Default::default()
+            }),
+            Value::Object(_) => {
+                let path = s(a, &["path", "alias", "attachmentPath", "storePath", "url"])?;
+                Some(Attachment {
+                    name: s(a, &["name", "fileName", "filename", "displayName"])
+                        .unwrap_or_else(|| base(&path)),
+                    size: a
+                        .get("sizeBytes")
+                        .or_else(|| a.get("size"))
+                        .and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok())),
+                    content_type: s(a, &["contentType", "mimeType", "mime"]),
+                    path,
+                })
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 #[async_trait]
@@ -61,6 +153,42 @@ pub trait ApiClient: Send + Sync {
     /// Soft notice from the last `list_bots` (e.g. team list failed). Cleared on read.
     fn take_list_notice(&self) -> Option<String> {
         None
+    }
+    /// Send with attachments (aliases from [`ApiClient::upload`]).
+    async fn send_with(
+        &self,
+        bot_id: &str,
+        text: &str,
+        nonce: &str,
+        attachments: &[Attachment],
+    ) -> gw::Result<SendReceipt> {
+        if attachments.is_empty() {
+            self.send(bot_id, text, nonce).await
+        } else {
+            Err(gw::Error::Attachment(gw::UploadFailure::NoCursorSession))
+        }
+    }
+    /// Whether this login can upload attachments (needs a Cursor session).
+    fn can_attach(&self) -> bool {
+        false
+    }
+    /// Upload a file for `bot_id`; `progress` tracks bytes sent.
+    async fn upload(
+        &self,
+        _bot_id: &str,
+        _name: &str,
+        _data: Vec<u8>,
+        _progress: Progress,
+    ) -> gw::Result<gw::UploadedAttachment> {
+        Err(gw::Error::Attachment(gw::UploadFailure::NoCursorSession))
+    }
+    /// Presigned reads for attachment paths/aliases.
+    async fn resolve_attachments(
+        &self,
+        _bot_id: &str,
+        _paths: &[String],
+    ) -> gw::Result<Vec<gw::AttachmentRead>> {
+        Err(gw::Error::Attachment(gw::UploadFailure::NoCursorSession))
     }
 }
 
@@ -130,6 +258,7 @@ pub fn messages_from_entries(entries: &[gw::Entry]) -> Vec<Message> {
                 },
                 text,
                 remote_id: e.id.clone(),
+                attachments: attachments_from_raw(&e.raw),
             })
         })
         .collect()
@@ -207,11 +336,47 @@ impl ApiClient for GatewayApi {
         self.client.delete_agent(bot_id).await.map(|_| ())
     }
     async fn send(&self, bot_id: &str, text: &str, nonce: &str) -> gw::Result<SendReceipt> {
+        self.send_with(bot_id, text, nonce, &[]).await
+    }
+    async fn send_with(
+        &self,
+        bot_id: &str,
+        text: &str,
+        nonce: &str,
+        attachments: &[Attachment],
+    ) -> gw::Result<SendReceipt> {
         let req = gw::SendPrompt {
             client_nonce: Some(nonce.into()),
+            attachment_paths: attachments.iter().map(|a| a.path.clone()).collect(),
+            attachment_names: attachments.iter().map(|a| a.name.clone()).collect(),
             ..gw::SendPrompt::new(bot_id, text)
         };
         self.client.send_prompt(&req).await
+    }
+    fn can_attach(&self) -> bool {
+        self.client.has_cursor_session()
+    }
+    async fn upload(
+        &self,
+        bot_id: &str,
+        name: &str,
+        data: Vec<u8>,
+        progress: Progress,
+    ) -> gw::Result<gw::UploadedAttachment> {
+        self.client
+            .upload_attachment(bot_id, None, name, &data, |p| {
+                progress.store(p.sent, Ordering::Relaxed)
+            })
+            .await
+    }
+    async fn resolve_attachments(
+        &self,
+        bot_id: &str,
+        paths: &[String],
+    ) -> gw::Result<Vec<gw::AttachmentRead>> {
+        self.client
+            .resolve_attachment_reads(bot_id, None, paths)
+            .await
     }
     async fn transcript(&self, bot_id: &str, limit: u32) -> gw::Result<Vec<Message>> {
         Ok(messages_from_entries(
@@ -423,6 +588,61 @@ impl ApiClient for MockClient {
         })
     }
     async fn send(&self, bot_id: &str, text: &str, nonce: &str) -> gw::Result<SendReceipt> {
+        self.send_with(bot_id, text, nonce, &[]).await
+    }
+    fn can_attach(&self) -> bool {
+        true
+    }
+    async fn upload(
+        &self,
+        _bot_id: &str,
+        name: &str,
+        data: Vec<u8>,
+        progress: Progress,
+    ) -> gw::Result<gw::UploadedAttachment> {
+        self.check("BeginGrokBotAttachmentUpload")?;
+        gw::attachments::validate_attachment(name, data.len() as u64)?;
+        if name.starts_with("refuse") {
+            return Err(gw::Error::Attachment(gw::UploadFailure::Refused {
+                reason: gw::UploadRefusal::UnsupportedType,
+                limit_bytes: None,
+            }));
+        }
+        if name.starts_with("usebox") {
+            return Err(gw::Error::Attachment(gw::UploadFailure::UseBox {
+                reason: String::new(),
+            }));
+        }
+        progress.store(data.len() as u64, Ordering::Relaxed);
+        Ok(gw::UploadedAttachment {
+            alias: format!("mock-att-{}", self.id()),
+            name: name.into(),
+            size_bytes: data.len() as u64,
+            content_type: String::new(),
+        })
+    }
+    async fn resolve_attachments(
+        &self,
+        _bot_id: &str,
+        paths: &[String],
+    ) -> gw::Result<Vec<gw::AttachmentRead>> {
+        Ok(paths
+            .iter()
+            .map(|p| gw::AttachmentRead {
+                path: p.clone(),
+                outcome: gw::ReadOutcome::Store,
+                url: format!("https://mock.invalid/{p}"),
+                ..Default::default()
+            })
+            .collect())
+    }
+    async fn send_with(
+        &self,
+        bot_id: &str,
+        text: &str,
+        nonce: &str,
+        attachments: &[Attachment],
+    ) -> gw::Result<SendReceipt> {
         self.check("sendPrompt")?;
         self.require_team_session(bot_id, "sendPrompt")?;
         // Mock texts drive the acceptance status seen by a later check.
@@ -461,6 +681,7 @@ impl ApiClient for MockClient {
                     role: Role::User,
                     text: text.into(),
                     remote_id: Some(mid.clone()),
+                    attachments: attachments.to_vec(),
                 },
                 now,
             ));
@@ -469,6 +690,7 @@ impl ApiClient for MockClient {
                     role: Role::Bot,
                     text: format!("echo: {text}"),
                     remote_id: Some(self.id()),
+                    attachments: vec![],
                 },
                 now + self.reply_delay,
             ));

@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.19.0] - 2026-10-29
+
+### Added
+- `/attach <path…>` (alias `/file`): attach up to 6 files of any type to the next prompt. Tab
+  path completion uses the shared completer (cycling replaces the path token). Quoted paths
+  and `\ ` escapes work. Pasting a file path attaches it instead of typing it.
+- Sizes are checked before uploading: images 25 MiB, video 1 GiB, other files 250 MiB.
+  Empty files, duplicates and a seventh file are refused.
+- Uploads start as soon as a file is staged (grokbot_api 1.2.0 `upload_attachment`: begin,
+  presigned PUT, complete). Chips above the input show the icon, name, size, % progress and
+  ✓/✗. Clicking a chip previews a staged image, ✕ removes it and aborts the upload, and
+  `/attach remove <n>`, `/attach clear` and `/detach [n|all]` do the same from the keyboard.
+- Sending waits for pending uploads, then sends `attachmentPaths`/`attachmentNames`. A failed
+  upload blocks the send and keeps the prompt in the input.
+- Clear messages for refusals (too large, storage full, unsupported type…), desktop-only bots
+  (`USE_BOX`) and logins without a Cursor session.
+- Sent prompts show `[icon name size ⤓]` chips. Clicking the name resolves the attachment
+  (`ResolveGrokBotAttachmentReads`) and opens images in the image viewer. ⤓ opens the download
+  modal with the real file name. Resolved images also join the viewer's n/N list and `/download`.
+  Presigned links are never shown: the modal and notices name only the host.
+- Message attachments are stored in `context.db` (schema v11, `messages.attachments`).
+- Theme parts `attach_chip` and `attach_chip_error` in every shipped theme.
+
+### Notes
+- Verified live once against the real service: one 64×64 PNG to one bot. The upload came back
+  `SINGLE_PUT` to S3 with `Content-Length` and `x-amz-checksum-sha256` headers. Complete returned
+  a path-like alias, `sendPrompt` accepted `attachmentPaths`, and the resolved read returned the
+  same bytes.
+- The gateway transcript does not include attachments, so the chips only show for prompts sent
+  from this install.
+- Built against grokbot_api 1.2.0.
+
 ## [1.18.0] - 2026-10-28
 
 ### Added

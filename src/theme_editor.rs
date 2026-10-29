@@ -3373,6 +3373,8 @@ mod tests {
                 "md_table_border",
                 "image_viewer_info",
                 "image_placeholder",
+                "attach_chip",
+                "attach_chip_error",
                 "download_path",
                 "download_dir",
                 "menu_active",

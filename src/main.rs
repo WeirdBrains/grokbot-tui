@@ -2,6 +2,7 @@
 mod api;
 mod app;
 mod appearance;
+mod attach;
 mod commands;
 mod complete;
 mod config;
@@ -17,6 +18,8 @@ mod input;
 mod keyctx;
 mod keymap;
 mod keys;
+#[cfg(test)]
+mod live_attach_test;
 mod markdown;
 mod menubar;
 mod notify;
@@ -318,7 +321,14 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                 Event::Paste(text) => {
                     // Bracketed paste: keep newlines; never submit.
                     if app.focus == Focus::Input && app.mode == app::InputMode::Normal {
-                        app.input_insert(&text);
+                        let files = attach::pasted_files(&text);
+                        if files.is_empty() || app.api.is_none() {
+                            app.input_insert(&text);
+                        } else {
+                            let paths: Vec<String> =
+                                files.iter().map(|p| p.display().to_string()).collect();
+                            app.attach_paths(&paths);
+                        }
                         dirty = true;
                     }
                 }

@@ -226,6 +226,8 @@ style_slots! {
     MD_TABLE_BORDER = "md_table_border", "Chat", false, "Markdown table borders";
     IMAGE_VIEWER_INFO = "image_viewer_info", "Modals", false, "Image viewer: dimensions, size, n/N, protocol";
     IMAGE_PLACEHOLDER = "image_placeholder", "Chat", false, "[🖼 image] placeholder in replies (/open opens it)";
+    ATTACH_CHIP = "attach_chip", "Chat", false, "Attachment chips above the input and under sent prompts";
+    ATTACH_CHIP_ERROR = "attach_chip_error", "Chat", false, "An attachment chip whose upload failed";
     DOWNLOAD_PATH = "download_path", "Modals", false, "Download modal: the save-path field";
     DOWNLOAD_DIR = "download_dir", "Modals", false, "Download modal: directories in the folder browser";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
@@ -407,6 +409,14 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
         s::IMAGE_PLACEHOLDER => StyleSpec {
             bg: Some(r(c::HEADER)),
             ..fg(c::ACCENT)
+        },
+        s::ATTACH_CHIP => StyleSpec {
+            bg: Some(r(c::HEADER)),
+            ..fg(c::ACCENT)
+        },
+        s::ATTACH_CHIP_ERROR => StyleSpec {
+            bg: Some(r(c::HEADER)),
+            ..fg(c::DANGER)
         },
         s::MENU_BAR => fg(c::TEXT),
         s::MENU_ACTIVE => bold(StyleSpec {
@@ -748,6 +758,12 @@ pub fn image_viewer_info() -> Style {
 pub fn image_placeholder() -> Style {
     st(slot::IMAGE_PLACEHOLDER)
 }
+pub fn attach_chip() -> Style {
+    st(slot::ATTACH_CHIP)
+}
+pub fn attach_chip_error() -> Style {
+    st(slot::ATTACH_CHIP_ERROR)
+}
 pub fn download_button() -> Style {
     st(slot::DOWNLOAD_BUTTON)
 }
@@ -995,6 +1011,7 @@ mod tests {
                     || s.key == "reaction_pill"
                     || s.key == "react_button"
                     || s.key.starts_with("download_")
+                    || s.key.starts_with("attach_")
                     || s.key.starts_with("md_")
                     || s.key.starts_with("image_")
                     || s.key == "menu_bar"

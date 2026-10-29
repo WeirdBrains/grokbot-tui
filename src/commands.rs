@@ -134,6 +134,22 @@ pub fn registry() -> Registry {
                 run: react,
             },
             Command {
+                name: "attach",
+                aliases: &["file"],
+                usage: "/attach <path…> | remove <n> | clear",
+                help: "Attach files to your next prompt (up to 6; images 25 MiB, video 1 GiB, other files 250 MiB). Tab completes paths",
+                complete: attach_complete,
+                run: attach,
+            },
+            Command {
+                name: "detach",
+                aliases: &["unattach"],
+                usage: "/detach [n|all]",
+                help: "Remove a staged attachment (the last one, n-th, or all); aborts its upload",
+                complete: detach_complete,
+                run: detach,
+            },
+            Command {
                 name: "view",
                 aliases: &["image"],
                 usage: "/view [n]",
@@ -618,6 +634,103 @@ pub fn open_item(app: &mut App, args: &str) -> Result<()> {
 
 /// `/react` / `/unreact` arguments: the emoji (on the target message first, then recent,
 /// then common, then all), and the optional message index `n`.
+fn attach_complete(app: &App, idx: usize, q: &str) -> Vec<crate::complete::Candidate> {
+    let words: Vec<&str> = app.input.split_whitespace().collect();
+    if words.get(1).is_some_and(|w| *w == "remove") && idx >= 1 {
+        return detach_complete(app, 0, q);
+    }
+    let mut out = vec![];
+    if idx == 0 {
+        for w in ["remove", "clear"] {
+            out.push(crate::complete::Candidate {
+                replace: w.into(),
+                label: w.into(),
+            });
+        }
+    }
+    out.extend(crate::download::path_candidates(q).into_iter().map(|p| {
+        crate::complete::Candidate {
+            replace: p.replace(' ', "\\ "),
+            label: p,
+        }
+    }));
+    out
+}
+
+fn detach_complete(app: &App, idx: usize, _q: &str) -> Vec<crate::complete::Candidate> {
+    if idx > 0 {
+        return vec![];
+    }
+    let mut out: Vec<crate::complete::Candidate> = app
+        .attach
+        .staged
+        .iter()
+        .enumerate()
+        .map(|(i, s)| crate::complete::Candidate {
+            replace: (i + 1).to_string(),
+            label: format!("{} {}", i + 1, s.name),
+        })
+        .collect();
+    if !out.is_empty() {
+        out.push(crate::complete::Candidate {
+            replace: "all".into(),
+            label: "all".into(),
+        });
+    }
+    out
+}
+
+fn attach(app: &mut App, args: &str) -> Result<()> {
+    let parts = crate::attach::split_args(args);
+    match parts.first().map(String::as_str) {
+        None => {
+            if app.attach.staged.is_empty() {
+                app.info("No attachments. /attach <path…> stages files for your next prompt (Tab completes paths; you can also paste a file path).".into());
+            } else {
+                let list: Vec<String> = app
+                    .attach
+                    .staged
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| {
+                        format!(
+                            "{}: {} ({})",
+                            i + 1,
+                            s.name,
+                            crate::markdown::human_size(s.size)
+                        )
+                    })
+                    .collect();
+                app.info(format!("Attached: {}", list.join(" · ")));
+            }
+        }
+        Some("remove") => detach(app, parts.get(1).map(String::as_str).unwrap_or(""))?,
+        Some("clear") => detach(app, "all")?,
+        Some(_) => app.attach_paths(&parts),
+    }
+    Ok(())
+}
+
+fn detach(app: &mut App, args: &str) -> Result<()> {
+    let n = app.attach.staged.len();
+    if n == 0 {
+        bail!("No attachments to remove.");
+    }
+    match args.trim() {
+        "all" => app.detach_all(),
+        "" => {
+            app.detach(n);
+        }
+        s => {
+            let i: usize = s.parse().context("usage: /detach [n|all]")?;
+            if !app.detach(i) {
+                bail!("No attachment {i} (there are {n}).");
+            }
+        }
+    }
+    Ok(())
+}
+
 fn react_complete(app: &App, idx: usize, q: &str) -> Vec<crate::complete::Candidate> {
     use crate::emoji::Origin;
     let unreact = app.input.trim_start().starts_with("/unreact");

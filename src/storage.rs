@@ -195,7 +195,10 @@ const V10: &str = "CREATE TABLE IF NOT EXISTS reactions (
         PRIMARY KEY (account_id, bot_id, msg_key, emoji)
     );";
 
-const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10];
+/// v10 -> v11: files sent with a message (JSON list of [`crate::api::Attachment`]).
+const V11: &str = "ALTER TABLE messages ADD COLUMN attachments TEXT;";
+
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11];
 
 /// One remembered prompt (newest-first lists).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -650,17 +653,17 @@ impl Store {
         self.ensure_bot(bot_id)?;
         let role = if m.role == Role::User { "user" } else { "bot" };
         self.conn.execute(
-            "INSERT INTO messages(account_id, bot_id, role, text, remote_id, ord)
+            "INSERT INTO messages(account_id, bot_id, role, text, remote_id, ord, attachments)
              VALUES (?1, ?2, ?3, ?4, ?5,
-               (SELECT COALESCE(MAX(ord), 0) + 1 FROM messages WHERE account_id = ?1 AND bot_id = ?2))",
-            params![self.account.id, bot_id, role, m.text, m.remote_id],
+               (SELECT COALESCE(MAX(ord), 0) + 1 FROM messages WHERE account_id = ?1 AND bot_id = ?2), ?6)",
+            params![self.account.id, bot_id, role, m.text, m.remote_id, attachments_json(&m.attachments)],
         )?;
         Ok(())
     }
 
     pub fn messages(&self, bot_id: &str) -> Result<Vec<Message>> {
         let mut st = self.conn.prepare(
-            "SELECT role, text, remote_id FROM messages WHERE account_id = ?1 AND bot_id = ?2 ORDER BY ord IS NULL, ord, id",
+            "SELECT role, text, remote_id, attachments FROM messages WHERE account_id = ?1 AND bot_id = ?2 ORDER BY ord IS NULL, ord, id",
         )?;
         let rows = st.query_map(params![self.account.id, bot_id], |r| {
             let role: String = r.get(0)?;
@@ -672,6 +675,10 @@ impl Store {
                 },
                 text: r.get(1)?,
                 remote_id: r.get(2)?,
+                attachments: r
+                    .get::<_, Option<String>>(3)?
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_default(),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -737,6 +744,14 @@ impl Store {
                     &[&id, &bot_id, &role, &m.text],
                 )?
             };
+            if let Some((rowid, _)) = found
+                && !m.attachments.is_empty()
+            {
+                self.conn.execute(
+                    "UPDATE messages SET attachments = ?2 WHERE id = ?1",
+                    params![rowid, attachments_json(&m.attachments)],
+                )?;
+            }
             let entry = match found {
                 Some(r) => r,
                 None => {
@@ -1020,6 +1035,10 @@ impl Store {
     }
 }
 
+fn attachments_json(a: &[crate::api::Attachment]) -> Option<String> {
+    (!a.is_empty()).then(|| serde_json::to_string(a).unwrap_or_default())
+}
+
 fn user_version(conn: &Connection) -> Result<usize> {
     Ok(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))? as usize)
 }
@@ -1070,6 +1089,7 @@ mod tests {
             role,
             text: t.into(),
             remote_id: None,
+            attachments: vec![],
         }
     }
 
@@ -1078,6 +1098,7 @@ mod tests {
             role,
             text: t.into(),
             remote_id: Some(id.into()),
+            attachments: vec![],
         }
     }
 
@@ -1343,6 +1364,7 @@ mod tests {
                 role: Role::User,
                 text: "hi".into(),
                 remote_id: Some("pending:n1".into()),
+                attachments: vec![],
             },
         )
         .unwrap();
@@ -1382,6 +1404,7 @@ mod tests {
                 role: Role::User,
                 text: "x".into(),
                 remote_id: Some("pending:n2".into()),
+                attachments: vec![],
             },
         )
         .unwrap();
@@ -1493,6 +1516,7 @@ mod tests {
                 role: Role::User,
                 text: "mine".into(),
                 remote_id: Some("pending:n".into()),
+                attachments: vec![],
             },
         )
         .unwrap();
@@ -1628,7 +1652,7 @@ mod prompt_history_store_tests {
             // Roll the schema back to v8 (no `bot` column), as an older release left it.
             s.conn
                 .execute_batch(
-                    "ALTER TABLE prompt_history DROP COLUMN bot; PRAGMA user_version = 8;",
+                    "ALTER TABLE prompt_history DROP COLUMN bot; ALTER TABLE messages DROP COLUMN attachments; PRAGMA user_version = 8;",
                 )
                 .unwrap();
         }
@@ -1637,5 +1661,36 @@ mod prompt_history_store_tests {
         let e = s.prompt_entries(10).unwrap();
         assert_eq!(e[0].text, "old prompt");
         assert_eq!(e[0].bot, None);
+    }
+
+    #[test]
+    fn attachments_persist_and_merge_onto_remote_rows() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Store::open(d.path(), None).unwrap();
+        let a = crate::api::Attachment {
+            path: "alias-1".into(),
+            name: "t.png".into(),
+            size: Some(3),
+            content_type: None,
+        };
+        let pending = Message {
+            role: Role::User,
+            text: "hi".into(),
+            remote_id: Some("pending:n".into()),
+            attachments: vec![a.clone()],
+        };
+        s.append_message("b", &pending).unwrap();
+        assert_eq!(s.messages("b").unwrap()[0].attachments, vec![a.clone()]);
+        // The server copy adopts the pending row and keeps the attachments.
+        let remote = Message {
+            remote_id: Some("srv-1".into()),
+            attachments: vec![],
+            ..pending.clone()
+        };
+        s.merge_remote("b", &[remote], false).unwrap();
+        let m = s.messages("b").unwrap();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].remote_id.as_deref(), Some("srv-1"));
+        assert_eq!(m[0].attachments, vec![a]);
     }
 }

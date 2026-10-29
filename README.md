@@ -137,8 +137,24 @@ Remote files stream in the background into `<name>.part` and are renamed when do
 files are copied. The size is capped by `downloads.max_mb` (default 25). The result shows as
 a notification. Theme parts: `download_path`, `download_dir`.
 
-Sending attachments isn't supported: the Grok Bot gateway API has no upload method (see the
-CHANGELOG for 1.18.0).
+### Attachments
+
+`/attach <path…>` (alias `/file`) attaches files to your next prompt, up to 6. Tab completes
+paths (cycling replaces the path, it never appends), and pasting a file path attaches the file.
+Uploads start right away. Chips above the input show each file's icon, name, size and
+progress (✓ done, ✗ failed). Click a chip to preview an image, and click ✕ to remove it and
+abort its upload. `/attach remove <n>`, `/attach clear` and `/detach [n|all]` remove from the
+keyboard. Sending waits for uploads to finish. A failed upload keeps your prompt in the input.
+
+Any file type can be attached. The client checks sizes up front: images 25 MiB, video 1 GiB,
+everything else 250 MiB. The server has the final say and its refusal reason is shown. A bot
+that only takes files through the desktop app says so. Attachments need a Cursor session
+(`/login desktop` or `/login cursor`); plain gateway logins can't upload.
+
+Sent prompts show their files as `[🖼 name size ⤓]` chips. Click the name to open an image in
+the viewer, or ⤓ for the download modal. The link is resolved when you click and is never
+shown. The gateway transcript doesn't record attachments, so the chips only appear on prompts
+sent from this grokbot-tui. Theme parts: `attach_chip`, `attach_chip_error`.
 
 ### Newlines in the prompt
 

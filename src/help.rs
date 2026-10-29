@@ -214,6 +214,13 @@ in between quits.
                                emoji picker: type to search (vim: / first), arrows/hjkl or
                                wheel move, Enter or click toggles, Esc/click outside closes. Stored locally: the Grok Bot API has
                                no reaction endpoint, so bots and other clients don't see them
+  /attach <path…>              Attach files to your next prompt (alias /file; up to 6). Tab
+                               completes paths; paste a file path to attach it. Uploads
+                               start right away; chips above the input show progress (✓/✗),
+                               click a chip to preview, ✕ removes it. Sending waits for
+                               uploads. Limits: images 25 MiB, video 1 GiB, others 250 MiB
+                               (the server is final). Needs /login desktop or /login cursor.
+                               /attach remove <n>, /attach clear, /detach [n|all]
   /download [n|list]           Save an image or file from the bot's replies (newest; n=2 the
                                one before; vim NORMAL: d; alias /save). Replies with images or
                                file links get [⤓] name buttons; click one to open the modal:
