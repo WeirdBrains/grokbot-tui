@@ -1,5 +1,7 @@
 # grokbot-tui — Grok Bot TUI
 
+[![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+
 A terminal UI for Grok Bot, written in Rust (2024 edition, Rust 1.89 or newer) with ratatui + crossterm.
 The `grokbot-tui` binary is this repository's single crate ([`src/`](src)). All networking goes through the
 [`grokbot_api`](https://crates.io/crates/grokbot_api) crate from crates.io: an async client for every known
@@ -227,6 +229,27 @@ current tasks." (plus your text) as a normal prompt; change the text with
 `commands.status_prompt`.
 
 Theme parts: `collapse_button`, `sidebar_strip`.
+
+### Video, GIFs and music (1.24.0)
+
+Videos and animated GIFs play **inside the bubble**, scaled like images (capped at
+`images.inline_max_rows`), with a one-row bar under them: **[▶]/[⏸]** toggles playback,
+clicking the bar seeks, and the label shows elapsed/total time (GIFs: frame position).
+Clicking the picture opens the full-size player (Space play/pause, ←/→ seek 5 s, Home,
+Esc/q close). Music links and attachments get the same bar. Only one video or track plays
+at a time, and it pauses when scrolled out of view; GIFs loop on their own.
+
+| Build | Decodes | Download |
+|---|---|---|
+| standard | GIF; H.264 MP4 (OpenH264, compiled in); MP3, AAC/M4A, FLAC, Vorbis, WAV. Other video codecs use a system `ffmpeg` if one is on PATH | `grokbot-tui-installer.sh/.ps1`, .deb/.rpm/.msi/.pkg, Homebrew, AUR |
+| -ffmpeg | the above, plus FFmpeg linked in statically: nearly every codec and container, nothing to install | `grokbot-tui-ffmpeg-<target>.tar.xz/.zip` |
+
+`grokbot-tui-setup.sh` / `grokbot-tui-setup.ps1` (release assets) ask which build to
+install (`--variant standard|ffmpeg` / `-Variant` to skip the question).
+
+Prefs: `media.inline` (`on`), `media.fps` (`10`, 1–30), `media.decoder`
+(`auto`|`builtin`|`ffmpeg`|`system`), `media.gif_autoplay` (`on`). `/media
+pause|stop|decoders`. Theme part: `media_bar`. On Linux, sound needs ALSA (libasound2).
 
 ### Attachments panel
 
@@ -559,7 +582,10 @@ separate "notices (not saved)" section below the chat, and never written to the 
 
 ## License
 
-BSD 3-Clause. See [LICENSE](LICENSE).
+GPL-3.0-or-later since 1.24.0 (see [LICENSE](LICENSE)); releases up to and including 1.23.0
+remain available under BSD-3-Clause. Third-party components, including the bundled OpenH264
+decoder and (in the `-ffmpeg` builds) FFmpeg, are listed in [THIRD_PARTY.md](THIRD_PARTY.md);
+`/license` shows both in the app. The `grokbot_api` crate keeps its own license.
 
 ## Troubleshooting
 

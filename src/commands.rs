@@ -182,6 +182,22 @@ pub fn registry() -> Registry {
                 run: sidebar,
             },
             Command {
+                name: "license",
+                aliases: &["licence", "third-party"],
+                usage: "/license [full]",
+                help: "Licence (GPL-3.0-or-later) and third-party notices, incl. OpenH264's patent caveat; `full` shows the GPL text",
+                complete: license_complete,
+                run: license,
+            },
+            Command {
+                name: "media",
+                aliases: &["play"],
+                usage: "/media [pause|stop|decoders]",
+                help: "Inline video/GIF/music: pause or stop everything, or list the decoders in this build",
+                complete: media_complete,
+                run: media,
+            },
+            Command {
                 name: "attachments",
                 aliases: &["files"],
                 usage: "/attachments [show|hide|toggle]",
@@ -759,6 +775,46 @@ fn sidebar(app: &mut App, args: &str) -> Result<()> {
         _ => bail!("Usage: /sidebar [collapse|expand|toggle]"),
     };
     app.set_sidebar_collapsed(on);
+    Ok(())
+}
+
+fn license_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(["full"])
+    } else {
+        vec![]
+    }
+}
+
+fn license(app: &mut App, args: &str) -> Result<()> {
+    app.show_license(args.trim() == "full");
+    Ok(())
+}
+
+fn media_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(["pause", "stop", "decoders"])
+    } else {
+        vec![]
+    }
+}
+
+fn media(app: &mut App, args: &str) -> Result<()> {
+    match args.trim() {
+        "" | "decoders" => app.info(format!(
+            "Media decoders: {}. Pref media.decoder = {:?}.",
+            crate::media::decoders_summary(),
+            app.config.media_decoder
+        )),
+        "pause" => {
+            let keys: Vec<String> = app.media.items.keys().cloned().collect();
+            for k in keys {
+                app.media_cmd(&k, crate::media::player::Cmd::Pause);
+            }
+        }
+        "stop" => app.media_stop_all(),
+        _ => bail!("Usage: /media [pause|stop|decoders]"),
+    }
     Ok(())
 }
 

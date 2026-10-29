@@ -240,6 +240,7 @@ style_slots! {
     ATTACH_PANEL_FRAME = "attach_panel_frame", "Sidebar and lists", false, "Attachments panel border and title";
     ATTACH_PANEL_FILTER = "attach_panel_filter", "Sidebar and lists", false, "Attachments panel search box";
     ATTACH_PANEL_COUNT = "attach_panel_count", "Sidebar and lists", false, "Attachment count on the collapsed panel strip";
+    MEDIA_BAR = "media_bar", "Chat", false, "Video/GIF/music progress bar";
     DOWNLOAD_PATH = "download_path", "Modals", false, "Download modal: the save-path field";
     DOWNLOAD_DIR = "download_dir", "Modals", false, "Download modal: directories in the folder browser";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
@@ -815,6 +816,9 @@ pub fn collapse_button() -> Style {
 pub fn sidebar_strip() -> Style {
     st(slot::SIDEBAR_STRIP)
 }
+pub fn media_bar() -> Style {
+    st(slot::MEDIA_BAR)
+}
 pub fn attach_panel_frame() -> Style {
     st(slot::ATTACH_PANEL_FRAME)
 }
@@ -1083,6 +1087,7 @@ mod tests {
                     || s.key == "presence_indicator"
                     || s.key == "collapse_button"
                     || s.key == "sidebar_strip"
+                    || s.key == "media_bar"
                     || s.key.starts_with("md_")
                     || s.key.starts_with("image_")
                     || s.key == "menu_bar"

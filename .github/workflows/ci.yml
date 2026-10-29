@@ -24,10 +24,16 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
+      - name: System libraries (ALSA for audio)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
       - name: Format
         run: cargo fmt --check
+      # Default features; the -ffmpeg feature is linted in build-ffmpeg-variant.yml
+      # (it compiles FFmpeg from source).
       - name: Clippy
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
       - name: Test
         run: cargo test --locked
       - name: Release build

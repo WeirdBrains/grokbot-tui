@@ -104,17 +104,17 @@ Pull requests and pushes to other branches run `ci.yml`; `release.yml` also runs
 
 ## License metadata
 
-The project is licensed under BSD-3-Clause (`LICENSE` at the repo root). Each format
+The project is licensed under GPL-3.0-or-later since 1.24.0 (1.23.0 and earlier stay BSD-3-Clause) (`LICENSE` at the repo root). Each format
 takes the license from `[package] license` in `Cargo.toml`:
 
 | Format | License field | License text shipped |
 |---|---|---|
 | Archives (`.tar.xz` / `.zip`) | n/a | `LICENSE` (cargo-dist includes it automatically) |
-| Homebrew formula | `license "BSD-3-Clause"` | in the archive |
-| `.deb` | `debian/copyright`: `License: BSD-3-Clause` | full text in `/usr/share/doc/grokbot-tui/copyright` |
-| `.rpm` | `License: BSD-3-Clause` | `/usr/share/licenses/grokbot-tui/LICENSE` |
-| AUR PKGBUILDs | `license=('BSD-3-Clause')` (SPDX, as Arch now requires) | `/usr/share/licenses/<pkgname>/LICENSE` |
-| winget | `License: BSD-3-Clause`, `LicenseUrl`, `Copyright` | link to `LICENSE` at the release tag |
+| Homebrew formula | `license "GPL-3.0-or-later"` | in the archive |
+| `.deb` | `debian/copyright`: `License: GPL-3.0-or-later` | notice, pointing at /usr/share/common-licenses/GPL-3 in `/usr/share/doc/grokbot-tui/copyright` |
+| `.rpm` | `License: GPL-3.0-or-later` | `/usr/share/licenses/grokbot-tui/LICENSE` |
+| AUR PKGBUILDs | `license=('GPL-3.0-or-later')` (SPDX, as Arch now requires) | `/usr/share/licenses/<pkgname>/LICENSE` |
+| winget | `License: GPL-3.0-or-later`, `LicenseUrl`, `Copyright` | link to `LICENSE` at the release tag |
 | `.msi` / `.pkg` | none | not included in the installer (the binary only) |
 
 To also install the license file with the MSI, follow the "license sidecar" comments in

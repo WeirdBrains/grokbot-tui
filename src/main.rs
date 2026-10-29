@@ -27,6 +27,7 @@ mod live_attach_test;
 #[cfg(test)]
 mod live_presence_test;
 mod markdown;
+mod media;
 mod menubar;
 mod notify;
 mod notify_rules;
@@ -207,6 +208,7 @@ fn main() -> Result<()> {
         hook(info);
     }));
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&mut term, &mut app)));
+    app.media_stop_all();
     app.presence_release_blocking();
     let _ = execute!(std::io::stdout(), event::DisableFocusChange);
     disable_shift_enter();
@@ -709,6 +711,10 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 app.set_attachments_panel(!app.config.attachments_panel);
                 return true;
             }
+            if app.media.modal.is_some() {
+                app.media_modal_key(k);
+                return true;
+            }
             if app.image_view.is_some() {
                 match k.code {
                     KeyCode::Esc | KeyCode::Char('q') => app.close_image_view(),
@@ -940,6 +946,11 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 _ => {}
             }
             app.picker_moved(before);
+        }
+        Event::Mouse(m) if app.media.modal.is_some() => {
+            if let MouseEventKind::Down(MouseButton::Left) = m.kind {
+                app.media_modal_click(m.column, m.row)
+            }
         }
         Event::Mouse(m) if app.image_view.is_some() => {
             if let MouseEventKind::Down(MouseButton::Left) = m.kind {

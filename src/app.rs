@@ -406,6 +406,16 @@ pub enum Event {
         dest: std::path::PathBuf,
         result: std::result::Result<u64, String>,
     },
+    /// A media item's player started (or failed to).
+    MediaReady {
+        key: String,
+        ctl: std::result::Result<std::sync::mpsc::Sender<crate::media::player::Cmd>, String>,
+    },
+    /// A frame or progress from a media player thread.
+    Media {
+        key: String,
+        out: crate::media::player::Out,
+    },
     /// An inline image finished loading.
     InlineLoaded {
         key: String,
@@ -550,6 +560,8 @@ pub struct App {
     pub inline: crate::inline::Inline,
     /// Inline image slots in the current feed (set when the feed cache is built).
     pub inline_slots: Vec<crate::inline::Slot>,
+    /// Inline video, GIFs and music (1.24.0).
+    pub media: crate::media::Media,
     /// The image viewer modal.
     pub image_view: Option<crate::imageview::ImageView>,
     pub image_load_seq: u64,
@@ -785,6 +797,7 @@ impl App {
             click_other: false,
             inline: Default::default(),
             inline_slots: vec![],
+            media: Default::default(),
             image_view: None,
             image_load_seq: 0,
             image_picker: ratatui_image::picker::Picker::halfblocks(),
@@ -872,6 +885,11 @@ impl App {
 
     /// A sender for tasks that report back themselves (they must count in `inflight`).
     pub(crate) fn event_sender(&self) -> mpsc::UnboundedSender<Event> {
+        self.tx.clone()
+    }
+
+    /// A sender for events from non-async threads (media players).
+    pub(crate) fn event_tx(&self) -> mpsc::UnboundedSender<Event> {
         self.tx.clone()
     }
 
@@ -1082,6 +1100,8 @@ impl App {
             Event::Uploaded { id, result } => self.on_uploaded(id, result),
             Event::BrowserLoaded { id, url, result } => self.on_browser_loaded(id, url, result),
             Event::InlineLoaded { key, result } => self.on_inline_loaded(key, result),
+            Event::MediaReady { key, ctl } => self.on_media_ready(key, ctl),
+            Event::Media { key, out } => self.on_media(key, out),
             Event::Presence {
                 epoch,
                 active,
@@ -1453,6 +1473,7 @@ impl App {
     // ------------------------------------------------------------ session lifecycle
 
     fn reset_session(&mut self) {
+        self.media_stop_all();
         self.epoch += 1;
         self.presence = Default::default();
         self.api = None;
@@ -1882,6 +1903,9 @@ impl App {
 
     /// Switch the body to bot `i`'s chat: restore from the DB, then poll its transcript.
     pub fn select_bot(&mut self, i: usize) {
+        if self.active != Some(i) {
+            self.media_stop_all();
+        }
         if i >= self.bots.len() {
             return;
         }
@@ -2457,6 +2481,7 @@ impl App {
             || self.completion.is_some()
             || self.menu.open.is_some()
             || self.image_view.is_some()
+            || self.media.modal.is_some()
             || self.browser.is_some()
             || self.react_picker.is_some()
             || self.download.is_some()
@@ -3544,6 +3569,9 @@ impl App {
             self.body_sel = None;
         }
         if self.attpanel_click(col, row) {
+            return;
+        }
+        if self.media_click(col, row) {
             return;
         }
         if self.header_toggle_area.contains(at) {

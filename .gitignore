@@ -4,3 +4,4 @@ target/
 .cursor/
 .vscode/
 .idea/
+/target-*

@@ -224,6 +224,15 @@ jobs:
     with:
       plan: ${{ needs.plan.outputs.val }}
     secrets: inherit
+
+  custom-build-ffmpeg-variant:
+    needs:
+      - plan
+      - build-local-artifacts
+    uses: ./.github/workflows/build-ffmpeg-variant.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit
   # Determines if we should publish/announce
   host:
     needs:
@@ -231,8 +240,9 @@ jobs:
       - build-local-artifacts
       - build-global-artifacts
       - custom-build-linux-packages
+      - custom-build-ffmpeg-variant
     # Only run if we're "publishing", and only if plan, local and global didn't fail (skipped is fine)
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.custom-build-linux-packages.result == 'skipped' || needs.custom-build-linux-packages.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.custom-build-linux-packages.result == 'skipped' || needs.custom-build-linux-packages.result == 'success') && (needs.custom-build-ffmpeg-variant.result == 'skipped' || needs.custom-build-ffmpeg-variant.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: "ubuntu-22.04"

@@ -358,11 +358,70 @@ fn inline_slot(
         rows,
         cols,
         right,
+        media: None,
     });
     lines.push(first);
     buttons.push(None);
     for _ in 1..rows {
         lines.push(Line::default());
+        buttons.push(None);
+    }
+}
+
+/// A video, GIF or music slot: the picture (videos/GIFs, once the first frame is in) and a
+/// one-row player bar under it. Loads lazily like images.
+#[allow(clippy::too_many_arguments)]
+fn media_slot(
+    app: &App,
+    lines: &mut Vec<Line<'static>>,
+    buttons: &mut Vec<Option<String>>,
+    slots: &mut Vec<crate::inline::Slot>,
+    media_wants: &mut Vec<(String, crate::media::Kind, String)>,
+    target: &str,
+    label: &str,
+    kind: crate::media::Kind,
+    bubble: usize,
+    right: bool,
+) {
+    let key = format!("{}{target}", crate::media::PREFIX);
+    if !app.media.items.contains_key(&key) {
+        media_wants.push((key.clone(), kind, label.to_string()));
+    }
+    let size = if kind == crate::media::Kind::Audio {
+        None
+    } else {
+        app.inline.size_of(
+            &key,
+            bubble.min(u16::MAX as usize) as u16,
+            app.config.inline_max_rows,
+            &app.image_picker,
+        )
+    };
+    let (cols, rows) = size.unwrap_or(((bubble.min(60)) as u16, 0));
+    let icon = match kind {
+        crate::media::Kind::Audio => "🎵",
+        crate::media::Kind::Gif => "🖼",
+        crate::media::Kind::Video => "🎞",
+    };
+    slots.push(crate::inline::Slot {
+        key,
+        url: target.to_string(),
+        line: lines.len(),
+        rows,
+        cols,
+        right,
+        media: Some(kind),
+    });
+    for i in 0..=rows {
+        let mut l = if i == 0 {
+            Line::from(theme::image_placeholder().span(format!("[{icon} {label}]")))
+        } else {
+            Line::default()
+        };
+        if right {
+            l = l.alignment(Alignment::Right);
+        }
+        lines.push(l);
         buttons.push(None);
     }
 }
@@ -437,6 +496,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     if app.image_view.is_some() {
         crate::imageview::draw(f, app);
+    }
+    if app.media.modal.is_some() {
+        crate::media::modal::draw(f, app);
     }
     draw_toasts(f, app);
     if let Some(tip) = app.tooltip.tip.clone() {
@@ -629,6 +691,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             app.inline.generation,
             app.config.images_inline,
             app.config.inline_max_rows,
+            app.config.media_inline,
         )
             .hash(&mut h);
         h.finish()
@@ -666,6 +729,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         let mut owners: Vec<Option<String>> = vec![];
         let mut slots: Vec<crate::inline::Slot> = vec![];
         let mut wants: Vec<String> = vec![];
+        let mut media_wants: Vec<(String, crate::media::Kind, String)> = vec![];
         let mut starts: Vec<usize> = vec![];
         for (i, e) in app.feed().iter().enumerate() {
             if i > 0 {
@@ -696,8 +760,31 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                     dl.push((lines.len(), hits));
                     lines.push(l);
                     buttons.push(None);
+                    if app.config.media_inline {
+                        for a in atts.iter() {
+                            let Some(kind) = crate::media::kind_of(&a.name) else {
+                                continue;
+                            };
+                            media_slot(
+                                app,
+                                &mut lines,
+                                &mut buttons,
+                                &mut slots,
+                                &mut media_wants,
+                                &format!("{}{}", crate::attach::SCHEME, a.path),
+                                &a.name,
+                                kind,
+                                bubble,
+                                true,
+                            );
+                        }
+                    }
                     if app.config.images_inline {
-                        for a in atts.iter().filter(|a| a.is_image()) {
+                        for a in atts.iter().filter(|a| {
+                            a.is_image()
+                                && !(app.config.media_inline
+                                    && crate::media::kind_of(&a.name).is_some())
+                        }) {
                             let key = format!("{}{}", crate::attach::SCHEME, a.path);
                             let url = app
                                 .fresh_read(&a.path)
@@ -719,11 +806,34 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                     }
                 }
             }
+            if e.kind == EntryKind::Bot && app.config.media_inline {
+                for o in crate::markdown::openables(&e.text) {
+                    let Some(kind) = crate::media::kind_of(&o.url) else {
+                        continue;
+                    };
+                    let label = if o.label.trim().is_empty() || o.label == o.url {
+                        crate::download::save_name(&o.url)
+                    } else {
+                        o.label.clone()
+                    };
+                    media_slot(
+                        app,
+                        &mut lines,
+                        &mut buttons,
+                        &mut slots,
+                        &mut media_wants,
+                        &o.url,
+                        &label,
+                        kind,
+                        bubble,
+                        false,
+                    );
+                }
+            }
             if e.kind == EntryKind::Bot && app.config.images_inline {
-                for o in crate::markdown::openables(&e.text)
-                    .into_iter()
-                    .filter(|o| o.image)
-                {
+                for o in crate::markdown::openables(&e.text).into_iter().filter(|o| {
+                    o.image && !(app.config.media_inline && crate::media::kind_of(&o.url).is_some())
+                }) {
                     inline_slot(
                         app,
                         &mut lines,
@@ -792,6 +902,9 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         app.inline_slots = slots;
         for k in wants {
             app.inline_want(&k);
+        }
+        for (k, kind, label) in media_wants {
+            app.media_want(&k, kind, &label);
         }
     }
     let mut extra: Vec<Line<'static>> = vec![];

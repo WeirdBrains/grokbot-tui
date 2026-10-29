@@ -385,6 +385,16 @@ impl App {
     /// View an attachment: images in the viewer, text in the built-in browser, else the
     /// system app (SSH asks first).
     pub fn attachment_view(&mut self, it: &Item) {
+        if let Some(kind) = crate::media::kind_of(&it.name) {
+            let target = match &it.src {
+                Src::Sent(p) => format!("{}{p}", crate::attach::SCHEME),
+                Src::Url(u) => u.clone(),
+            };
+            let key = format!("{}{target}", crate::media::PREFIX);
+            self.media_want(&key, kind, &it.name);
+            self.open_media_modal(&key);
+            return;
+        }
         match &it.src {
             Src::Sent(path) => self.open_attachment(path, crate::attach::Then::View),
             Src::Url(url) => {

@@ -32,7 +32,11 @@ formula = "grokbot-tui"
 tap = "WeirdBrains/homebrew-tap"
 # Extra jobs (reusable workflows in .github/workflows/):
 # .deb/.rpm built alongside dist's artifacts, so they are attached to the release.
-global-artifacts-jobs = ["./build-linux-packages"]
+# The -ffmpeg variant archives and the grokbot-tui-setup.{sh,ps1} wrapper installers
+# (choose standard or -ffmpeg) are built by build-ffmpeg-variant.yml.
+global-artifacts-jobs = ["./build-linux-packages", "./build-ffmpeg-variant"]
+# Shipped in every archive next to LICENSE and README.
+include = ["THIRD_PARTY.md"]
 # Publish jobs: render the AUR PKGBUILD + winget manifests from the real release sha256s.
 # Automatic Homebrew publishing is commented out until the WeirdBrains/homebrew-tap repo
 # and the HOMEBREW_TAP_TOKEN secret exist. To re-enable it, swap the two lines below and
@@ -41,6 +45,10 @@ global-artifacts-jobs = ["./build-linux-packages"]
 publish-jobs = ["./publish-manifests"]
 # publish-manifests uploads its files to the GitHub release.
 github-custom-job-permissions = { "publish-manifests" = { contents = "write" } }
+
+# rodio/cpal (audio) link ALSA on Linux.
+[dist.dependencies.apt]
+libasound2-dev = "*"
 
 [dist.mac-pkg-config]
 # Reverse-DNS bundle identifier for the macOS .pkg.

@@ -86,6 +86,8 @@ pub struct Slot {
     pub cols: u16,
     /// Right-aligned (your own messages).
     pub right: bool,
+    /// Video/GIF/music: a one-row player bar follows the picture rows.
+    pub media: Option<crate::media::Kind>,
 }
 
 impl App {
@@ -134,6 +136,48 @@ impl App {
         self.feed_cache = None;
     }
 
+    /// The one-row player bar under a media slot: [▶] ━━━──── 0:12/1:03.
+    fn draw_media_bar(&mut self, buf: &mut ratatui::buffer::Buffer, inner: Rect, s: &Slot, y: u16) {
+        use ratatui::widgets::Widget;
+        let Some(it) = self.media.items.get(&s.key) else {
+            return;
+        };
+        let w = s.cols.max(24).min(inner.width);
+        let x = if s.right {
+            inner.x + inner.width.saturating_sub(w)
+        } else {
+            inner.x
+        };
+        let (b, bar, l) = crate::media::bar_parts(it, w as usize);
+        let bw = b.chars().count() as u16;
+        let barw = bar.chars().count() as u16;
+        let line = ratatui::text::Line::from(vec![
+            crate::theme::download_button().span(b),
+            crate::theme::media_bar().span(bar),
+            crate::theme::muted().span(l),
+        ]);
+        let r = Rect::new(x, y, w, 1);
+        for xx in r.x..r.x + r.width {
+            if let Some(c) = buf.cell_mut((xx, y)) {
+                c.set_symbol(" ");
+            }
+        }
+        ratatui::widgets::Paragraph::new(line).render(r, buf);
+        self.media.hits.push((
+            Rect::new(x, y, bw, 1),
+            s.key.clone(),
+            crate::media::Part::Button,
+        ));
+        if barw > 1 {
+            self.media.hits.push((
+                Rect::new(x + bw + 1, y, barw - 1, 1),
+                s.key.clone(),
+                crate::media::Part::Bar,
+            ));
+        }
+        self.media.shown.push(s.key.clone());
+    }
+
     /// Draw the visible, fully on-screen inline images and their click areas.
     pub fn draw_inline(
         &mut self,
@@ -145,11 +189,23 @@ impl App {
         use ratatui::widgets::Widget;
         let slots = std::mem::take(&mut self.inline_slots);
         let mut sig: u64 = 0;
+        self.media.hits.clear();
+        self.media.pics.clear();
+        self.media.shown.clear();
         for s in &slots {
             let Some(&start) = row_of_line.get(s.line) else {
                 continue;
             };
             let y = start as isize - off as isize;
+            if s.media.is_some() {
+                let by = y + s.rows as isize;
+                if by >= 0 && by < inner.height as isize {
+                    self.draw_media_bar(buf, inner, s, inner.y + by as u16);
+                }
+                if s.rows == 0 {
+                    continue;
+                }
+            }
             if y < 0 || y + s.rows as isize > inner.height as isize {
                 continue; // partly visible: keep the placeholder text
             }
@@ -183,6 +239,10 @@ impl App {
                 sig = sig
                     .wrapping_mul(31)
                     .wrapping_add((r.x as u64) << 32 | (r.y as u64) << 16 | s.line as u64);
+                if s.media.is_some() {
+                    self.media.pics.push((r, s.key.clone()));
+                    continue;
+                }
                 for yy in r.y..r.y + r.height {
                     self.link_hits.push(crate::ui::LinkHit {
                         x: r.x,
@@ -195,6 +255,7 @@ impl App {
             }
         }
         self.inline_slots = slots;
+        self.media_after_draw();
         if sig != self.inline.shown_sig {
             self.inline.shown_sig = sig;
             if self.image_picker.protocol_type() != ratatui_image::picker::ProtocolType::Halfblocks

@@ -97,6 +97,14 @@ pub const DEFAULT_STATUS_PROMPT: &str =
 pub const PREF_IMAGES_INLINE: &str = "images.inline";
 /// Height cap for inline images, in rows (global, 2..=60).
 pub const PREF_IMAGES_INLINE_MAX_ROWS: &str = "images.inline_max_rows";
+/// Play videos, GIFs and music inline in chat bubbles (global, on|off).
+pub const PREF_MEDIA_INLINE: &str = "media.inline";
+/// Video decoder order: auto|builtin|ffmpeg|system.
+pub const PREF_MEDIA_DECODER: &str = "media.decoder";
+/// Frames per second drawn for video (1..=30).
+pub const PREF_MEDIA_FPS: &str = "media.fps";
+/// Animated GIFs loop on their own (on|off).
+pub const PREF_GIF_AUTOPLAY: &str = "media.gif_autoplay";
 
 /// `links.open_with`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -152,6 +160,10 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_CLICK_TO_REACT,
     PREF_IMAGES_INLINE,
     PREF_IMAGES_INLINE_MAX_ROWS,
+    PREF_MEDIA_INLINE,
+    PREF_MEDIA_DECODER,
+    PREF_MEDIA_FPS,
+    PREF_GIF_AUTOPLAY,
 ];
 
 /// Which block glyphs draw the big header title (pref `ui.title_glyphs`).
@@ -263,6 +275,14 @@ pub struct Config {
     pub images_inline: bool,
     /// `images.inline_max_rows`.
     pub inline_max_rows: u16,
+    /// `media.inline`.
+    pub media_inline: bool,
+    /// `media.decoder`.
+    pub media_decoder: crate::media::Decoder,
+    /// `media.fps`.
+    pub media_fps: u32,
+    /// `media.gif_autoplay`.
+    pub gif_autoplay: bool,
     /// `commands.status_prompt`.
     pub status_prompt: String,
     /// `keys.esc_alt_timeout_ms`.
@@ -305,6 +325,10 @@ impl Default for Config {
             idle_minutes: DEFAULT_IDLE_MINUTES,
             images_inline: true,
             inline_max_rows: 12,
+            media_inline: true,
+            media_decoder: crate::media::Decoder::Auto,
+            media_fps: 10,
+            gif_autoplay: true,
             status_prompt: DEFAULT_STATUS_PROMPT.to_string(),
             esc_alt_ms: 50,
             header_compact: false,
@@ -340,6 +364,10 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_IDLE_MINUTES, c.idle_minutes.to_string()),
         (PREF_IMAGES_INLINE, "on".to_string()),
         (PREF_IMAGES_INLINE_MAX_ROWS, c.inline_max_rows.to_string()),
+        (PREF_MEDIA_INLINE, "on".to_string()),
+        (PREF_MEDIA_DECODER, "auto".to_string()),
+        (PREF_MEDIA_FPS, c.media_fps.to_string()),
+        (PREF_GIF_AUTOPLAY, "on".to_string()),
         (PREF_STATUS_PROMPT, c.status_prompt.clone()),
         (PREF_ESC_ALT_MS, c.esc_alt_ms.to_string()),
         (PREF_HEADER, "full".to_string()),
@@ -414,6 +442,19 @@ impl Config {
                 .and_then(|v| v.trim().parse().ok())
                 .filter(|n| (2..=60).contains(n))
                 .unwrap_or(d.inline_max_rows),
+            media_inline: o(PREF_MEDIA_INLINE)
+                .map(|v| !matches!(v.trim(), "off" | "false" | "0" | "no"))
+                .unwrap_or(d.media_inline),
+            media_decoder: o(PREF_MEDIA_DECODER)
+                .and_then(|v| crate::media::Decoder::parse(&v))
+                .unwrap_or(d.media_decoder),
+            media_fps: o(PREF_MEDIA_FPS)
+                .and_then(|v| v.trim().parse().ok())
+                .filter(|n| (1..=30).contains(n))
+                .unwrap_or(d.media_fps),
+            gif_autoplay: o(PREF_GIF_AUTOPLAY)
+                .map(|v| !matches!(v.trim(), "off" | "false" | "0" | "no"))
+                .unwrap_or(d.gif_autoplay),
             status_prompt: o(PREF_STATUS_PROMPT)
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty())

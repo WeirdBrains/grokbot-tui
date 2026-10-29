@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.24.0] - 2026-10-29
+
+### Changed
+- **Licence: grokbot-tui is now GPL-3.0-or-later** (was BSD-3-Clause). Releases 1.23.0 and
+  earlier stay available under BSD-3-Clause. The `grokbot_api` crate is unchanged.
+  LICENSE, Cargo metadata, the .deb copyright, the AUR/winget manifests (from Cargo.toml)
+  and the README are updated, and `THIRD_PARTY.md` lists every bundled component.
+
+### Added
+- Inline video, animated GIFs and music in chat bubbles, for received links and attachments:
+  - Scaled to the bubble like images (row cap `images.inline_max_rows`), with the poster
+    frame shown while stopped.
+  - A one-row bar under each: [▶]/[⏸] toggles playback, clicking the bar seeks, and the
+    label shows elapsed/total time. GIFs show their frame position instead.
+  - Clicking the picture opens a full-size player modal (Space, ←/→ ±5 s, Home, Esc/q, and
+    the clickable bar).
+  - Only one video or track plays at a time, and it pauses when scrolled out of view. GIFs
+    loop on their own (`media.gif_autoplay`).
+  - Decoders: GIF (image crate), H.264 MP4 through OpenH264 compiled from source into
+    every build, and MP3/AAC/M4A/FLAC/Vorbis/WAV through rodio/Symphonia. Sound plays
+    in sync with MP4 video. Other codecs use FFmpeg in the new `-ffmpeg` builds, else a
+    system `ffmpeg` on PATH if there is one.
+  - Prefs `media.inline`, `media.fps`, `media.decoder` (auto|builtin|ffmpeg|system) and
+    `media.gif_autoplay`. Commands `/media pause|stop|decoders` (alias `/play`).
+  - The attachments panel's [view] opens the player for video, GIFs and audio.
+- Two builds per target: standard, and `-ffmpeg` (`grokbot-tui-ffmpeg-<target>` archives,
+  FFmpeg linked statically). New `grokbot-tui-setup.sh` / `grokbot-tui-setup.ps1` wrapper
+  installers ask which one to install.
+- `/license` (aliases `/licence`, `/third-party`): the licence notice, the decoders in this
+  build, and THIRD_PARTY.md, including the H.264 patent caveat. `/license full` shows the
+  GPL text.
+- Theme part `media_bar`.
+
+### Notes
+- On Linux, audio uses ALSA (libasound2). The .deb/.rpm/AUR packages depend on it.
+
 ## [1.23.0] - 2026-10-29
 
 ### Added

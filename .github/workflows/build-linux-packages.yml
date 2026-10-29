@@ -32,6 +32,10 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+      - name: System libraries (ALSA for audio)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
       - name: Install cargo-deb and cargo-generate-rpm
         run: cargo install --locked cargo-deb cargo-generate-rpm
       - name: Build

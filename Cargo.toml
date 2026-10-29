@@ -1,9 +1,9 @@
 [package]
 name = "grokbot-tui"
-version = "1.23.0"
+version = "1.24.0"
 edition = "2024"
 rust-version = "1.89"
-license = "BSD-3-Clause"
+license = "GPL-3.0-or-later"
 authors = ["Michael Christenson II <m3talsmith@gmail.com>"]
 homepage = "https://github.com/WeirdBrains/grokbot-tui"
 repository = "https://github.com/WeirdBrains/grokbot-tui"
@@ -29,11 +29,12 @@ extended-description = """\
 A terminal user interface for Grok Bot: chat with your bots, switch accounts, \
 and keep a local SQLite history. Unofficial; uses the Grok Bot gateway API."""
 depends = "$auto"
-# DEP-5 copyright file (full BSD-3-Clause text) -> /usr/share/doc/grokbot-tui/copyright.
+# DEP-5 copyright file (GPL-3.0-or-later) -> /usr/share/doc/grokbot-tui/copyright.
 license-file = ["packaging/deb/copyright", "0"]
 assets = [
     ["target/release/grokbot-tui", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/grokbot-tui/README.md", "644"],
+    ["THIRD_PARTY.md", "usr/share/doc/grokbot-tui/THIRD_PARTY.md", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -43,6 +44,7 @@ assets = [
     { source = "target/release/grokbot-tui", dest = "/usr/bin/grokbot-tui", mode = "755" },
     { source = "README.md", dest = "/usr/share/doc/grokbot-tui/README.md", mode = "644", doc = true },
     { source = "LICENSE", dest = "/usr/share/licenses/grokbot-tui/LICENSE", mode = "644", doc = true },
+    { source = "THIRD_PARTY.md", dest = "/usr/share/doc/grokbot-tui/THIRD_PARTY.md", mode = "644", doc = true },
 ]
 
 [[bin]]
@@ -75,6 +77,11 @@ ratatui-image = { version = "11.1", default-features = false, features = ["cross
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 html2text = "0.17"
 url = "2"
+openh264 = "0.9"
+mp4 = "0.14"
+rodio = { version = "0.23", default-features = false, features = ["flac", "mp3", "mp4", "playback", "vorbis", "wav"] }
+# The -ffmpeg builds (GPL): FFmpeg linked in for every codec. See THIRD_PARTY.md.
+ffmpeg-next = { version = "9", optional = true, default-features = false, features = ["codec", "format", "software-scaling", "software-resampling"] }
 
 [target."cfg(unix)".dependencies]
 # Terminal background query (OSC 11) for the "system" theme mode.
@@ -89,3 +96,9 @@ wiremock = "0.6"
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+[features]
+# Link FFmpeg (found via pkg-config, or vcpkg on Windows).
+ffmpeg = ["dep:ffmpeg-next"]
+# Build FFmpeg from source and link it statically (Linux/macOS -ffmpeg release builds).
+ffmpeg-static = ["ffmpeg", "ffmpeg-next/build", "ffmpeg-next/static"]

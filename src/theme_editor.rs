@@ -3384,6 +3384,7 @@ mod tests {
                 "presence_indicator",
                 "attach_panel_frame",
                 "attach_panel_filter",
+                "media_bar",
                 "download_path",
                 "download_dir",
                 "menu_active",

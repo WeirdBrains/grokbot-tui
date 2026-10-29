@@ -302,6 +302,13 @@ Input focused (multi-line)
                             ui.attachments_panel; keymap view.toggle_attachments).
                             In the panel: j/k move, Enter jump, v view, d download,
                             / filter, t type (All/Img/Vid/Aud/Doc), Esc back to input
+  Video, GIFs, music        Play inline in the bubble: [▶]/[⏸] toggles, click the bar to
+                            seek, click the picture for the full-size player (Space,
+                            ←/→ 5 s, Home, Esc). One video/track plays at a time and
+                            pauses when scrolled away; GIFs loop (media.gif_autoplay).
+                            Prefs: media.inline on|off, media.fps (10), media.decoder
+                            auto|builtin|ffmpeg|system. /media pause|stop|decoders
+  /license                  Licence (GPL-3.0-or-later) and third-party notices
   Click a message           Opens the reaction picker for it (pref message.click_to_react,
                             default on). Links, images, [☺+] and [⤓] keep their actions;
                             dragging still selects text

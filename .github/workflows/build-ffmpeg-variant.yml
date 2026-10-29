@@ -1,0 +1,122 @@
+# Builds the "-ffmpeg" variant (FFmpeg linked in statically; GPL-3.0-or-later as a whole)
+# for every dist target, plus the wrapper installers that let users pick a variant.
+# Called by release.yml (dist "global-artifacts-jobs"); files uploaded as `artifacts-*`
+# are attached to the GitHub Release by dist's host job.
+#
+# A target whose FFmpeg build fails is skipped (continue-on-error), so the standard
+# release still ships; the wrapper installers fall back to the standard build for it.
+# Pushing a branch named ci-ffmpeg/* runs this alone, to try changes before a release.
+name: Build -ffmpeg variant
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+  push:
+    branches:
+      - "ci-ffmpeg/**"
+
+permissions:
+  contents: read
+
+jobs:
+  ffmpeg:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2022
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: true
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm pkg-config clang libclang-dev libasound2-dev
+      - name: Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install nasm pkg-config
+      - name: FFmpeg via vcpkg (Windows, static)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $root = "$env:VCPKG_INSTALLATION_ROOT"
+          & "$root\vcpkg.exe" install "ffmpeg[core,avcodec,avformat,swscale,swresample]:x64-windows-static-md"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKGRS_TRIPLET=x64-windows-static-md" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Build (Linux/macOS, FFmpeg from source, static)
+        if: runner.os != 'Windows'
+        run: cargo build --profile dist --locked --features ffmpeg-static --target ${{ matrix.target }}
+      - name: Build (Windows, vcpkg FFmpeg, static)
+        if: runner.os == 'Windows'
+        run: cargo build --profile dist --locked --features ffmpeg --target ${{ matrix.target }}
+      - name: Clippy (-ffmpeg code paths)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cargo clippy --release --locked --features ffmpeg-static --target ${{ matrix.target }} -- -D warnings
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=grokbot-tui-ffmpeg-${{ matrix.target }}
+          mkdir -p "out/$name"
+          exe=grokbot-tui; [ "${{ runner.os }}" = Windows ] && exe=grokbot-tui.exe
+          cp "target/${{ matrix.target }}/dist/$exe" LICENSE THIRD_PARTY.md README.md CHANGELOG.md "out/$name/"
+          "out/$name/$exe" --version
+          cd out
+          if [ "${{ runner.os }}" = Windows ]; then
+            7z a -tzip "$name.zip" "$name" >/dev/null
+            sha256sum "$name.zip" > "$name.zip.sha256"
+          else
+            tar -cJf "$name.tar.xz" "$name"
+            shasum -a 256 "$name.tar.xz" > "$name.tar.xz.sha256"
+          fi
+          rm -rf "$name"
+          ls -l
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-ffmpeg-${{ matrix.target }}
+          path: out/*
+
+  wrappers:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Stamp the version into the wrapper installers
+        run: |
+          set -euo pipefail
+          v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          mkdir -p out
+          sed "s/@VERSION@/$v/g" packaging/setup/grokbot-tui-setup.sh > out/grokbot-tui-setup.sh
+          sed "s/@VERSION@/$v/g" packaging/setup/grokbot-tui-setup.ps1 > out/grokbot-tui-setup.ps1
+          bash -n out/grokbot-tui-setup.sh
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-setup-wrappers
+          path: out/*

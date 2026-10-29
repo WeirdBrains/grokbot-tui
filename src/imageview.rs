@@ -59,7 +59,7 @@ pub fn protocol_name(p: &Picker) -> &'static str {
     }
 }
 
-fn local_path(url: &str) -> Option<std::path::PathBuf> {
+pub fn local_path(url: &str) -> Option<std::path::PathBuf> {
     let u = url.strip_prefix("file://").unwrap_or(url);
     if u.contains("://") {
         return None;
