@@ -15,6 +15,7 @@ mod fuzzy;
 mod help;
 mod history;
 mod imageview;
+mod inline;
 mod input;
 mod keyctx;
 mod keymap;
@@ -253,8 +254,10 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let mut captured = true;
     let mut dirty = true;
     let mut last_draw = std::time::Instant::now();
-    let mut esc_meta = crate::keys::EscMeta::default();
+    let mut esc_meta =
+        crate::keys::EscMeta::with_window(std::time::Duration::from_millis(app.config.esc_alt_ms));
     while !app.should_quit {
+        esc_meta.window = std::time::Duration::from_millis(app.config.esc_alt_ms);
         app.tick();
         let now = std::time::Instant::now();
         if let Some(k) = esc_meta.poll_timeout(now) {
@@ -323,6 +326,12 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                     let now = std::time::Instant::now();
                     match esc_meta.feed(k, now) {
                         crate::keys::Feed::Hold => {}
+                        crate::keys::Feed::EscHold => {
+                            dirty |= handle_event(
+                                app,
+                                Event::Key(event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+                            );
+                        }
                         crate::keys::Feed::Key(k) => {
                             dirty |= handle_event(app, Event::Key(k));
                         }
@@ -461,6 +470,16 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
         }
     }
     match ev {
+        Event::Mouse(m) if app.menu_mouse(m) => {}
+        Event::Mouse(m)
+            if app.completion.is_some()
+                && matches!(
+                    m.kind,
+                    MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                ) =>
+        {
+            crate::complete::wheel(app, m.kind == MouseEventKind::ScrollDown);
+        }
         Event::Mouse(m) if m.kind == MouseEventKind::Moved => {
             app.mouse_pos = Some((m.column, m.row));
             if app.picker.is_some() {
@@ -484,7 +503,14 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
         }
         Event::Mouse(m) if matches!(m.kind, MouseEventKind::Up(_)) => {
             if app.body_sel.as_ref().is_some_and(|s| !s.is_empty()) {
+                app.press_at = None;
                 app.body_mouse_up();
+                return true;
+            }
+            if matches!(m.kind, MouseEventKind::Up(MouseButton::Left))
+                && !app.overlay_open()
+                && app.body_release(m.column, m.row)
+            {
                 return true;
             }
             return false;
@@ -603,6 +629,18 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 app.tooltip.dismiss();
                 return true;
             }
+            // Alt+<underlined letter> opens that menu (Alt-C Chat, Alt-W Web, …).
+            if let KeyCode::Char(c) = k.code
+                && k.modifiers.contains(KeyModifiers::ALT)
+                && !k.modifiers.contains(KeyModifiers::CONTROL)
+                && let Some(i) = crate::menubar::MENUS
+                    .iter()
+                    .position(|m| m.hint == c.to_ascii_lowercase())
+            {
+                app.menu.open_menu(i);
+                app.tooltip.dismiss();
+                return true;
+            }
             if app.menu.open.is_some() {
                 match k.code {
                     KeyCode::Esc => app.menu.close(),
@@ -656,6 +694,14 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
             if k.code == KeyCode::F(4) {
                 app.cycle_theme_mode();
+                return true;
+            }
+            if k.code == KeyCode::F(7) && app.keys_scheme_default() {
+                app.set_header_compact(!app.config.header_compact);
+                return true;
+            }
+            if k.code == KeyCode::F(8) && app.keys_scheme_default() {
+                app.set_sidebar_collapsed(!app.config.sidebar_collapsed);
                 return true;
             }
             if app.image_view.is_some() {
@@ -1613,6 +1659,82 @@ mod completion_cycle_tests {
         assert_eq!(a.input, "/th", "Shift-Tab goes back to what was typed");
         key(&mut a, KeyCode::Down);
         assert_eq!(a.input, first, "arrows swap the same span");
+    }
+
+    #[test]
+    fn path_completion_handles_spaces_quotes_and_continues() {
+        let (mut a, _d, _rt) = app();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("My Dir");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("inner file.txt"), b"x").unwrap();
+        let base = tmp.path().display().to_string();
+        typed(&mut a, &format!("/attach {base}/My"));
+        key(&mut a, KeyCode::Tab);
+        assert_eq!(a.input, format!("/attach {base}/My\\ Dir/"));
+        key(&mut a, KeyCode::Enter); // accept, keep typing
+        typed(&mut a, "inn");
+        key(&mut a, KeyCode::Tab);
+        let want = format!("/attach {base}/My\\ Dir/inner\\ file.txt");
+        assert_eq!(a.input, want);
+        // /attach parses it back to the real path.
+        let args = crate::attach::split_args(want.strip_prefix("/attach ").unwrap());
+        assert_eq!(args, vec![format!("{base}/My Dir/inner file.txt")]);
+        // A quoted token completes too (replaced by the escaped form).
+        a.completion = None;
+        a.input.clear();
+        a.input_cursor = 0;
+        typed(&mut a, &format!("/attach \"{base}/My D"));
+        key(&mut a, KeyCode::Tab);
+        assert_eq!(a.input, format!("/attach {base}/My\\ Dir/"));
+        assert_eq!(
+            crate::complete::last_token("/attach 'a b/c"),
+            (8, "a b/c".to_string())
+        );
+        assert_eq!(
+            crate::complete::last_token("/attach a\\ b"),
+            (8, "a b".into())
+        );
+        assert_eq!(
+            crate::complete::last_token("/attach x "),
+            (10, String::new())
+        );
+    }
+
+    #[test]
+    fn long_completion_lists_scroll_and_keep_the_selection_visible() {
+        let (mut a, _d, _rt) = app();
+        let tmp = tempfile::tempdir().unwrap();
+        for n in 0..60 {
+            std::fs::write(tmp.path().join(format!("f{n:02}.txt")), b"x").unwrap();
+        }
+        typed(&mut a, &format!("/attach {}/", tmp.path().display()));
+        key(&mut a, KeyCode::Tab);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        term.draw(|f| ui::draw(f, &mut a)).unwrap();
+        let p = a.completion.as_ref().unwrap();
+        assert_eq!(p.items.len(), 60);
+        let h = p.list_area.height as usize;
+        assert!(h > 8, "uses the room above the prompt: {h}");
+        key(&mut a, KeyCode::PageDown);
+        key(&mut a, KeyCode::PageDown);
+        term.draw(|f| ui::draw(f, &mut a)).unwrap();
+        let p = a.completion.as_ref().unwrap();
+        assert!(p.scroll > 0);
+        assert!(
+            p.cursor >= p.scroll && p.cursor < p.scroll + h,
+            "selection visible"
+        );
+        let shown = format!("{}", term.backend());
+        assert!(
+            shown.contains(&format!("{}/60", p.cursor + 1)),
+            "position indicator"
+        );
+        let before = p.cursor;
+        crate::complete::wheel(&mut a, true);
+        assert_eq!(a.completion.as_ref().unwrap().cursor, before + 3);
+        assert_eq!(crate::complete::keep_visible(0, 30, 10, 60), 21);
+        assert_eq!(crate::complete::keep_visible(25, 3, 10, 60), 3);
     }
 
     #[test]

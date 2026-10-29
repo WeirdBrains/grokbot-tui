@@ -3382,6 +3382,7 @@ mod tests {
                 "browser_status",
                 "ssh_indicator",
                 "presence_indicator",
+                "sidebar_strip",
                 "download_path",
                 "download_dir",
                 "menu_active",

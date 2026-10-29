@@ -158,6 +158,38 @@ pub fn registry() -> Registry {
                 run: links,
             },
             Command {
+                name: "status",
+                aliases: &[],
+                usage: "/status [extra text]",
+                help: "Ask the current bot for a brief status of its tasks (a normal prompt; text from commands.status_prompt, plus any extra text)",
+                complete: status_complete,
+                run: status,
+            },
+            Command {
+                name: "header",
+                aliases: &[],
+                usage: "/header [compact|full|toggle]",
+                help: "One-row header (compact) or the tall one when there's room (full); also F7 and the ▾/▴ button",
+                complete: header_complete,
+                run: header,
+            },
+            Command {
+                name: "sidebar",
+                aliases: &[],
+                usage: "/sidebar [collapse|expand|toggle]",
+                help: "Collapse the bot list to a 1-column strip (click it to expand); also F8 and the «/» button",
+                complete: sidebar_complete,
+                run: sidebar,
+            },
+            Command {
+                name: "menu",
+                aliases: &[],
+                usage: "/menu [chat|account|view|web|theme|notify|help]",
+                help: "Open the menu bar without Alt (also F10, or click a menu title)",
+                complete: menu_complete,
+                run: menu,
+            },
+            Command {
                 name: "mute",
                 aliases: &["presence"],
                 usage: "/mute [on|off|toggle]",
@@ -646,6 +678,109 @@ fn browse(app: &mut App, args: &str) -> Result<()> {
     Ok(())
 }
 
+/// The prompt `/status` sends.
+pub fn status_text(base: &str, extra: &str) -> String {
+    let extra = extra.trim();
+    if extra.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base} {extra}")
+    }
+}
+
+fn status_complete(_: &App, idx: usize, q: &str) -> Vec<crate::complete::Candidate> {
+    if idx != 0 {
+        return vec![];
+    }
+    [
+        "Include blockers.",
+        "Include next steps.",
+        "Keep it to three bullets.",
+    ]
+    .iter()
+    .filter(|s| s.to_lowercase().starts_with(&q.to_lowercase()))
+    .map(|s| crate::complete::Candidate {
+        replace: s.to_string(),
+        label: s.to_string(),
+    })
+    .collect()
+}
+
+fn status(app: &mut App, args: &str) -> Result<()> {
+    if app.active_bot().is_none() {
+        bail!("No bot selected (F2 picks one)")
+    }
+    let text = status_text(&app.config.status_prompt, args);
+    app.remember_prompt(&text);
+    app.send_chat(text);
+    Ok(())
+}
+
+fn header_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(["compact", "full", "toggle"])
+    } else {
+        vec![]
+    }
+}
+
+fn header(app: &mut App, args: &str) -> Result<()> {
+    let on = match args.trim() {
+        "" | "toggle" => !app.config.header_compact,
+        "compact" | "collapse" => true,
+        "full" | "expand" => false,
+        _ => bail!("Usage: /header [compact|full|toggle]"),
+    };
+    app.set_header_compact(on);
+    Ok(())
+}
+
+fn sidebar_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(["collapse", "expand", "toggle"])
+    } else {
+        vec![]
+    }
+}
+
+fn sidebar(app: &mut App, args: &str) -> Result<()> {
+    let on = match args.trim() {
+        "" | "toggle" => !app.config.sidebar_collapsed,
+        "collapse" | "collapsed" => true,
+        "expand" | "expanded" => false,
+        _ => bail!("Usage: /sidebar [collapse|expand|toggle]"),
+    };
+    app.set_sidebar_collapsed(on);
+    Ok(())
+}
+
+fn menu_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(
+            crate::menubar::MENUS
+                .iter()
+                .map(|m| m.label.to_ascii_lowercase())
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        vec![]
+    }
+}
+
+fn menu(app: &mut App, args: &str) -> Result<()> {
+    let a = args.trim().to_ascii_lowercase();
+    let i = if a.is_empty() {
+        0
+    } else {
+        crate::menubar::MENUS
+            .iter()
+            .position(|m| m.label.to_ascii_lowercase().starts_with(&a))
+            .ok_or_else(|| anyhow::anyhow!("No menu '{a}'"))?
+    };
+    app.menu.open_menu(i);
+    Ok(())
+}
+
 fn mute_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
     if idx == 0 {
         crate::complete::names(["on", "off", "toggle"])
@@ -750,7 +885,7 @@ fn attach_complete(app: &App, idx: usize, q: &str) -> Vec<crate::complete::Candi
     }
     out.extend(crate::download::path_candidates(q).into_iter().map(|p| {
         crate::complete::Candidate {
-            replace: p.replace(' ', "\\ "),
+            replace: crate::complete::escape_path(&p),
             label: p,
         }
     }));

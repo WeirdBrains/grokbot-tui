@@ -6,33 +6,70 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::time::{Duration, Instant};
 
-/// How long to wait after Esc for a following Enter (Alt-Enter as ESC+CR).
+/// Default for `keys.esc_alt_timeout_ms`: how long after a lone Esc a following key still
+/// counts as Alt+key (terminals send Alt+x as ESC x; over SSH the two bytes can arrive in
+/// separate reads, so crossterm sees a plain Esc and then x).
 pub const ESC_META_WINDOW: Duration = Duration::from_millis(50);
 
-/// Pending Esc that may combine with the next key into Alt+Enter.
-#[derive(Debug, Default)]
+/// Pending Esc that may combine with the next key into Alt+key.
+#[derive(Debug)]
 pub struct EscMeta {
     pub at: Option<Instant>,
+    /// Zero disables folding (Esc is delivered at once).
+    pub window: Duration,
+}
+
+impl Default for EscMeta {
+    fn default() -> Self {
+        Self {
+            at: None,
+            window: ESC_META_WINDOW,
+        }
+    }
+}
+
+/// Keys that an ESC prefix turns into Alt+key.
+fn foldable(k: &KeyEvent) -> bool {
+    !k.modifiers
+        .intersects(KeyModifiers::ALT | KeyModifiers::CONTROL)
+        && matches!(
+            k.code,
+            KeyCode::Char(_)
+                | KeyCode::Enter
+                | KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::Backspace
+        )
 }
 
 impl EscMeta {
-    /// Feed a key. Returns the key to handle (possibly rewritten as Alt+Enter),
-    /// and whether a lone Esc should fire (timeout with nothing after).
+    pub fn with_window(window: Duration) -> Self {
+        Self { at: None, window }
+    }
+
+    /// Feed a key. A lone Esc is held for `window`; a foldable key inside it becomes
+    /// Alt+key, anything else releases the Esc first.
     pub fn feed(&mut self, k: KeyEvent, now: Instant) -> Feed {
         if k.code == KeyCode::Esc
             && k.modifiers.is_empty()
             && !matches!(k.kind, ratatui::crossterm::event::KeyEventKind::Release)
         {
-            self.at = Some(now);
+            if self.window.is_zero() {
+                return Feed::Key(k);
+            }
+            if self.at.replace(now).is_some() {
+                // Esc Esc: the first is a real Esc.
+                return Feed::EscHold;
+            }
             return Feed::Hold;
         }
         if let Some(t0) = self.at.take() {
-            if now.duration_since(t0) <= ESC_META_WINDOW
-                && k.code == KeyCode::Enter
-                && !k.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                // ESC+CR → Alt+Enter (newline).
-                return Feed::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
+            if now.duration_since(t0) <= self.window && foldable(&k) {
+                let mut alt = k;
+                alt.modifiers |= KeyModifiers::ALT;
+                return Feed::Key(alt);
             }
             // Esc was something else: emit Esc first, then this key.
             return Feed::EscThen(k);
@@ -43,7 +80,7 @@ impl EscMeta {
     /// If a held Esc has aged out, emit it.
     pub fn poll_timeout(&mut self, now: Instant) -> Option<KeyEvent> {
         let t0 = self.at?;
-        if now.duration_since(t0) > ESC_META_WINDOW {
+        if now.duration_since(t0) > self.window {
             self.at = None;
             Some(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         } else {
@@ -52,9 +89,56 @@ impl EscMeta {
     }
 }
 
+/// Feed a raw byte stream through crossterm-style decoding as the terminal would deliver
+/// it in separate reads: `chunks` are (delay since previous ms, bytes). Test helper.
+#[cfg(test)]
+pub fn simulate(chunks: &[(u64, &[u8])], window: Duration) -> Vec<KeyEvent> {
+    let mut m = EscMeta::with_window(window);
+    let mut out = vec![];
+    let mut now = Instant::now();
+    for (delay, bytes) in chunks {
+        now += Duration::from_millis(*delay);
+        if let Some(k) = m.poll_timeout(now) {
+            out.push(k);
+        }
+        // Per read: ESC followed by a byte in the SAME read is Alt+key (crossterm does
+        // that itself); a trailing ESC is delivered as a plain Esc.
+        let mut i = 0;
+        while i < bytes.len() {
+            let k = if bytes[i] == 0x1b && i + 1 < bytes.len() {
+                i += 1;
+                KeyEvent::new(KeyCode::Char(bytes[i] as char), KeyModifiers::ALT)
+            } else if bytes[i] == 0x1b {
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
+            } else if bytes[i] == b'\r' {
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+            } else {
+                KeyEvent::new(KeyCode::Char(bytes[i] as char), KeyModifiers::NONE)
+            };
+            i += 1;
+            match m.feed(k, now) {
+                Feed::Hold => {}
+                Feed::Key(k) => out.push(k),
+                Feed::EscThen(k) => {
+                    out.push(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+                    out.push(k);
+                }
+                Feed::EscHold => out.push(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            }
+        }
+    }
+    now += window + Duration::from_millis(1);
+    if let Some(k) = m.poll_timeout(now) {
+        out.push(k);
+    }
+    out
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Feed {
     Hold,
+    /// Emit a plain Esc and keep holding the new one.
+    EscHold,
     Key(KeyEvent),
     EscThen(KeyEvent),
 }
@@ -127,6 +211,49 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    fn alt(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT)
+    }
+    fn plain(c: KeyCode) -> KeyEvent {
+        KeyEvent::new(c, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn split_esc_prefix_over_ssh_becomes_alt() {
+        let w = ESC_META_WINDOW;
+        // Same read: already Alt-c.
+        assert_eq!(simulate(&[(0, b"\x1bc")], w), vec![alt('c')]);
+        // ESC and c in separate reads 5 ms apart (SSH): still Alt-c.
+        assert_eq!(simulate(&[(0, b"\x1b"), (5, b"c")], w), vec![alt('c')]);
+        // A real Esc, then typing later: Esc, c.
+        assert_eq!(
+            simulate(&[(0, b"\x1b"), (200, b"c")], w),
+            vec![plain(KeyCode::Esc), plain(KeyCode::Char('c'))]
+        );
+        // Lone Esc still arrives.
+        assert_eq!(simulate(&[(0, b"\x1b")], w), vec![plain(KeyCode::Esc)]);
+        // Esc Esc: one plain Esc, then the second folds with m into Alt-m.
+        assert_eq!(
+            simulate(&[(0, b"\x1b"), (2, b"\x1b"), (2, b"m")], w),
+            vec![plain(KeyCode::Esc), alt('m')]
+        );
+        // ESC CR → Alt-Enter (newline), as before.
+        assert_eq!(
+            simulate(&[(0, b"\x1b"), (3, b"\r")], w),
+            vec![KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)]
+        );
+        // Disabled: no folding.
+        assert_eq!(
+            simulate(&[(0, b"\x1b"), (5, b"c")], Duration::ZERO),
+            vec![plain(KeyCode::Esc), plain(KeyCode::Char('c'))]
+        );
+        // A longer window catches slower links.
+        assert_eq!(
+            simulate(&[(0, b"\x1b"), (90, b"c")], Duration::from_millis(120)),
+            vec![alt('c')]
+        );
     }
 
     #[test]

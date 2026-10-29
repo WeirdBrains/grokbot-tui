@@ -46,6 +46,8 @@ pub enum Then {
     /// Images open in the viewer, other files in the download modal.
     Open,
     Download,
+    /// Only remember the read (inline image previews); never shows errors.
+    Inline,
 }
 
 /// A resolved presigned read (kept until shortly before it expires).
@@ -394,7 +396,13 @@ impl App {
         let reads = match result {
             Ok(r) => r,
             Err(e) => {
-                self.error(format!("Couldn't open the attachment: {}", error_text(&e)));
+                if then == Then::Inline {
+                    for p in &paths {
+                        self.inline.fail(&format!("{SCHEME}{p}"), error_text(&e));
+                    }
+                } else {
+                    self.error(format!("Couldn't open the attachment: {}", error_text(&e)));
+                }
                 return;
             }
         };
@@ -422,6 +430,10 @@ impl App {
                     self.feed_cache = None;
                     self.act_on_read(p, &read, then);
                 }
+                _ if then == Then::Inline => {
+                    self.inline
+                        .fail(&format!("{SCHEME}{p}"), "not in storage".into());
+                }
                 Some(r) if r.outcome == gw::ReadOutcome::NotInStore => self.error(format!(
                     "{name} is stored on the bot's computer; open it from the desktop app."
                 )),
@@ -439,6 +451,9 @@ impl App {
     }
 
     fn act_on_read(&mut self, path: &str, r: &Read, then: Then) {
+        if then == Then::Inline {
+            return;
+        }
         let name = self.attachment_name(path);
         let image = r.content_type.starts_with("image/")
             || gw::AttachmentKind::from_name(&name) == gw::AttachmentKind::Image;

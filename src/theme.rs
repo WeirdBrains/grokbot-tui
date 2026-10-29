@@ -235,6 +235,8 @@ style_slots! {
     BROWSER_STATUS = "browser_status", "Modals", false, "Built-in browser: title / loading indicator";
     SSH_INDICATOR = "ssh_indicator", "Screen and header", false, "The SSH badge (links open in the built-in browser)";
     PRESENCE_INDICATOR = "presence_indicator", "Screen and header", false, "🔕 while the presence claim holds pushes to your other devices";
+    COLLAPSE_BUTTON = "collapse_button", "Screen and header", false, "Header ▾/▴ and sidebar «/» collapse buttons";
+    SIDEBAR_STRIP = "sidebar_strip", "Sidebar and lists", false, "The collapsed 1-column sidebar strip";
     DOWNLOAD_PATH = "download_path", "Modals", false, "Download modal: the save-path field";
     DOWNLOAD_DIR = "download_dir", "Modals", false, "Download modal: directories in the folder browser";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
@@ -437,6 +439,8 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
         },
         s::BROWSER_STATUS => fg(c::SUBTLE),
         s::PRESENCE_INDICATOR => fg(c::SUBTLE),
+        s::COLLAPSE_BUTTON => fg(c::ACCENT),
+        s::SIDEBAR_STRIP => fg(c::MUTED),
         s::SSH_INDICATOR => StyleSpec {
             bold: true,
             ..fg(c::WARN)
@@ -802,6 +806,12 @@ pub fn browser_heading() -> Style {
 pub fn browser_status() -> Style {
     st(slot::BROWSER_STATUS)
 }
+pub fn collapse_button() -> Style {
+    st(slot::COLLAPSE_BUTTON)
+}
+pub fn sidebar_strip() -> Style {
+    st(slot::SIDEBAR_STRIP)
+}
 pub fn presence_indicator() -> Style {
     st(slot::PRESENCE_INDICATOR)
 }
@@ -1059,6 +1069,8 @@ mod tests {
                     || s.key.starts_with("browser_")
                     || s.key == "ssh_indicator"
                     || s.key == "presence_indicator"
+                    || s.key == "collapse_button"
+                    || s.key == "sidebar_strip"
                     || s.key.starts_with("md_")
                     || s.key.starts_with("image_")
                     || s.key == "menu_bar"

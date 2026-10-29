@@ -6,6 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.22.0] - 2026-10-29
+
+### Added
+- Clickable menus: click a menu title to open it (again to close), hover highlights items,
+  click runs one, click outside closes. `/menu [name]` opens the menu bar without Alt
+  (as do F10 and Alt-M). Alt+<underlined letter> opens that menu (Alt-C Chat, Alt-V View, …).
+- **View** menu, `/header [compact|full|toggle]` (F7, keymap `view.toggle_header`, ▾/▴ button):
+  a one-row header with the bot, account, login status, SSH and 🔕. Pref `ui.header`.
+- `/sidebar [collapse|expand|toggle]` (F8, keymap `view.toggle_sidebar`, «/» buttons):
+  collapses the bot list to a 1-column strip (● active, ◆ keyboard cursor); click it to
+  expand. Pref `ui.sidebar_collapsed`.
+- Click an empty part of a message bubble to open the reaction picker for it (pref
+  `message.click_to_react`, default on). Press and release must be on the same cell, so
+  scrolling and drag selection are unchanged; links, images, [☺+] and [⤓] keep their actions.
+- `/status [extra text]` (menu **Chat**): sends "Where are we now? Give me a brief status of
+  your current tasks." plus any extra text to the current bot as a normal prompt (chat and
+  history). The text is pref `commands.status_prompt`. Tab suggests a few add-ons.
+- Inline images: received images and your image attachments are drawn in the bubble with
+  ratatui-image (kitty / sixel / iTerm2, halfblocks fallback), scaled to the bubble width
+  with the aspect kept and at most `images.inline_max_rows` rows (default 12). `images.inline =
+  on|off` (default on). Loaded lazily (the `[🖼 …]` placeholder stays until ready, and while
+  the image is only partly on screen); resized protocols are cached per size; kitty/sixel
+  graphics are cleared when what's shown changes, so scrolling leaves no artifacts. Click an
+  image for the full-size viewer.
+- Pref `keys.esc_alt_timeout_ms` (default 50, 0 disables).
+- Theme parts `collapse_button`, `sidebar_strip` in all shipped themes.
+
+### Fixed
+- Long completion lists were cut off at 8 rows with the selection running off the end. The
+  shared completion popup now sizes to its items up to the room above (or below) the prompt,
+  scrolls to keep the selection visible, shows a scrollbar and `n/total`, and takes
+  PgUp/PgDn and the mouse wheel.
+- Paths with spaces in completion: the token under the cursor is found shell-style (`"…"`,
+  `'…'` and `\ ` escapes), so completing inside `My\ Dir/` or `"My Dir/` keeps working.
+  Completed names with spaces are inserted backslash-escaped (always); `/attach` parses the
+  same forms. The 1.16.1 token-span replacement is unchanged.
+- Alt shortcuts over SSH (reported from Windows Terminal). Terminals send Alt+x as ESC x; over
+  SSH the two bytes can arrive in separate reads, and crossterm then reports a lone Esc followed
+  by x. Only ESC+Enter was folded back before; now any letter, Enter, arrow or Backspace within
+  the window becomes Alt+key, and Esc Esc gives one Esc. Also, Alt+<menu letter> was never bound
+  (only Alt-M and F10 opened the menu), so Alt-C did nothing even locally.
+
 ## [1.21.0] - 2026-10-29
 
 ### Added

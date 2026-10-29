@@ -32,6 +32,8 @@ pub struct Popup {
     pub list_area: Rect,
     /// The token's span in `draft`.
     pub orig_range: (usize, usize),
+    /// First visible item (the list scrolls to keep the selection visible).
+    pub scroll: usize,
 }
 
 impl Popup {
@@ -110,6 +112,7 @@ pub fn tab(app: &mut App, back: bool) {
         query,
         list_area: Rect::default(),
         orig_range: range,
+        scroll: 0,
     };
     p.apply_current(&mut app.input, &mut app.input_cursor);
     app.input_anchor = None;
@@ -159,6 +162,14 @@ pub fn key(app: &mut App, k: KeyEvent) {
         KeyCode::Tab => cycle(app, 1),
         KeyCode::BackTab | KeyCode::Up => cycle(app, -1),
         KeyCode::Down => cycle(app, 1),
+        KeyCode::PageDown => {
+            let n = page(app);
+            cycle(app, n)
+        }
+        KeyCode::PageUp => {
+            let n = page(app);
+            cycle(app, -n)
+        }
         KeyCode::Char(c) if !ctrl => {
             app.input_insert(&c.to_string());
             refilter(app);
@@ -173,6 +184,32 @@ pub fn key(app: &mut App, k: KeyEvent) {
         }
         _ => {}
     }
+}
+
+fn page(app: &App) -> i32 {
+    app.completion
+        .as_ref()
+        .map(|p| (p.list_area.height.max(2) as i32) - 1)
+        .unwrap_or(5)
+}
+
+/// Mouse wheel over the open popup: step the selection.
+pub fn wheel(app: &mut App, down: bool) {
+    cycle(app, if down { 3 } else { -3 });
+}
+
+/// Keep `cursor` inside the `h`-row window starting at `scroll`.
+pub fn keep_visible(scroll: usize, cursor: usize, h: usize, n: usize) -> usize {
+    let h = h.max(1);
+    let cursor = cursor.min(n.saturating_sub(1));
+    let s = if cursor < scroll {
+        cursor
+    } else if cursor >= scroll + h {
+        cursor + 1 - h
+    } else {
+        scroll
+    };
+    s.min(n.saturating_sub(h))
 }
 
 pub fn rank(query: &str, candidates: &[Candidate]) -> Vec<Candidate> {
@@ -202,13 +239,9 @@ fn candidates(app: &App) -> Option<((usize, usize), String, Vec<Candidate>)> {
         return None;
     }
     let cur = app.input_cursor.min(input.len());
-    // Token = from last whitespace (or after '/') to cursor.
-    let start = input[..cur]
-        .rfind(char::is_whitespace)
-        .map(|i| i + 1)
-        .unwrap_or(1);
+    // Token = the last shell-like word before the cursor ("…", '…' and `\ ` keep spaces).
+    let (start, query) = last_token(&input[..cur]);
     let start = start.max(1); // never include the leading '/'
-    let query = input[start..cur].to_string();
     let range = (start, cur);
     let rest = input[1..start.min(input.len())].trim();
     let items = if rest.is_empty() && !input[1..cur].contains(char::is_whitespace) {
@@ -237,19 +270,57 @@ fn candidates(app: &App) -> Option<((usize, usize), String, Vec<Candidate>)> {
         let cmd_name = rest.split_whitespace().next().unwrap_or("");
         let cmd = app.registry.find(cmd_name)?;
         let args = rest[cmd_name.len()..].trim_start();
-        // Which argument index?
-        let idx = args
-            .split_whitespace()
-            .count()
-            .saturating_sub(usize::from(!query.is_empty()));
-        let idx = if query.is_empty() && input[..cur].ends_with(char::is_whitespace) {
-            args.split_whitespace().count()
-        } else {
-            idx
-        };
+        // Which argument index? (Words before the token, quote-aware.)
+        let idx = crate::attach::split_args(args).len();
         (cmd.complete)(app, idx, &query)
     };
     Some((range, query, items))
+}
+
+/// Start byte and unquoted text of the last word in `s` (shell-like: `"…"`, `'…'` and
+/// backslash escapes keep spaces inside one word). Empty text when `s` ends in a space.
+pub fn last_token(s: &str) -> (usize, String) {
+    let mut start = 0;
+    let mut text = String::new();
+    let mut quote: Option<char> = None;
+    let mut in_word = false;
+    let mut it = s.char_indices().peekable();
+    while let Some((i, c)) = it.next() {
+        if !in_word && !(quote.is_none() && c.is_whitespace()) {
+            in_word = true;
+            start = i;
+            text.clear();
+        }
+        match (c, quote) {
+            ('\\', q) if q != Some('\'') => {
+                if let Some((_, n)) = it.next() {
+                    text.push(n);
+                }
+            }
+            ('"' | '\'', None) => quote = Some(c),
+            (q, Some(open)) if q == open => quote = None,
+            (c, None) if c.is_whitespace() => {
+                in_word = false;
+            }
+            (c, _) => text.push(c),
+        }
+    }
+    if !in_word {
+        return (s.len(), String::new());
+    }
+    (start, text)
+}
+
+/// A path as one shell word: spaces, quotes and backslashes are backslash-escaped.
+pub fn escape_path(p: &str) -> String {
+    let mut out = String::with_capacity(p.len());
+    for c in p.chars() {
+        if c.is_whitespace() || matches!(c, '\\' | '"' | '\'') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// `:shortcode` completions: the emoji replaces the whole `:partial` token.
@@ -272,19 +343,43 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if area.height < 2 {
         return;
     }
-    let h = (p.items.len() as u16).clamp(1, 8).min(area.y.max(1));
-    let r = Rect {
-        x: area.x,
-        y: area.y.saturating_sub(h + 1),
-        width: area.width,
-        height: h + 1,
+    // As tall as the items need, up to the space above the input (or below, if more).
+    let above = area.y.saturating_sub(2);
+    let screen_h = f.area().height;
+    let below = screen_h.saturating_sub(area.y + area.height);
+    let room = above.max(below).max(1);
+    let h = (p.items.len() as u16).clamp(1, room);
+    let r = if above >= below || above >= h {
+        Rect {
+            x: area.x,
+            y: area.y.saturating_sub(h + 2),
+            width: area.width,
+            height: h + 2,
+        }
+    } else {
+        Rect {
+            x: area.x,
+            y: area.y + area.height,
+            width: area.width,
+            height: (h + 2).min(below),
+        }
     };
     f.render_widget(Clear, r);
-    let block = theme::block(&theme::panel(true)).title(" Completions · Tab cycles · Esc keeps ");
+    let n = p.items.len();
+    let pos = if p.cursor < n {
+        format!("{}/{n}", p.cursor + 1)
+    } else {
+        format!("–/{n}")
+    };
+    let block = theme::block(&theme::panel(true)).title(format!(
+        " Completions {pos} · Tab cycles · PgUp/PgDn · Esc keeps "
+    ));
     let inner = block.inner(r);
     f.render_widget(block, r);
+    let vis = inner.height as usize;
+    p.scroll = keep_visible(p.scroll, p.cursor, vis, n);
     let mut lines = vec![];
-    for (i, c) in p.items.iter().enumerate().take(inner.height as usize) {
+    for (i, c) in p.items.iter().enumerate().skip(p.scroll).take(vis) {
         let st = if i == p.cursor {
             theme::selected()
         } else {
@@ -300,6 +395,21 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             }
         }
         lines.push(Line::from(spans));
+    }
+    if n > vis && vis > 0 {
+        use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
+        let mut sb = ScrollbarState::new(n.saturating_sub(vis)).position(p.scroll);
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None),
+            Rect {
+                x: r.x,
+                width: r.width,
+                ..inner
+            },
+            &mut sb,
+        );
     }
     p.list_area = inner;
     f.render_widget(Paragraph::new(lines), inner);

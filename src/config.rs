@@ -78,6 +78,25 @@ pub const PREF_IDLE_MINUTES: &str = "notifications.idle_minutes";
 pub const PREF_INSTALL_ID: &str = "notifications.install_id";
 pub const DEFAULT_IDLE_MINUTES: u64 = 10;
 
+/// Esc-prefix window for Alt+key, ms (global, 0 disables, max 1000).
+pub const PREF_ESC_ALT_MS: &str = "keys.esc_alt_timeout_ms";
+/// Header: `full` (tall when there's room) or `compact` (one row) (global).
+pub const PREF_HEADER: &str = "ui.header";
+/// Sidebar collapsed to a 1-column strip (global).
+pub const PREF_SIDEBAR_COLLAPSED: &str = "ui.sidebar_collapsed";
+/// Clicking an empty part of a message bubble opens the reaction picker (global).
+pub const PREF_CLICK_TO_REACT: &str = "message.click_to_react";
+
+/// The prompt `/status` sends (account-scoped).
+pub const PREF_STATUS_PROMPT: &str = "commands.status_prompt";
+pub const DEFAULT_STATUS_PROMPT: &str =
+    "Where are we now? Give me a brief status of your current tasks.";
+
+/// Draw images inline in chat bubbles (global).
+pub const PREF_IMAGES_INLINE: &str = "images.inline";
+/// Height cap for inline images, in rows (global, 2..=60).
+pub const PREF_IMAGES_INLINE_MAX_ROWS: &str = "images.inline_max_rows";
+
 /// `links.open_with`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OpenWith {
@@ -125,6 +144,12 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_DOWNLOAD_MAX_MB,
     PREF_LINKS_OPEN_WITH,
     PREF_LINKS_SSH_BEHAVIOR,
+    PREF_ESC_ALT_MS,
+    PREF_HEADER,
+    PREF_SIDEBAR_COLLAPSED,
+    PREF_CLICK_TO_REACT,
+    PREF_IMAGES_INLINE,
+    PREF_IMAGES_INLINE_MAX_ROWS,
 ];
 
 /// Which block glyphs draw the big header title (pref `ui.title_glyphs`).
@@ -232,6 +257,20 @@ pub struct Config {
     pub open_with: OpenWith,
     /// In SSH, links always use the built-in browser (`links.ssh_behavior = builtin`).
     pub ssh_builtin: bool,
+    /// `images.inline`.
+    pub images_inline: bool,
+    /// `images.inline_max_rows`.
+    pub inline_max_rows: u16,
+    /// `commands.status_prompt`.
+    pub status_prompt: String,
+    /// `keys.esc_alt_timeout_ms`.
+    pub esc_alt_ms: u64,
+    /// `ui.header = compact`.
+    pub header_compact: bool,
+    /// `ui.sidebar_collapsed`.
+    pub sidebar_collapsed: bool,
+    /// `message.click_to_react`.
+    pub click_to_react: bool,
     /// `notifications.claim_presence`.
     pub claim_presence: bool,
     /// `notifications.idle_minutes` (1..=240).
@@ -260,6 +299,13 @@ impl Default for Config {
             ssh_builtin: true,
             claim_presence: false,
             idle_minutes: DEFAULT_IDLE_MINUTES,
+            images_inline: true,
+            inline_max_rows: 12,
+            status_prompt: DEFAULT_STATUS_PROMPT.to_string(),
+            esc_alt_ms: 50,
+            header_compact: false,
+            sidebar_collapsed: false,
+            click_to_react: true,
         }
     }
 }
@@ -287,6 +333,13 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_LINKS_SSH_BEHAVIOR, "builtin".to_string()),
         (PREF_CLAIM_PRESENCE, c.claim_presence.to_string()),
         (PREF_IDLE_MINUTES, c.idle_minutes.to_string()),
+        (PREF_IMAGES_INLINE, "on".to_string()),
+        (PREF_IMAGES_INLINE_MAX_ROWS, c.inline_max_rows.to_string()),
+        (PREF_STATUS_PROMPT, c.status_prompt.clone()),
+        (PREF_ESC_ALT_MS, c.esc_alt_ms.to_string()),
+        (PREF_HEADER, "full".to_string()),
+        (PREF_SIDEBAR_COLLAPSED, c.sidebar_collapsed.to_string()),
+        (PREF_CLICK_TO_REACT, c.click_to_react.to_string()),
     ]
 }
 
@@ -345,6 +398,27 @@ impl Config {
                 .and_then(|v| v.trim().parse().ok())
                 .filter(|n| (1..=240).contains(n))
                 .unwrap_or(d.idle_minutes),
+            images_inline: o(PREF_IMAGES_INLINE)
+                .map(|v| !matches!(v.trim(), "off" | "false" | "0" | "no"))
+                .unwrap_or(d.images_inline),
+            inline_max_rows: o(PREF_IMAGES_INLINE_MAX_ROWS)
+                .and_then(|v| v.trim().parse().ok())
+                .filter(|n| (2..=60).contains(n))
+                .unwrap_or(d.inline_max_rows),
+            status_prompt: o(PREF_STATUS_PROMPT)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .unwrap_or(d.status_prompt),
+            esc_alt_ms: o(PREF_ESC_ALT_MS)
+                .and_then(|v| v.trim().parse().ok())
+                .filter(|n| *n <= 1000)
+                .unwrap_or(d.esc_alt_ms),
+            header_compact: o(PREF_HEADER).is_some_and(|v| v.trim() == "compact"),
+            sidebar_collapsed: o(PREF_SIDEBAR_COLLAPSED)
+                .is_some_and(|v| matches!(v.trim(), "true" | "1" | "yes" | "on")),
+            click_to_react: o(PREF_CLICK_TO_REACT)
+                .map(|v| !matches!(v.trim(), "false" | "0" | "no" | "off"))
+                .unwrap_or(d.click_to_react),
         }
     }
 }
@@ -381,6 +455,23 @@ mod tests {
         m.insert(PREF_IDLE_MINUTES.into(), "0".into());
         assert!(Config::from_prefs(&m).claim_presence);
         assert_eq!(Config::from_prefs(&m).idle_minutes, 10);
+        assert_eq!(c.esc_alt_ms, 50);
+        assert!(c.click_to_react && !c.header_compact && !c.sidebar_collapsed);
+        m.insert(PREF_ESC_ALT_MS.into(), "5000".into());
+        m.insert(PREF_HEADER.into(), "compact".into());
+        m.insert(PREF_SIDEBAR_COLLAPSED.into(), "true".into());
+        m.insert(PREF_CLICK_TO_REACT.into(), "off".into());
+        let x = Config::from_prefs(&m);
+        assert_eq!(x.esc_alt_ms, 50);
+        assert!(x.header_compact && x.sidebar_collapsed && !x.click_to_react);
+        for k in [
+            PREF_ESC_ALT_MS,
+            PREF_HEADER,
+            PREF_SIDEBAR_COLLAPSED,
+            PREF_CLICK_TO_REACT,
+        ] {
+            m.remove(k);
+        }
         m.remove(PREF_CLAIM_PRESENCE);
         m.remove(PREF_IDLE_MINUTES);
         m.remove(PREF_LINKS_OPEN_WITH);

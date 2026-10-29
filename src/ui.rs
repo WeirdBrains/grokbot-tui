@@ -103,6 +103,7 @@ enum Target {
     Account,
     ThemeSwitch,
     Mode(Mode),
+    Collapse,
 }
 
 /// A piece of header text, optionally clickable.
@@ -143,6 +144,7 @@ fn render_segs(f: &mut Frame, app: &mut App, area: Rect, segs: Vec<Seg>) {
                 Target::Account => app.account_area = r,
                 Target::ThemeSwitch => app.theme_switch_area = r,
                 Target::Mode(m) => app.theme_areas.push((r, m)),
+                Target::Collapse => app.header_toggle_area = r,
             }
         }
         x = x.saturating_add(w);
@@ -224,6 +226,7 @@ fn mouse_seg(app: &App) -> Seg {
 fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
     app.account_area = Rect::default();
     app.theme_switch_area = Rect::default();
+    app.header_toggle_area = Rect::default();
     app.theme_areas.clear();
     f.render_widget(Block::new().style(theme::top_bar()), area);
     let (user, bot) = login_and_bot(app);
@@ -231,6 +234,7 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
         HeaderKind::Compact => {
             // Most useful first, so a narrow terminal clips the least important parts.
             let mut segs = vec![
+                hit("▾", theme::collapse_button(), Target::Collapse),
                 seg(" grokbot-tui ", theme::brand()),
                 seg(" ", theme::top_bar()),
             ];
@@ -305,9 +309,84 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
             if app.mock {
                 segs.push(seg("   [MOCK]", theme::mock_tag()));
             }
+            segs.push(seg("   ", theme::top_bar()));
+            segs.push(hit(
+                " ▴ compact ",
+                theme::collapse_button(),
+                Target::Collapse,
+            ));
             render_segs(f, app, rows[3], segs);
         }
     }
+}
+
+/// Reserve feed lines for an inline image: one placeholder line while it loads (or failed),
+/// else as many rows as the scaled image needs.
+#[allow(clippy::too_many_arguments)]
+fn inline_slot(
+    app: &App,
+    lines: &mut Vec<Line<'static>>,
+    buttons: &mut Vec<Option<String>>,
+    slots: &mut Vec<crate::inline::Slot>,
+    wants: &mut Vec<String>,
+    key: String,
+    url: String,
+    label: &str,
+    bubble: usize,
+    right: bool,
+) {
+    let size = app.inline.size_of(
+        &key,
+        bubble.min(u16::MAX as usize) as u16,
+        app.config.inline_max_rows,
+        &app.image_picker,
+    );
+    if !app.inline.states.contains_key(&key) {
+        wants.push(key.clone());
+    }
+    let Some((cols, rows)) = size else {
+        return; // the [🖼 …] placeholder in the text stands in
+    };
+    let mut first = Line::from(theme::image_placeholder().span(format!("[🖼 {label}]")));
+    if right {
+        first = first.alignment(Alignment::Right);
+    }
+    slots.push(crate::inline::Slot {
+        key,
+        url,
+        line: lines.len(),
+        rows,
+        cols,
+        right,
+    });
+    lines.push(first);
+    buttons.push(None);
+    for _ in 1..rows {
+        lines.push(Line::default());
+        buttons.push(None);
+    }
+}
+
+/// The collapsed sidebar: a 1-column strip. Top: » (expand); then one marker per bot
+/// (● active, · others, ◆ the keyboard cursor when the sidebar has focus).
+fn draw_sidebar_strip(f: &mut Frame, app: &mut App, side: Rect) {
+    if side.height == 0 {
+        return;
+    }
+    let mut lines = vec![Line::from(theme::collapse_button().span("»"))];
+    for (i, _) in app.bots.iter().enumerate().take(side.height as usize - 1) {
+        let l = if Some(i) == app.active {
+            theme::selected().span("●")
+        } else if app.focus == Focus::Sidebar && i == app.sidebar_cursor {
+            theme::cursor_row().span("◆")
+        } else {
+            theme::sidebar_strip().span("·")
+        };
+        lines.push(Line::from(l));
+    }
+    f.render_widget(Block::new().style(theme::sidebar_strip()), side);
+    f.render_widget(Paragraph::new(lines), side);
+    app.sidebar_toggle_area = side;
 }
 
 /// Input text as shown (masked for token prompts) and its cursor byte offset.
@@ -427,7 +506,11 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     let il = crate::input::layout(&shown, cur, text_w);
     let vis = crate::input::visible_rows(il.rows.len());
     app.input_scroll = crate::input::scroll_for(app.input_scroll, il.cursor.0, il.rows.len(), vis);
-    let header = header_kind(f.area());
+    let header = if app.config.header_compact {
+        HeaderKind::Compact
+    } else {
+        header_kind(f.area())
+    };
     let chips_h = u16::from(!app.attach.staged.is_empty());
     let [top, menu_row, mid, chips_row, bottom] = Layout::vertical([
         Constraint::Length(header.rows()),
@@ -462,7 +545,11 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         );
     }
     let [side, body] = Layout::horizontal([
-        Constraint::Length(app.config.sidebar_width),
+        Constraint::Length(if app.config.sidebar_collapsed {
+            1
+        } else {
+            app.config.sidebar_width
+        }),
         Constraint::Min(10),
     ])
     .areas(mid);
@@ -490,11 +577,22 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             }
         })
         .collect();
-    f.render_widget(
-        List::new(items)
-            .block(theme::block(&theme::panel(app.focus == Focus::Sidebar)).title(" Bots ")),
-        side,
-    );
+    app.sidebar_toggle_area = Rect::default();
+    if app.config.sidebar_collapsed {
+        draw_sidebar_strip(f, app, side);
+    } else {
+        f.render_widget(
+            List::new(items)
+                .block(theme::block(&theme::panel(app.focus == Focus::Sidebar)).title(" Bots ")),
+            side,
+        );
+        // « collapse button on the top border.
+        if side.width >= 10 {
+            let r = Rect::new(side.x + side.width - 4, side.y, 3, 1);
+            f.render_widget(Paragraph::new(theme::collapse_button().span(" « ")), r);
+            app.sidebar_toggle_area = r;
+        }
+    }
 
     // Body
     let bot_name = app.active_bot().map(|b| b.name.clone());
@@ -516,6 +614,12 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         for a in app.feed_attachments() {
             (a.path, a.name).hash(&mut h);
         }
+        (
+            app.inline.generation,
+            app.config.images_inline,
+            app.config.inline_max_rows,
+        )
+            .hash(&mut h);
         h.finish()
     };
     if app.feed_cache.as_ref().is_none_or(|c| c.key != key) {
@@ -548,6 +652,9 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         let mut pending: Option<(String, bool)> = None;
         // (line index, download buttons on it).
         let mut dl: Vec<(usize, Vec<ColHit>)> = vec![];
+        let mut owners: Vec<Option<String>> = vec![];
+        let mut slots: Vec<crate::inline::Slot> = vec![];
+        let mut wants: Vec<String> = vec![];
         for (i, e) in app.feed().iter().enumerate() {
             if i > 0 {
                 match pending.take() {
@@ -563,6 +670,10 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             }
             let body = entry_lines(e.kind, &e.text, bot_name.as_deref(), Some(bubble));
             buttons.extend(std::iter::repeat_n(None, body.len()));
+            owners.resize(lines.len(), None);
+            let owner = matches!(e.kind, EntryKind::User | EntryKind::Bot)
+                .then(|| crate::emoji::message_key(e.kind as u8, &e.text));
+            owners.extend(std::iter::repeat_n(owner, body.len()));
             lines.extend(body);
             if e.kind == EntryKind::User {
                 let k = crate::emoji::message_key(e.kind as u8, &e.text);
@@ -572,6 +683,46 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                     dl.push((lines.len(), hits));
                     lines.push(l);
                     buttons.push(None);
+                    if app.config.images_inline {
+                        for a in atts.iter().filter(|a| a.is_image()) {
+                            let key = format!("{}{}", crate::attach::SCHEME, a.path);
+                            let url = app
+                                .fresh_read(&a.path)
+                                .map(|r| r.url.clone())
+                                .unwrap_or_default();
+                            inline_slot(
+                                app,
+                                &mut lines,
+                                &mut buttons,
+                                &mut slots,
+                                &mut wants,
+                                key,
+                                url,
+                                &a.name,
+                                bubble,
+                                true,
+                            );
+                        }
+                    }
+                }
+            }
+            if e.kind == EntryKind::Bot && app.config.images_inline {
+                for o in crate::markdown::openables(&e.text)
+                    .into_iter()
+                    .filter(|o| o.image)
+                {
+                    inline_slot(
+                        app,
+                        &mut lines,
+                        &mut buttons,
+                        &mut slots,
+                        &mut wants,
+                        o.url.clone(),
+                        o.url,
+                        &o.label,
+                        bubble,
+                        false,
+                    );
                 }
             }
             if e.kind == EntryKind::Bot {
@@ -610,6 +761,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             })
             .collect();
         let rows = row_counts(&lines, inner_w);
+        owners.resize(lines.len(), None);
         let mut downloads = vec![vec![]; lines.len()];
         for (i, h) in dl {
             downloads[i] = h;
@@ -621,7 +773,12 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             rows,
             links,
             buttons,
+            owners,
         });
+        app.inline_slots = slots;
+        for k in wants {
+            app.inline_want(&k);
+        }
     }
     let mut extra: Vec<Line<'static>> = vec![];
     let cache_empty = app.feed_cache.as_ref().is_some_and(|c| c.lines.is_empty());
@@ -715,16 +872,41 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     {
         let cache = app.feed_cache.as_ref().expect("built above");
         let mut row = 0usize;
-        for ((((l, n), ls), btn), dls) in cache
+        app.bubble_hits.clear();
+        for (((((l, n), ls), btn), dls), owner) in cache
             .lines
             .iter()
             .zip(&cache.rows)
             .zip(&cache.links)
             .zip(&cache.buttons)
             .zip(&cache.downloads)
+            .zip(&cache.owners)
         {
             let y = row as isize - off as isize;
             row += n;
+            if let Some(k) = owner {
+                // Every visible screen row of this bubble line (wrapped lines span rows).
+                let lw = l.width().min(inner_w);
+                let dx = match l.alignment {
+                    Some(Alignment::Right) => inner_w.saturating_sub(lw),
+                    Some(Alignment::Center) => inner_w.saturating_sub(lw) / 2,
+                    _ => 0,
+                };
+                let w = if *n > 1 { inner_w } else { lw };
+                let x0 = if *n > 1 { 0 } else { dx };
+                for r in 0..*n as isize {
+                    let yy = y + r;
+                    if yy >= 0 && yy < inner_h as isize && w > 0 {
+                        app.bubble_hits.push(LinkHit {
+                            x: inner.x + x0 as u16,
+                            y: inner.y + yy as u16,
+                            w: w as u16,
+                            url: k.clone(),
+                            image: false,
+                        });
+                    }
+                }
+            }
             if (ls.is_empty() && btn.is_none() && dls.is_empty())
                 || *n != 1
                 || y < 0
@@ -773,6 +955,23 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                 }
             }
         }
+    }
+    {
+        let starts: Vec<usize> = app
+            .feed_cache
+            .as_ref()
+            .map(|c| {
+                c.rows
+                    .iter()
+                    .scan(0usize, |acc, n| {
+                        let s = *acc;
+                        *acc += n;
+                        Some(s)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        app.draw_inline(f.buffer_mut(), inner, &starts, off as usize);
     }
     app.unread_area = Rect::default();
     if !app.follow && app.unread > 0 && body.height > 2 && body.width > 8 {
@@ -891,6 +1090,8 @@ pub struct FeedCache {
     buttons: Vec<Option<String>>,
     /// Per line: download buttons (start col, end col, url).
     downloads: Vec<Vec<ColHit>>,
+    /// Per line: the message whose bubble this line is part of (click-to-react).
+    owners: Vec<Option<String>>,
 }
 
 /// A link drawn on screen this frame: one row, `x..x+w`.
@@ -1519,6 +1720,181 @@ pub(crate) mod tests {
                     .add_modifier
                     .contains(ratatui::style::Modifier::UNDERLINED)
         }));
+    }
+
+    fn chat_app(rt: &tokio::runtime::Runtime) -> (App, tempfile::TempDir) {
+        let (mut app, d) = crate::app::tests::test_app(rt);
+        crate::app::tests::mock_login(&mut app, "tok");
+        let bot = app.active_bot().unwrap().id.clone();
+        app.logs.insert(
+            bot,
+            vec![crate::app::Entry {
+                kind: EntryKind::Bot,
+                text: "hello there, a reply with a link https://example.com/x in it".into(),
+            }],
+        );
+        app.ssh = false;
+        (app, d)
+    }
+
+    fn redraw(app: &mut App) {
+        let mut term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        term.draw(|f| draw(f, app)).unwrap();
+    }
+
+    #[test]
+    fn clicking_a_bubble_opens_the_react_picker_but_not_on_links_or_drags() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = chat_app(&rt);
+        redraw(&mut app);
+        let b = app.bubble_hits.first().cloned().expect("bubble on screen");
+        let link = app.link_hits.first().cloned().unwrap();
+        // Empty part of the bubble: first cell.
+        app.click(b.x, b.y);
+        assert!(app.body_release(b.x, b.y));
+        let p = app.react_picker.as_ref().expect("picker");
+        assert_eq!(p.msg_key, b.url);
+        app.react_picker = None;
+        // Press and release on different cells (a drag): no picker.
+        app.click(b.x, b.y);
+        assert!(!app.body_release(b.x + 2, b.y));
+        assert!(app.react_picker.is_none());
+        // On a link: the link's own action, never the picker.
+        app.press_at = Some((link.x, link.y));
+        assert!(!app.body_release(link.x, link.y));
+        // Pref off.
+        app.config.click_to_react = false;
+        app.click(b.x, b.y);
+        assert!(!app.body_release(b.x, b.y));
+        assert!(app.react_picker.is_none());
+    }
+
+    #[test]
+    fn menus_are_clickable_and_hover_highlights() {
+        use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        let ev = |kind, column, row| MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = chat_app(&rt);
+        redraw(&mut app);
+        let view = crate::menubar::MENUS
+            .iter()
+            .position(|m| m.label == "View")
+            .unwrap();
+        let r = app.menu.bar_areas[view];
+        assert!(app.menu_mouse(ev(MouseEventKind::Down(MouseButton::Left), r.x + 1, r.y)));
+        assert_eq!(app.menu.open, Some(view));
+        redraw(&mut app);
+        // Hover the second item.
+        let o = app.menu.opt_areas[1];
+        assert!(app.menu_mouse(ev(MouseEventKind::Moved, o.x + 1, o.y)));
+        assert_eq!(app.menu.opt, 1);
+        // Click it: /sidebar toggles.
+        assert!(app.menu_mouse(ev(MouseEventKind::Down(MouseButton::Left), o.x + 1, o.y)));
+        assert!(app.menu.open.is_none());
+        assert!(app.config.sidebar_collapsed);
+        // Open again, click outside: closes.
+        app.menu_mouse(ev(MouseEventKind::Down(MouseButton::Left), r.x + 1, r.y));
+        redraw(&mut app);
+        assert!(app.menu_mouse(ev(MouseEventKind::Down(MouseButton::Left), 90, 20)));
+        assert!(app.menu.open.is_none());
+        // Closed: clicks elsewhere aren't consumed.
+        assert!(!app.menu_mouse(ev(MouseEventKind::Down(MouseButton::Left), 90, 20)));
+    }
+
+    #[test]
+    fn header_and_sidebar_collapse_with_correct_hit_testing() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = chat_app(&rt);
+        let mut term = Terminal::new(TestBackend::new(140, 40)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let tall_body_y = app.body_area.y;
+        assert!(tall_body_y > 3, "tall header");
+        // Header ▴ button collapses to one row.
+        let h = app.header_toggle_area;
+        assert!(h.width > 0);
+        app.click(h.x, h.y);
+        assert!(app.config.header_compact);
+        assert_eq!(
+            app.store
+                .get_pref(crate::config::PREF_HEADER)
+                .unwrap()
+                .as_deref(),
+            Some("compact")
+        );
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        assert_eq!(
+            app.menu.bar_areas[0].y, 1,
+            "menu right under a 1-row header"
+        );
+        assert!(app.body_area.y < tall_body_y);
+        // Sidebar « collapses to one column; the body starts at x=1.
+        let s = app.sidebar_toggle_area;
+        app.click(s.x + 1, s.y);
+        assert!(app.config.sidebar_collapsed);
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        assert_eq!(app.sidebar_area.width, 1);
+        assert_eq!(app.body_area.x, 1);
+        let buf = term.backend().buffer().clone();
+        assert_eq!(buf[(0, app.sidebar_area.y)].symbol(), "»");
+        // Links still hit where they're drawn.
+        let l = app.link_hits.first().cloned().unwrap();
+        assert!(
+            app.body_area
+                .contains(ratatui::layout::Position::new(l.x, l.y))
+        );
+        // Clicking the strip expands; ▾ in the compact header expands it.
+        app.click(0, app.sidebar_area.y + 2);
+        assert!(!app.config.sidebar_collapsed);
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let h = app.header_toggle_area;
+        app.click(h.x, h.y);
+        assert!(!app.config.header_compact);
+    }
+
+    #[test]
+    fn images_draw_inline_scaled_and_click_opens_the_viewer() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        crate::app::tests::mock_login(&mut app, "tok");
+        let tmp = tempfile::tempdir().unwrap();
+        let png = tmp.path().join("pic.png");
+        image::RgbImage::from_pixel(200, 100, image::Rgb([200, 0, 0]))
+            .save(&png)
+            .unwrap();
+        let bot = app.active_bot().unwrap().id.clone();
+        app.logs.insert(
+            bot,
+            vec![crate::app::Entry {
+                kind: EntryKind::Bot,
+                text: format!("look: ![pic]({})", png.display()),
+            }],
+        );
+        let mut term = Terminal::new(TestBackend::new(100, 40)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(app.inline_slots.is_empty(), "placeholder while loading");
+        crate::app::tests::settle(&mut app);
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let s = app.inline_slots.first().cloned().expect("slot once loaded");
+        assert!(s.rows >= 2 && s.rows <= 12, "{s:?}");
+        assert!(s.cols as usize <= 66, "within the bubble");
+        let h = app
+            .link_hits
+            .iter()
+            .find(|h| h.image && h.w == s.cols)
+            .cloned()
+            .expect("image click area");
+        app.click(h.x + 1, h.y);
+        assert!(app.image_view.is_some(), "click opens the viewer");
+        // Off: no slot.
+        app.image_view = None;
+        app.config.images_inline = false;
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(app.inline_slots.is_empty());
     }
 
     #[test]

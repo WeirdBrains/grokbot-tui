@@ -24,13 +24,18 @@ pub const MENUS: &[Menu] = &[
         label: "Chat",
         hint: 'c',
         items: &[
-            "help", "copy", "history", "reload", "mouse", "keymap", "quit",
+            "help", "copy", "history", "reload", "mouse", "keymap", "status", "quit",
         ],
     },
     Menu {
         label: "Account",
         hint: 'a',
         items: &["login", "logout", "whoami", "account", "switch"],
+    },
+    Menu {
+        label: "View",
+        hint: 'v',
+        items: &["header", "sidebar", "menu"],
     },
     Menu {
         label: "Web",

@@ -406,6 +406,11 @@ pub enum Event {
         dest: std::path::PathBuf,
         result: std::result::Result<u64, String>,
     },
+    /// An inline image finished loading.
+    InlineLoaded {
+        key: String,
+        result: std::result::Result<image::DynamicImage, String>,
+    },
     /// A presence report (claim or release) finished.
     Presence {
         epoch: u64,
@@ -504,6 +509,13 @@ pub struct App {
     pub link_hits: Vec<crate::ui::LinkHit>,
     /// React buttons on screen (url = message key).
     pub react_hits: Vec<crate::ui::LinkHit>,
+    /// Message bubble rows on screen (url = message key) for click-to-react.
+    pub bubble_hits: Vec<crate::ui::LinkHit>,
+    /// Where the left button went down in the chat body (click vs drag).
+    pub press_at: Option<(u16, u16)>,
+    /// Header ▾/▴ and sidebar «/» buttons.
+    pub header_toggle_area: Rect,
+    pub sidebar_toggle_area: Rect,
     /// The emoji picker modal.
     pub react_picker: Option<crate::emojipicker::EmojiPicker>,
     /// The download modal (`[⤓]`, `/download`, vim `d`).
@@ -528,6 +540,10 @@ pub struct App {
     pub ssh_confirm: Option<(String, std::time::Instant)>,
     /// The current click had Ctrl/Alt held: links use the other opener.
     pub click_other: bool,
+    /// Inline image states and protocol cache (1.22.0).
+    pub inline: crate::inline::Inline,
+    /// Inline image slots in the current feed (set when the feed cache is built).
+    pub inline_slots: Vec<crate::inline::Slot>,
     /// The image viewer modal.
     pub image_view: Option<crate::imageview::ImageView>,
     pub image_load_seq: u64,
@@ -742,6 +758,10 @@ impl App {
             unread_area: Rect::default(),
             link_hits: vec![],
             react_hits: vec![],
+            bubble_hits: vec![],
+            press_at: None,
+            header_toggle_area: Rect::default(),
+            sidebar_toggle_area: Rect::default(),
             react_picker: None,
             download: None,
             download_hits: vec![],
@@ -754,6 +774,8 @@ impl App {
             ssh: crate::ssh::detect(),
             ssh_confirm: None,
             click_other: false,
+            inline: Default::default(),
+            inline_slots: vec![],
             image_view: None,
             image_load_seq: 0,
             image_picker: ratatui_image::picker::Picker::halfblocks(),
@@ -1050,6 +1072,7 @@ impl App {
             Event::ImageLoaded { id, result } => self.on_image_loaded(id, result),
             Event::Uploaded { id, result } => self.on_uploaded(id, result),
             Event::BrowserLoaded { id, url, result } => self.on_browser_loaded(id, url, result),
+            Event::InlineLoaded { key, result } => self.on_inline_loaded(key, result),
             Event::Presence {
                 epoch,
                 active,
@@ -2874,6 +2897,14 @@ impl App {
                 }
                 true
             }
+            "view.toggle_header" => {
+                self.set_header_compact(!self.config.header_compact);
+                true
+            }
+            "view.toggle_sidebar" => {
+                self.set_sidebar_collapsed(!self.config.sidebar_collapsed);
+                true
+            }
             "browser.open" => {
                 self.open_browser(None);
                 true
@@ -3068,6 +3099,126 @@ impl App {
              Clicking bots and wheel scrolling are off until F6 or /mouse on."
                 .into()
         });
+    }
+
+    /// Left button released: a click (press and release on the same cell, no drag) on an
+    /// empty part of a message bubble opens the reaction picker for it.
+    pub fn body_release(&mut self, col: u16, row: u16) -> bool {
+        let Some(p) = self.press_at.take() else {
+            return false;
+        };
+        if p != (col, row)
+            || !self.config.click_to_react
+            || self.body_sel.as_ref().is_some_and(|s| !s.is_empty())
+        {
+            return false;
+        }
+        let on = |hs: &[crate::ui::LinkHit]| {
+            hs.iter()
+                .any(|h| h.y == row && col >= h.x && col < h.x + h.w)
+        };
+        if on(&self.link_hits) || on(&self.react_hits) || on(&self.download_hits) {
+            return false;
+        }
+        let Some(k) = self
+            .bubble_hits
+            .iter()
+            .find(|h| h.y == row && col >= h.x && col < h.x + h.w)
+            .map(|h| h.url.clone())
+        else {
+            return false;
+        };
+        self.body_sel = None;
+        self.open_react_picker_for(k);
+        true
+    }
+
+    /// The default key scheme (vim users get F7/F8 from the keymap, remappable).
+    pub fn keys_scheme_default(&self) -> bool {
+        self.config.keys == crate::config::KeysScheme::Default
+    }
+
+    /// `ui.header`: one-row header (`compact`) or the tall one when there's room (`full`).
+    pub fn set_header_compact(&mut self, on: bool) {
+        let v = if on { "compact" } else { "full" };
+        if let Err(e) = self.store.set_pref(crate::config::PREF_HEADER, v) {
+            self.error(format!("{e:#}"));
+            return;
+        }
+        self.config.header_compact = on;
+        self.needs_clear = true;
+    }
+
+    /// `ui.sidebar_collapsed`: the sidebar as a 1-column strip.
+    pub fn set_sidebar_collapsed(&mut self, on: bool) {
+        if let Err(e) = self.store.set_pref(
+            crate::config::PREF_SIDEBAR_COLLAPSED,
+            if on { "true" } else { "false" },
+        ) {
+            self.error(format!("{e:#}"));
+            return;
+        }
+        self.config.sidebar_collapsed = on;
+        self.needs_clear = true;
+    }
+
+    /// Mouse on the menu bar / open dropdown. True when consumed.
+    pub fn menu_mouse(&mut self, m: ratatui::crossterm::event::MouseEvent) -> bool {
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+        if self.menu.open.is_none() && self.overlay_open() {
+            return false;
+        }
+        let (c, r) = (m.column, m.row);
+        match m.kind {
+            MouseEventKind::Moved => {
+                let Some(open) = self.menu.open else {
+                    return false;
+                };
+                if let Some(k) = self.menu.hit_opt(c, r) {
+                    self.menu.opt = k;
+                    return true;
+                }
+                if let Some(i) = self.menu.hit_bar(c, r)
+                    && i != open
+                {
+                    self.menu.open_menu(i);
+                    return true;
+                }
+                false
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(i) = self.menu.hit_bar(c, r) {
+                    if self.menu.open == Some(i) {
+                        self.menu.close();
+                    } else {
+                        self.menu.open_menu(i);
+                        self.tooltip.dismiss();
+                    }
+                    return true;
+                }
+                if self.menu.open.is_none() {
+                    return false;
+                }
+                if let Some(k) = self.menu.hit_opt(c, r) {
+                    self.menu.opt = k;
+                    if let Some(cmd) = self.menu.selected_command() {
+                        self.run_menu_command(cmd);
+                    }
+                    return true;
+                }
+                if !self
+                    .menu
+                    .dropdown_area
+                    .contains(ratatui::layout::Position::new(c, r))
+                {
+                    self.menu.close();
+                }
+                true
+            }
+            MouseEventKind::Up(_) | MouseEventKind::Drag(_) => self.menu.open.is_some(),
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => self.menu.open.is_some(),
+            _ => false,
+        }
     }
 
     pub fn toggle_mouse_capture(&mut self) {
@@ -3366,10 +3517,20 @@ impl App {
                     anchor: off,
                     cursor: off,
                 });
+                self.press_at = Some((col, row));
                 return;
             }
+            self.press_at = Some((col, row));
         } else {
             self.body_sel = None;
+        }
+        if self.header_toggle_area.contains(at) {
+            self.set_header_compact(!self.config.header_compact);
+            return;
+        }
+        if self.sidebar_toggle_area.contains(at) {
+            self.set_sidebar_collapsed(!self.config.sidebar_collapsed);
+            return;
         }
         if self.theme_switch_area.contains(at) {
             self.open_theme_picker();
@@ -3666,6 +3827,33 @@ pub mod tests {
             assert!(app.follow);
             assert_eq!(app.scroll, 0);
         }
+    }
+
+    #[test]
+    fn status_command_sends_the_configured_prompt() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "tok");
+        let bot = app.active_bot().unwrap().id.clone();
+        type_line(&mut app, "/status Include blockers.");
+        let want =
+            "Where are we now? Give me a brief status of your current tasks. Include blockers.";
+        let db: Vec<String> = app
+            .store
+            .messages(&bot)
+            .unwrap()
+            .iter()
+            .map(|m| m.text.clone())
+            .collect();
+        assert!(db.contains(&want.to_string()), "{db:?}");
+        assert!(app.feed().iter().any(|e| e.text == want));
+        app.store
+            .set_pref(crate::config::PREF_STATUS_PROMPT, "Status?")
+            .unwrap();
+        app.reload_config().unwrap();
+        type_line(&mut app, "/status");
+        assert!(app.feed().iter().any(|e| e.text == "Status?"));
+        assert_eq!(crate::commands::status_text("A", "  "), "A");
     }
 
     #[test]

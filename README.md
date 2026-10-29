@@ -204,6 +204,30 @@ app sends, so pushes to your other devices can be held. 🔕 in the header shows
 switch accounts or quit; if the process is suspended the lease simply expires. It needs a
 Cursor session (`/login desktop` or `/login cursor`). Theme part: `presence_indicator`.
 
+## Layout toggles, menus and Alt over SSH
+
+- `/header compact|full|toggle` (F7, the ▾/▴ button, **View** menu; pref `ui.header`) switches
+  to a one-row header that keeps the bot, account, login status, SSH and 🔕.
+- `/sidebar collapse|expand|toggle` (F8, the «/» buttons; pref `ui.sidebar_collapsed`) shrinks
+  the bot list to a 1-column strip; click it to expand.
+- Menus are clickable (title opens, hover highlights, click runs, outside closes). Without the
+  mouse: F10, Alt-M, Alt+<underlined letter>, or `/menu [name]`.
+- Clicking an empty part of a message bubble opens its reaction picker
+  (`message.click_to_react`, default on).
+- Over SSH, Alt+key can arrive as a separate ESC and key. ESC then a key within
+  `keys.esc_alt_timeout_ms` (default 50 ms; 0 disables) is read as Alt+key. Windows Terminal
+  keeps a few Alt chords for itself (Alt-Enter, Alt-Space, Alt-Shift-+/-); use F10 or `/menu`.
+
+Images in replies and your image attachments show inline in the bubble (scaled to fit, at
+most `images.inline_max_rows` rows, default 12; `images.inline = off` turns it off). Click one
+for the full-size viewer.
+
+`/status [extra text]` asks the current bot "Where are we now? Give me a brief status of your
+current tasks." (plus your text) as a normal prompt; change the text with
+`commands.status_prompt`.
+
+Theme parts: `collapse_button`, `sidebar_strip`.
+
 ## Notifications, menu bar, tooltips
 
 Toasts honour `~/.grokbot-tui/notify-rules.toml` and `/notify` (dnd / per-kind). They never

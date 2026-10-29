@@ -10,6 +10,8 @@
 "ctrl-z" = "input.undo_clear"
 "f1" = "help.open"
 "f6" = "mouse.toggle"
+"f7" = "view.toggle_header"
+"f8" = "view.toggle_sidebar"
 
 [mode.normal]
 "i" = "mode.insert"

@@ -206,6 +206,9 @@ in between quits.
                                last notifications.idle_minutes, default 10) so Grok Bot pushes
                                to your other devices are held; 🔕 while held, /whoami shows
                                the lease. Released on blur, idle, logout, account switch, quit.
+  /status [extra text]         Ask the bot “Where are we now? Give me a brief status of your
+                               current tasks.” (+ extra text) as a normal prompt; change the
+                               text with pref commands.status_prompt. Also menu Chat.
   /browse [url] (/web)         Built-in text browser: no JavaScript, no cookies, 5 MiB / 20 s
                                cap. Tab completes recent URLs; vim NORMAL b. In it: e, Ctrl-L
                                or : edit the URL; j/k ↑/↓ PgUp/PgDn g/G Ctrl-d/u wheel scroll;
@@ -219,6 +222,12 @@ in between quits.
                                builtin; respect_pref follows links.open_with). Anything that
                                would open an app on the remote machine (o, /open, Ctrl-click,
                                the viewer's o) warns and needs repeating within 5 s.
+  Inline images                Replies' images and your image attachments draw in the bubble
+                               (images.inline = on|off, images.inline_max_rows = 12); click
+                               one for the viewer. Shown once fully on screen.
+  Tab completion               Lists scroll (PgUp/PgDn, wheel, n/total shown). Paths with
+                               spaces: quotes or backslash escapes; completions insert
+                               backslash-escaped names.
   /view [n]                    Image viewer: the image nearest the bottom of the chat (or the
                                n-th newest), as large as the terminal allows (kitty / sixel /
                                iTerm2, else halfblocks). Also: click a [🖼 …] placeholder,
@@ -271,7 +280,25 @@ Input focused (multi-line)
   \\ then Enter             New line (strip the backslash) when modifiers are unavailable
   Alt-Enter                 New line (Option-as-Meta / ESC+CR). macOS Terminal.app:
                             enable “Use Option as Meta key”, or use Ctrl-J / \\+Enter.
-  F10 / Alt-M               Menu bar (Chat, Account, Theme, Notify, Help)
+  F10 / Alt-M / /menu [name] Menu bar (Chat, Account, View, Web, Theme, Notify, Help).
+                            Alt+<underlined letter> opens that menu (Alt-C Chat, Alt-V
+                            View, …). Or click a title; hover highlights, click runs,
+                            click outside closes (needs mouse capture: F6).
+  Alt over SSH              Terminals send Alt+x as ESC x. Over SSH (e.g. Windows Terminal
+                            → ssh) the ESC can arrive alone, so ESC then a key within
+                            keys.esc_alt_timeout_ms (default 50; 0 = off; raise it on slow
+                            links) counts as Alt+key. A plain Esc still works (it fires
+                            after that delay). Windows Terminal keeps some Alt chords
+                            itself (Alt-Enter fullscreen, Alt-Space, Alt-Shift-+/-, Alt-F4):
+                            use F10 or /menu instead.
+  F7 / /header              Header: one row (compact) or full; also the ▾/▴ button and
+                            View menu (pref ui.header; keymap view.toggle_header)
+  F8 / /sidebar             Collapse the bot list to a 1-column strip (● active); click
+                            the strip or » to expand, « to collapse (pref
+                            ui.sidebar_collapsed; keymap view.toggle_sidebar)
+  Click a message           Opens the reaction picker for it (pref message.click_to_react,
+                            default on). Links, images, [☺+] and [⤓] keep their actions;
+                            dragging still selects text
   /notify                   Toasts: dnd, on/off <kind>, reload rules
   ← → / Home End            Move the cursor / to the start or end of the line
   ↑ / ↓                     Previous / next line; on the first / last line, prompt history
