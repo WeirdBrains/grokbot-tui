@@ -80,6 +80,35 @@ pub const DEFAULT_IDLE_MINUTES: u64 = 10;
 
 /// Esc-prefix window for Alt+key, ms (global, 0 disables, max 1000).
 pub const PREF_ESC_ALT_MS: &str = "keys.esc_alt_timeout_ms";
+/// kitty keyboard protocol: auto (when the terminal answers the query) | on | off.
+pub const PREF_KITTY_PROTOCOL: &str = "keys.kitty_protocol";
+
+/// `keys.kitty_protocol`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KittyProtocol {
+    #[default]
+    Auto,
+    On,
+    Off,
+}
+
+impl KittyProtocol {
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s.trim() {
+            "auto" => Self::Auto,
+            "on" | "true" | "1" | "yes" => Self::On,
+            "off" | "false" | "0" | "no" => Self::Off,
+            _ => return None,
+        })
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::On => "on",
+            Self::Off => "off",
+        }
+    }
+}
 /// Header: `full` (tall when there's room) or `compact` (one row) (global).
 pub const PREF_HEADER: &str = "ui.header";
 /// Sidebar collapsed to a 1-column strip (global).
@@ -154,6 +183,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_LINKS_OPEN_WITH,
     PREF_LINKS_SSH_BEHAVIOR,
     PREF_ESC_ALT_MS,
+    PREF_KITTY_PROTOCOL,
     PREF_HEADER,
     PREF_SIDEBAR_COLLAPSED,
     PREF_ATTACHMENTS_PANEL,
@@ -287,6 +317,8 @@ pub struct Config {
     pub status_prompt: String,
     /// `keys.esc_alt_timeout_ms`.
     pub esc_alt_ms: u64,
+    /// `keys.kitty_protocol`.
+    pub kitty_protocol: KittyProtocol,
     /// `ui.header = compact`.
     pub header_compact: bool,
     /// `ui.sidebar_collapsed`.
@@ -331,6 +363,7 @@ impl Default for Config {
             gif_autoplay: true,
             status_prompt: DEFAULT_STATUS_PROMPT.to_string(),
             esc_alt_ms: 50,
+            kitty_protocol: KittyProtocol::Auto,
             header_compact: false,
             sidebar_collapsed: false,
             attachments_panel: false,
@@ -370,6 +403,7 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_GIF_AUTOPLAY, "on".to_string()),
         (PREF_STATUS_PROMPT, c.status_prompt.clone()),
         (PREF_ESC_ALT_MS, c.esc_alt_ms.to_string()),
+        (PREF_KITTY_PROTOCOL, c.kitty_protocol.as_str().to_string()),
         (PREF_HEADER, "full".to_string()),
         (PREF_SIDEBAR_COLLAPSED, c.sidebar_collapsed.to_string()),
         (
@@ -459,6 +493,9 @@ impl Config {
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty())
                 .unwrap_or(d.status_prompt),
+            kitty_protocol: o(PREF_KITTY_PROTOCOL)
+                .and_then(|v| KittyProtocol::parse(&v))
+                .unwrap_or(d.kitty_protocol),
             esc_alt_ms: o(PREF_ESC_ALT_MS)
                 .and_then(|v| v.trim().parse().ok())
                 .filter(|n| *n <= 1000)
@@ -613,5 +650,15 @@ mod max_response_tests {
         );
         assert_eq!(parse_max_response_bytes(Some(" 1048576 ")), 1_048_576);
         const { assert!(DEFAULT_MAX_RESPONSE_BYTES > grokbot_api::MAX_RESPONSE_BYTES) };
+    }
+
+    #[test]
+    fn kitty_protocol_pref() {
+        assert_eq!(Config::default().kitty_protocol, KittyProtocol::Auto);
+        let mut m = BTreeMap::new();
+        m.insert(PREF_KITTY_PROTOCOL.to_string(), "off".to_string());
+        assert_eq!(Config::from_prefs(&m).kitty_protocol, KittyProtocol::Off);
+        assert_eq!(KittyProtocol::parse("on"), Some(KittyProtocol::On));
+        assert_eq!(KittyProtocol::parse("bogus"), None);
     }
 }

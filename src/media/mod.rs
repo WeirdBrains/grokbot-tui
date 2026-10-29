@@ -551,6 +551,14 @@ impl App {
         false
     }
 
+    /// Pause every player (suspend).
+    pub fn media_cmd_all_pause(&mut self) {
+        let keys: Vec<String> = self.media.items.keys().cloned().collect();
+        for k in keys {
+            self.media_cmd(&k, Cmd::Pause);
+        }
+    }
+
     /// Stop every player (logout, chat switch, quit).
     pub fn media_stop_all(&mut self) {
         for it in self.media.items.values() {

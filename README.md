@@ -168,6 +168,14 @@ work when the terminal reports modifiers. A trailing `\` then Enter also inserts
 **macOS Terminal.app** sends plain Enter for Shift/Ctrl-Enter; enable “Use Option as Meta
 key” for Option-Enter, or use Ctrl-J / `\`+Enter.
 
+## Keyboard protocol
+
+On terminals with the kitty keyboard protocol (kitty, Ghostty, foot, WezTerm, recent
+Alacritty/iTerm2), grokbot-tui turns it on (disambiguate, event types and alternate keys),
+so Alt, Ctrl-Enter and Shift-Enter are reliable and Esc has no delay. Elsewhere the ESC-prefix
+Alt handling is used. Pref `keys.kitty_protocol = auto|on|off` (default `auto`);
+`/kitty` shows or changes it. The flags are popped on exit and on suspend.
+
 ## Built-in browser and SSH
 
 Links open in a built-in text browser by default (`links.open_with = "builtin"`; set it to

@@ -276,6 +276,10 @@ Input focused (multi-line)
                             ones that send plain Enter (e.g. Alacritty by default) send.
   Shift/Alt-Enter           New line when the terminal reports modifiers (kitty protocol
                             / modifyOtherKeys). Remap via keymap `input.newline`.
+  keys.kitty_protocol       auto (default) | on | off. With the kitty keyboard protocol
+                            (kitty, Ghostty, foot, WezTerm, recent Alacritty/iTerm2) Alt,
+                            Ctrl-Enter and Shift-Enter are reliable and Esc has no delay;
+                            elsewhere the ESC-prefix Alt handling is used. /kitty shows or sets it
   Ctrl-J                    New line (works everywhere, including macOS Terminal.app)
   \\ then Enter             New line (strip the backslash) when modifiers are unavailable
   Alt-Enter                 New line (Option-as-Meta / ESC+CR). macOS Terminal.app:

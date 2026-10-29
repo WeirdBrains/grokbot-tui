@@ -579,6 +579,8 @@ pub struct App {
     pub tooltip: crate::tooltip::TooltipState,
     /// Kitty-style keyboard enhancement is active.
     pub keyboard_enhancement: bool,
+    /// `/kitty` changed `keys.kitty_protocol`: re-apply it in the event loop.
+    pub kitty_reapply: bool,
     /// One-time Apple Terminal newline hint already shown this process.
     pub apple_newline_hinted: bool,
     pub sidebar_area: Rect,
@@ -807,6 +809,7 @@ impl App {
             menu: crate::menubar::MenuBar::default(),
             tooltip: crate::tooltip::TooltipState::default(),
             keyboard_enhancement: false,
+            kitty_reapply: false,
             apple_newline_hinted: false,
             sidebar_area: Rect::default(),
             account_area: Rect::default(),

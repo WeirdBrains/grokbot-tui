@@ -197,8 +197,9 @@ fn main() -> Result<()> {
     let _ = execute!(std::io::stdout(), EnableBracketedPaste);
     // Focus reports drive the presence claim (released on blur).
     let _ = execute!(std::io::stdout(), event::EnableFocusChange);
-    let enhancement = enable_shift_enter();
+    let enhancement = enable_shift_enter(app.config.kitty_protocol);
     app.keyboard_enhancement = enhancement;
+    suspend::install();
     app.maybe_apple_terminal_hint();
     // Pop enhancement / paste even on panic.
     let hook = std::panic::take_hook();
@@ -260,7 +261,30 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let mut esc_meta =
         crate::keys::EscMeta::with_window(std::time::Duration::from_millis(app.config.esc_alt_ms));
     while !app.should_quit {
-        esc_meta.window = std::time::Duration::from_millis(app.config.esc_alt_ms);
+        if suspend::take() {
+            suspend_and_resume(term, app)?;
+            dirty = true;
+        }
+        if std::mem::take(&mut app.kitty_reapply) {
+            disable_shift_enter();
+            app.keyboard_enhancement = enable_shift_enter(app.config.kitty_protocol);
+            app.info(format!(
+                "kitty keyboard protocol {}.",
+                if app.keyboard_enhancement {
+                    "on"
+                } else {
+                    "off"
+                }
+            ));
+            dirty = true;
+        }
+        // The kitty protocol reports Alt itself (and a plain Esc at once): no ESC-prefix
+        // folding or Esc delay then.
+        esc_meta.window = if app.keyboard_enhancement {
+            std::time::Duration::ZERO
+        } else {
+            std::time::Duration::from_millis(app.config.esc_alt_ms)
+        };
         app.tick();
         let now = std::time::Instant::now();
         if let Some(k) = esc_meta.poll_timeout(now) {
@@ -325,7 +349,8 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                 _ => {}
             }
             match ev {
-                Event::Key(k) if k.kind == KeyEventKind::Press => {
+                Event::Key(k) if k.kind != KeyEventKind::Release => {
+                    let k = normalize_key(k);
                     let now = std::time::Instant::now();
                     match esc_meta.feed(k, now) {
                         crate::keys::Feed::Hold => {}
@@ -518,7 +543,7 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
             return false;
         }
-        Event::Key(k) if k.kind == KeyEventKind::Press => {
+        Event::Key(k) if k.kind != KeyEventKind::Release => {
             if let Some(q) = quit_key(&k) {
                 let now = std::time::Instant::now();
                 match q {
@@ -1099,34 +1124,117 @@ fn write_hyperlinks(buf: &ratatui::buffer::Buffer, hits: &[ui::LinkHit]) -> std:
 const MODIFY_OTHER_KEYS_ON: &str = "\x1b[>4;1m";
 const MODIFY_OTHER_KEYS_OFF: &str = "\x1b[>4m";
 
-/// Ask the terminal to report modifiers on Enter so Shift-Enter can be told apart.
-/// Both requests are sent unconditionally: the kitty "supports?" query fails behind
-/// tmux/screen even when the outer terminal could help, and terminals ignore requests
-/// they don't understand. Alt-Enter and Ctrl-J always work as fallbacks.
-/// Push keyboard enhancement when the terminal supports it. Always send modifyOtherKeys
-/// level 1 (harmless when ignored). Returns whether kitty-style enhancement is active.
-fn enable_shift_enter() -> bool {
-    use ratatui::crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
-    use std::io::Write;
-    let supported = ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
-    let mut out = std::io::stdout();
-    if supported {
-        let _ = execute!(
-            out,
-            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-        );
-    }
-    let _ = out.write_all(MODIFY_OTHER_KEYS_ON.as_bytes());
-    let _ = out.flush();
-    supported
+/// Flags pushed with the kitty keyboard protocol (1.25.0): unambiguous escape codes (Alt,
+/// Ctrl-Enter, Shift-Enter, a plain Esc without a timeout), press/repeat/release types,
+/// and alternate (shifted) keys.
+fn kitty_flags() -> ratatui::crossterm::event::KeyboardEnhancementFlags {
+    use ratatui::crossterm::event::KeyboardEnhancementFlags as F;
+    F::DISAMBIGUATE_ESCAPE_CODES | F::REPORT_EVENT_TYPES | F::REPORT_ALTERNATE_KEYS
 }
 
+/// Push the kitty keyboard protocol per `keys.kitty_protocol` (auto: when the terminal
+/// answers the query; on: always; off: never), and always send modifyOtherKeys level 1
+/// (harmless when ignored). Returns whether the kitty protocol is active. Without it the
+/// ESC-prefix Alt handling (`keys.esc_alt_timeout_ms`) stays in use.
+fn enable_shift_enter(mode: crate::config::KittyProtocol) -> bool {
+    use crate::config::KittyProtocol;
+    use ratatui::crossterm::event::PushKeyboardEnhancementFlags;
+    use std::io::Write;
+    let push = match mode {
+        KittyProtocol::Off => false,
+        KittyProtocol::On => true,
+        KittyProtocol::Auto => {
+            ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
+        }
+    };
+    let mut out = std::io::stdout();
+    if push {
+        let _ = execute!(out, PushKeyboardEnhancementFlags(kitty_flags()));
+    }
+    KITTY_PUSHED.store(push, std::sync::atomic::Ordering::SeqCst);
+    let _ = out.write_all(MODIFY_OTHER_KEYS_ON.as_bytes());
+    let _ = out.flush();
+    push
+}
+
+static KITTY_PUSHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Undo [`enable_shift_enter`]; pops the kitty flags only if we pushed them.
 fn disable_shift_enter() {
     use std::io::Write;
     let mut out = std::io::stdout();
     let _ = out.write_all(MODIFY_OTHER_KEYS_OFF.as_bytes());
-    let _ = execute!(out, ratatui::crossterm::event::PopKeyboardEnhancementFlags);
+    if KITTY_PUSHED.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        let _ = execute!(out, ratatui::crossterm::event::PopKeyboardEnhancementFlags);
+    }
     let _ = out.flush();
+}
+
+/// SIGTSTP (`kill -TSTP`, or job control from a wrapper; Ctrl-Z itself is an app key in
+/// raw mode): put the terminal back (kitty flags popped, mouse off, main screen), stop,
+/// and restore everything on SIGCONT.
+mod suspend {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    pub static REQUESTED: AtomicBool = AtomicBool::new(false);
+
+    #[cfg(unix)]
+    extern "C" fn on_tstp(_: libc::c_int) {
+        REQUESTED.store(true, Ordering::SeqCst);
+    }
+
+    pub fn install() {
+        #[cfg(unix)]
+        // SAFETY: the handler only stores to an atomic (async-signal-safe).
+        unsafe {
+            libc::signal(libc::SIGTSTP, on_tstp as *const () as libc::sighandler_t);
+        }
+    }
+
+    pub fn take() -> bool {
+        REQUESTED.swap(false, Ordering::SeqCst)
+    }
+
+    /// Stop the process now (default SIGSTOP); returns after SIGCONT.
+    pub fn stop() {
+        #[cfg(unix)]
+        // SAFETY: raising a signal on ourselves.
+        unsafe {
+            libc::raise(libc::SIGSTOP);
+        }
+    }
+}
+
+/// Leave the TUI for a suspend and come back (see [`suspend`]).
+fn suspend_and_resume(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
+    app.media_cmd_all_pause();
+    let _ = execute!(std::io::stdout(), event::DisableFocusChange);
+    disable_shift_enter();
+    let _ = execute!(std::io::stdout(), DisableBracketedPaste);
+    let _ = execute!(std::io::stdout(), DisableMouseCapture);
+    ratatui::restore();
+    suspend::stop();
+    *term = ratatui::init();
+    if app.mouse_capture {
+        execute!(std::io::stdout(), EnableMouseCapture)?;
+    }
+    let _ = execute!(std::io::stdout(), EnableBracketedPaste);
+    let _ = execute!(std::io::stdout(), event::EnableFocusChange);
+    app.keyboard_enhancement = enable_shift_enter(app.config.kitty_protocol);
+    app.needs_clear = true;
+    Ok(())
+}
+
+/// With the kitty protocol's alternate keys a shifted symbol arrives as e.g. `?` + SHIFT;
+/// legacy terminals send plain `?`. Drop SHIFT from symbols so bindings match either way
+/// (letters keep it, as crossterm reports `A` + SHIFT in both modes).
+pub fn normalize_key(mut k: event::KeyEvent) -> event::KeyEvent {
+    if let KeyCode::Char(c) = k.code
+        && k.modifiers.contains(KeyModifiers::SHIFT)
+        && !c.is_alphabetic()
+    {
+        k.modifiers.remove(KeyModifiers::SHIFT);
+    }
+    k
 }
 
 fn is_newline_key(k: &event::KeyEvent) -> bool {
@@ -1618,6 +1726,64 @@ mod event_batch_tests {
 
 #[cfg(test)]
 mod completion_cycle_tests {
+    #[test]
+    fn kitty_alternate_keys_normalize_symbols_but_keep_letters() {
+        let k = |c, m| event::KeyEvent::new(KeyCode::Char(c), m);
+        assert_eq!(
+            normalize_key(k('?', KeyModifiers::SHIFT)),
+            k('?', KeyModifiers::NONE)
+        );
+        assert_eq!(
+            normalize_key(k('!', KeyModifiers::SHIFT | KeyModifiers::ALT)),
+            k('!', KeyModifiers::ALT)
+        );
+        assert_eq!(
+            normalize_key(k('A', KeyModifiers::SHIFT)),
+            k('A', KeyModifiers::SHIFT)
+        );
+        let enter = event::KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT);
+        assert_eq!(normalize_key(enter), enter);
+    }
+
+    #[test]
+    fn kitty_flags_include_event_types_and_alternates() {
+        use ratatui::crossterm::event::KeyboardEnhancementFlags as F;
+        let f = kitty_flags();
+        assert!(f.contains(
+            F::DISAMBIGUATE_ESCAPE_CODES | F::REPORT_EVENT_TYPES | F::REPORT_ALTERNATE_KEYS
+        ));
+        assert!(!f.contains(F::REPORT_ALL_KEYS_AS_ESCAPE_CODES));
+    }
+
+    #[test]
+    fn repeat_events_act_like_presses() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        let rep = event::KeyEvent::new_with_kind(
+            KeyCode::Char('x'),
+            KeyModifiers::NONE,
+            KeyEventKind::Repeat,
+        );
+        assert!(handle_event(&mut app, Event::Key(rep)));
+        assert_eq!(app.input, "x");
+    }
+
+    #[test]
+    fn kitty_command_sets_the_pref_and_asks_to_reapply() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        crate::app::tests::type_line(&mut app, "/kitty off");
+        assert_eq!(app.config.kitty_protocol, crate::config::KittyProtocol::Off);
+        assert!(app.kitty_reapply);
+        assert_eq!(
+            app.store
+                .get_pref(crate::config::PREF_KITTY_PROTOCOL)
+                .unwrap()
+                .as_deref(),
+            Some("off")
+        );
+    }
+
     use super::*;
     use ratatui::crossterm::event::KeyEvent;
 

@@ -182,6 +182,14 @@ pub fn registry() -> Registry {
                 run: sidebar,
             },
             Command {
+                name: "kitty",
+                aliases: &["keyboard"],
+                usage: "/kitty [auto|on|off]",
+                help: "kitty keyboard protocol (reliable Alt, Ctrl/Shift-Enter): show whether it's active, or set keys.kitty_protocol",
+                complete: kitty_complete,
+                run: kitty,
+            },
+            Command {
                 name: "license",
                 aliases: &["licence", "third-party"],
                 usage: "/license [full]",
@@ -775,6 +783,43 @@ fn sidebar(app: &mut App, args: &str) -> Result<()> {
         _ => bail!("Usage: /sidebar [collapse|expand|toggle]"),
     };
     app.set_sidebar_collapsed(on);
+    Ok(())
+}
+
+fn kitty_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(["auto", "on", "off"])
+    } else {
+        vec![]
+    }
+}
+
+fn kitty(app: &mut App, args: &str) -> Result<()> {
+    use crate::config::{KittyProtocol, PREF_KITTY_PROTOCOL};
+    let a = args.trim();
+    if a.is_empty() {
+        app.info(format!(
+            "kitty keyboard protocol: {} (keys.kitty_protocol = {}).{}",
+            if app.keyboard_enhancement {
+                "active"
+            } else {
+                "not active"
+            },
+            app.config.kitty_protocol.as_str(),
+            if app.keyboard_enhancement {
+                ""
+            } else {
+                " Alt uses the ESC-prefix fallback (keys.esc_alt_timeout_ms)."
+            }
+        ));
+        return Ok(());
+    }
+    let Some(mode) = KittyProtocol::parse(a) else {
+        bail!("Usage: /kitty [auto|on|off]");
+    };
+    app.store.set_pref(PREF_KITTY_PROTOCOL, mode.as_str())?;
+    app.config.kitty_protocol = mode;
+    app.kitty_reapply = true;
     Ok(())
 }
 

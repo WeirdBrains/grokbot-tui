@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.25.0] - 2026-10-29
+
+### Added
+- kitty keyboard protocol: where the terminal supports it (kitty, Ghostty, foot, WezTerm,
+  recent Alacritty and iTerm2), grokbot-tui now pushes disambiguate, report event types
+  and report alternate keys. That makes Alt, Ctrl-Enter and Shift-Enter reliable, and a
+  plain Esc acts at once with no ESC-prefix delay. Other terminals keep the ESC-prefix Alt
+  handling (`keys.esc_alt_timeout_ms`).
+  - Pref `keys.kitty_protocol = auto|on|off`, default `auto`, which uses the protocol
+    when the terminal answers the query.
+  - `/kitty [auto|on|off]` (alias `/keyboard`) shows the state or changes it live.
+  - Held keys repeat (repeat events count as presses; releases are ignored). With
+    alternate keys a shifted symbol (e.g. `?` + Shift) matches the same bindings as before.
+  - The flags are popped on exit, on a panic, and when the process is suspended (SIGTSTP),
+    and pushed again on resume, which also pauses media and redraws.
+
 ## [1.24.0] - 2026-10-29
 
 ### Changed
