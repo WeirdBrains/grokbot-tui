@@ -23,14 +23,40 @@ Prebuilt packages are attached to each [GitHub Release](https://github.com/Weird
 - **Fedora:** `sudo dnf install ./grokbot-tui-<ver>-1.<arch>.rpm`
 - **Homebrew, AUR, winget:** once published (see PACKAGING.md), `brew install WeirdBrains/tap/grokbot-tui`,
   `yay -S grokbot-tui-bin`, `winget install WeirdBrains.grokbot-tui`
-- **From source:** `cargo install --path .` (from the repository root)
+- **From source:** `make install` from a checkout (see [Install from a local checkout](#install-from-a-local-checkout))
+
+### Install from a local checkout
+
+These build the code in front of you and copy the result into place. Nothing is
+fetched from crates.io as an install, and no prebuilt binary is downloaded. Building
+still needs a Rust toolchain (`cargo`/`rustc`, from rustup or your distro), plus
+`libasound2-dev`/`alsa-lib-devel` on Linux.
+
+```sh
+make                         # build (release)
+make install                 # install to ~/.local (or /usr/local as root)
+make install PREFIX=/opt/gbt # any prefix; DESTDIR=... for staged/package installs
+make install FFMPEG=1        # -ffmpeg variant (FFmpeg built and linked statically)
+make uninstall               # same PREFIX/DESTDIR as the install
+make vendor && make install OFFLINE=1   # vendor crates once, then build fully offline
+```
+
+Without `make`, run the script directly: `./install-local.sh [--prefix DIR] [--destdir DIR]
+[--ffmpeg] [--vendor] [--offline] [--no-build] [--uninstall]`. On Windows:
+`.\install-local.ps1 [-Prefix DIR] [-Ffmpeg] [-Vendor] [-Offline] [-Uninstall]` (default
+`%LOCALAPPDATA%\Programs\grokbot-tui`, added to your user PATH; `-Ffmpeg` needs vcpkg FFmpeg).
+
+The install puts the binary in `PREFIX/bin`, docs and `THIRD_PARTY.md` in
+`PREFIX/share/doc/grokbot-tui`, the licence in `PREFIX/share/licenses/grokbot-tui`, and
+the example themes, keymap and notify rules in `PREFIX/share/grokbot-tui`. Uninstall
+removes only those; your settings and history stay.
 
 ## Run
 
 ```sh
 cargo run -- --mock                        # offline: fake bots, delayed echo replies
 cargo run                                  # real gateway
-cargo install --path .                     # installs the `grokbot-tui` binary
+make install                               # builds and installs the `grokbot-tui` binary
 grokbot-tui --data-dir /tmp/gbtest         # different data directory (holds context.db)
 grokbot-tui --account work                 # start in an account (or GROKBOT_TUI_ACCOUNT=work)
 grokbot-tui --theme solar                  # use a theme for this run only (not saved)
@@ -615,4 +641,4 @@ Optional (zsh): auto-rehash when a command is not found —
 zstyle ':completion:*' rehash true
 ```
 
-Or run `./install.sh` from a checkout, which installs and reminds you to rehash.
+Or run `make install` (or `./install-local.sh`) from a checkout; it tells you if the bin directory is not on PATH.

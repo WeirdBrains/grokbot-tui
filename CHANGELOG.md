@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.26.0] - 2026-10-29
+
+### Added
+- Install from a local checkout without `cargo install`, crates.io installs or downloaded
+  binaries: `make`, `make install`, `make uninstall` (PREFIX, default `~/.local` or
+  `/usr/local` as root; DESTDIR; `FFMPEG=1` for the -ffmpeg variant; `OFFLINE=1`;
+  `make vendor` for a fully offline build), backed by `install-local.sh`, plus
+  `install-local.ps1` for Windows. They install the binary, README/CHANGELOG/THIRD_PARTY,
+  the licence and the example themes, keymap and notify rules (and a man page or shell
+  completions when those exist). Building still needs a Rust toolchain.
+
+### Changed
+- `install.sh` now runs `install-local.sh` (default prefix `~/.local`, was `~/.cargo/bin`
+  via `cargo install`).
+- The AUR source package installs with `make install NOBUILD=1 PREFIX=/usr DESTDIR=$pkgdir`,
+  so it uses the same layout. The .deb and .rpm keep their cargo-deb / cargo-generate-rpm
+  asset lists (those tools package an already-built binary; same paths).
+
 ## [1.25.0] - 2026-10-29
 
 ### Added
