@@ -228,6 +228,18 @@ current tasks." (plus your text) as a normal prompt; change the text with
 
 Theme parts: `collapse_button`, `sidebar_strip`.
 
+### Attachments panel
+
+A collapsible bar on the right of each chat lists its attachments, sent and received, with
+type, name, size, sender and time. **[view]** opens images in the viewer, text/HTML/Markdown
+in the built-in browser and other files in the system app (with the SSH guard); **[⤓]** opens
+the download modal; clicking a row jumps to its message. It has a search box and
+All/Img/Vid/Aud/Doc filters, and keys j/k, Enter, v, d, /, t and Esc when focused.
+Toggle with F9, the «/» buttons, View ▸ attachments, `/attachments show|hide|toggle`
+(alias `/files`) or keymap `view.toggle_attachments`; pref `ui.attachments_panel`
+(`show`/`hide`, default `hide` = 1-column strip with the count). Hidden below 70 columns.
+Theme parts: `attach_panel_frame`, `attach_panel_filter`, `attach_panel_count`.
+
 ## Notifications, menu bar, tooltips
 
 Toasts honour `~/.grokbot-tui/notify-rules.toml` and `/notify` (dnd / per-kind). They never

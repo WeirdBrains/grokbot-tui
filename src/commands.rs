@@ -182,6 +182,14 @@ pub fn registry() -> Registry {
                 run: sidebar,
             },
             Command {
+                name: "attachments",
+                aliases: &["files"],
+                usage: "/attachments [show|hide|toggle]",
+                help: "Right-hand panel listing this chat's attachments with [view] and [⤓]; also F9 and the «/» button",
+                complete: attachments_complete,
+                run: attachments,
+            },
+            Command {
                 name: "menu",
                 aliases: &[],
                 usage: "/menu [chat|account|view|web|theme|notify|help]",
@@ -751,6 +759,25 @@ fn sidebar(app: &mut App, args: &str) -> Result<()> {
         _ => bail!("Usage: /sidebar [collapse|expand|toggle]"),
     };
     app.set_sidebar_collapsed(on);
+    Ok(())
+}
+
+fn attachments_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(["show", "hide", "toggle"])
+    } else {
+        vec![]
+    }
+}
+
+fn attachments(app: &mut App, args: &str) -> Result<()> {
+    let on = match args.trim() {
+        "" | "toggle" => !app.config.attachments_panel,
+        "show" | "open" | "expand" => true,
+        "hide" | "close" | "collapse" => false,
+        _ => bail!("Usage: /attachments [show|hide|toggle]"),
+    };
+    app.set_attachments_panel(on);
     Ok(())
 }
 

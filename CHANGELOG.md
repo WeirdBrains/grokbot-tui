@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.23.0] - 2026-10-29
+
+### Added
+- Attachments panel: a collapsible bar on the right of the chat listing every attachment
+  in it, sent and received (images, files and file links in replies), with its type icon,
+  name, size, sender and time, and [view] and [⤓] buttons.
+  - [view] opens images in the image viewer, text/HTML/Markdown/JSON in the built-in
+    browser, and anything else in the system app (asks first over SSH).
+  - [⤓] opens the download modal. Clicking a row scrolls the chat to that message.
+  - A search box and type filters (All, Img, Vid, Aud, Doc); keyboard: j/k, Enter (jump),
+    v (view), d (download), / (filter), t (type), Esc (back to the input).
+  - Collapses to a 1-column strip with the attachment count; toggle with the «/» buttons,
+    View ▸ attachments, F9, `/attachments show|hide|toggle` (alias `/files`) or keymap
+    `view.toggle_attachments`. Persisted as `ui.attachments_panel` (default hide).
+  - Hidden when the chat body is narrower than 70 columns; works with the collapsed or
+    expanded sidebar and the compact header.
+- Theme parts `attach_panel_frame`, `attach_panel_filter`, `attach_panel_count`.
+
+### Fixed
+- The built-in browser's URL bar, edit field and copy no longer expose presigned URL
+  signatures (host only).
+
 ## [1.22.0] - 2026-10-29
 
 ### Added

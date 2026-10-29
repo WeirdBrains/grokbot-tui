@@ -12,6 +12,7 @@
 "f6" = "mouse.toggle"
 "f7" = "view.toggle_header"
 "f8" = "view.toggle_sidebar"
+"f9" = "view.toggle_attachments"
 
 [mode.normal]
 "i" = "mode.insert"

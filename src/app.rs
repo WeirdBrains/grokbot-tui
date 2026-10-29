@@ -516,6 +516,12 @@ pub struct App {
     /// Header ▾/▴ and sidebar «/» buttons.
     pub header_toggle_area: Rect,
     pub sidebar_toggle_area: Rect,
+    /// The attachments panel (1.23.0).
+    pub attpanel: crate::attpanel::Panel,
+    /// Feed entry to scroll to at the next draw.
+    pub pending_jump: Option<usize>,
+    /// Per bot: each message's stored time ("MM-DD HH:MM"), aligned with the log.
+    pub msg_times: HashMap<String, Vec<String>>,
     /// The emoji picker modal.
     pub react_picker: Option<crate::emojipicker::EmojiPicker>,
     /// The download modal (`[⤓]`, `/download`, vim `d`).
@@ -762,6 +768,9 @@ impl App {
             press_at: None,
             header_toggle_area: Rect::default(),
             sidebar_toggle_area: Rect::default(),
+            attpanel: Default::default(),
+            pending_jump: None,
+            msg_times: HashMap::new(),
             react_picker: None,
             download: None,
             download_hits: vec![],
@@ -1935,6 +1944,12 @@ impl App {
         } else {
             self.msg_attachments.insert(bot_id.to_string(), atts);
         }
+        let times = self.store.message_times(bot_id).unwrap_or_default();
+        if times.len() == msgs.len() {
+            self.msg_times.insert(bot_id.to_string(), times);
+        } else {
+            self.msg_times.remove(bot_id);
+        }
         let entries: Vec<Entry> = msgs.iter().map(entry_from_msg).collect();
         let new_len = entries.len();
         self.logs.insert(bot_id.to_string(), entries);
@@ -2177,7 +2192,7 @@ impl App {
         self.key()
     }
 
-    fn key(&self) -> String {
+    pub(crate) fn key(&self) -> String {
         self.active_bot().map(|b| b.id.clone()).unwrap_or_default()
     }
 
@@ -2905,6 +2920,10 @@ impl App {
                 self.set_sidebar_collapsed(!self.config.sidebar_collapsed);
                 true
             }
+            "view.toggle_attachments" => {
+                self.set_attachments_panel(!self.config.attachments_panel);
+                true
+            }
             "browser.open" => {
                 self.open_browser(None);
                 true
@@ -3523,6 +3542,9 @@ impl App {
             self.press_at = Some((col, row));
         } else {
             self.body_sel = None;
+        }
+        if self.attpanel_click(col, row) {
+            return;
         }
         if self.header_toggle_area.contains(at) {
             self.set_header_compact(!self.config.header_compact);

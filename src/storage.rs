@@ -661,6 +661,17 @@ impl Store {
         Ok(())
     }
 
+    /// Each message's local time as "MM-DD HH:MM", in `messages` order.
+    pub fn message_times(&self, bot_id: &str) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare(
+            "SELECT strftime('%m-%d %H:%M', created_at, 'localtime') FROM messages WHERE account_id = ?1 AND bot_id = ?2 ORDER BY ord IS NULL, ord, id",
+        )?;
+        let rows = st.query_map(params![self.account.id, bot_id], |r| {
+            Ok(r.get::<_, Option<String>>(0)?.unwrap_or_default())
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn messages(&self, bot_id: &str) -> Result<Vec<Message>> {
         let mut st = self.conn.prepare(
             "SELECT role, text, remote_id, attachments FROM messages WHERE account_id = ?1 AND bot_id = ?2 ORDER BY ord IS NULL, ord, id",

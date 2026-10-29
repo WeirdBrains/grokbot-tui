@@ -553,6 +553,17 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         Constraint::Min(10),
     ])
     .areas(mid);
+    // Attachments panel on the right (1.23.0): expanded or a 1-column strip.
+    let panel_w = if body.width < crate::attpanel::MIN_BODY {
+        0
+    } else if app.config.attachments_panel {
+        crate::attpanel::WIDTH
+    } else {
+        1
+    };
+    let [body, files] =
+        Layout::horizontal([Constraint::Min(10), Constraint::Length(panel_w)]).areas(body);
+    crate::attpanel::draw(f, app, files);
 
     draw_header(f, app, top, header);
     crate::menubar::draw(f, &mut app.menu, menu_row);
@@ -655,6 +666,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         let mut owners: Vec<Option<String>> = vec![];
         let mut slots: Vec<crate::inline::Slot> = vec![];
         let mut wants: Vec<String> = vec![];
+        let mut starts: Vec<usize> = vec![];
         for (i, e) in app.feed().iter().enumerate() {
             if i > 0 {
                 match pending.take() {
@@ -669,6 +681,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                 }
             }
             let body = entry_lines(e.kind, &e.text, bot_name.as_deref(), Some(bubble));
+            starts.push(lines.len());
             buttons.extend(std::iter::repeat_n(None, body.len()));
             owners.resize(lines.len(), None);
             let owner = matches!(e.kind, EntryKind::User | EntryKind::Bot)
@@ -774,6 +787,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             links,
             buttons,
             owners,
+            starts,
         });
         app.inline_slots = slots;
         for k in wants {
@@ -811,6 +825,14 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     let total_u = total.min(u16::MAX as usize) as u16;
     app.apply_body_layout(total_u, inner_h);
     let max_off = total_u.saturating_sub(inner_h);
+    if let Some(i) = app.pending_jump.take() {
+        let cache = app.feed_cache.as_ref().expect("built above");
+        if let Some(&line) = cache.starts.get(i) {
+            let row: usize = cache.rows[..line].iter().sum();
+            app.scroll = max_off.saturating_sub(row.min(u16::MAX as usize) as u16);
+            app.follow = app.scroll == 0;
+        }
+    }
     let scroll = app.scroll.min(max_off);
     let off = max_off - scroll;
     let cache = app.feed_cache.as_ref().expect("built above");
@@ -1092,6 +1114,8 @@ pub struct FeedCache {
     downloads: Vec<Vec<ColHit>>,
     /// Per line: the message whose bubble this line is part of (click-to-react).
     owners: Vec<Option<String>>,
+    /// Per feed entry: its first line (attachments panel jump).
+    starts: Vec<usize>,
 }
 
 /// A link drawn on screen this frame: one row, `x..x+w`.

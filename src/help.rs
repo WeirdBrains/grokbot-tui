@@ -296,6 +296,12 @@ Input focused (multi-line)
   F8 / /sidebar             Collapse the bot list to a 1-column strip (● active); click
                             the strip or » to expand, « to collapse (pref
                             ui.sidebar_collapsed; keymap view.toggle_sidebar)
+  F9 / /attachments (/files) Right panel listing this chat's attachments (sent and
+                            received) with [view] and [⤓]; click a row to jump to its
+                            message. Collapses to a 1-column strip with the count (pref
+                            ui.attachments_panel; keymap view.toggle_attachments).
+                            In the panel: j/k move, Enter jump, v view, d download,
+                            / filter, t type (All/Img/Vid/Aud/Doc), Esc back to input
   Click a message           Opens the reaction picker for it (pref message.click_to_react,
                             default on). Links, images, [☺+] and [⤓] keep their actions;
                             dragging still selects text

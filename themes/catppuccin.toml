@@ -68,6 +68,9 @@ ssh_indicator = { fg = "@warn", bold = true }
 presence_indicator = { fg = "@subtle" }
 collapse_button = { fg = "@accent" }
 sidebar_strip = { fg = "@muted" }
+attach_panel_frame = { fg = "@subtle" }
+attach_panel_filter = { fg = "@subtle" }
+attach_panel_count = { fg = "@accent", bold = true }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }
@@ -162,6 +165,9 @@ ssh_indicator = { fg = "@warn", bold = true }
 presence_indicator = { fg = "@subtle" }
 collapse_button = { fg = "@accent" }
 sidebar_strip = { fg = "@muted" }
+attach_panel_frame = { fg = "@subtle" }
+attach_panel_filter = { fg = "@subtle" }
+attach_panel_count = { fg = "@accent", bold = true }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }

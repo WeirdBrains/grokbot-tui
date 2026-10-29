@@ -44,6 +44,7 @@ pub const ACTIONS: &[&str] = &[
     "browser.open",
     "view.toggle_header",
     "view.toggle_sidebar",
+    "view.toggle_attachments",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

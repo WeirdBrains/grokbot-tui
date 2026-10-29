@@ -605,7 +605,7 @@ pub fn key(b: &mut Browser, k: KeyEvent) -> Action {
                     return Action::Close;
                 }
                 b.editing = false;
-                b.bar = b.url().unwrap_or_default().to_string();
+                b.bar = bar_url(b.url().unwrap_or_default());
             }
             KeyCode::Enter => {
                 let t = b.bar.trim();
@@ -754,7 +754,8 @@ pub fn draw(f: &mut Frame, b: &mut Browser, ssh: bool) {
     let bar_text = if b.editing {
         format!(" {}▏", b.bar)
     } else {
-        format!(" {}", b.url().unwrap_or(""))
+        // Presigned links never show their signature.
+        format!(" {}", bar_url(b.url().unwrap_or("")))
     };
     let mut bar = vec![sp(rs(theme::browser_url()), bar_text)];
     if ssh {
@@ -978,11 +979,7 @@ impl App {
                 }
             }
             Action::CopyUrl => {
-                if let Some(u) = self
-                    .browser
-                    .as_ref()
-                    .and_then(|b| b.url().map(str::to_string))
-                {
+                if let Some(u) = self.browser.as_ref().and_then(|b| b.url().map(bar_url)) {
                     self.copy_text(u);
                 }
             }
@@ -1019,6 +1016,15 @@ fn sp(style: Style, text: impl Into<String>) -> Span<'static> {
 
 fn rs(s: ratatui_lipgloss::Style) -> Style {
     Style::from(&s)
+}
+
+/// The URL bar text: signed (presigned) URLs show the host only.
+pub fn bar_url(u: &str) -> String {
+    if u.contains("Signature=") || u.contains("X-Amz-") {
+        crate::links::shown(u)
+    } else {
+        u.to_string()
+    }
 }
 
 #[cfg(test)]

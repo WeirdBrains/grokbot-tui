@@ -84,6 +84,7 @@ pub const PREF_ESC_ALT_MS: &str = "keys.esc_alt_timeout_ms";
 pub const PREF_HEADER: &str = "ui.header";
 /// Sidebar collapsed to a 1-column strip (global).
 pub const PREF_SIDEBAR_COLLAPSED: &str = "ui.sidebar_collapsed";
+pub const PREF_ATTACHMENTS_PANEL: &str = "ui.attachments_panel";
 /// Clicking an empty part of a message bubble opens the reaction picker (global).
 pub const PREF_CLICK_TO_REACT: &str = "message.click_to_react";
 
@@ -147,6 +148,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_ESC_ALT_MS,
     PREF_HEADER,
     PREF_SIDEBAR_COLLAPSED,
+    PREF_ATTACHMENTS_PANEL,
     PREF_CLICK_TO_REACT,
     PREF_IMAGES_INLINE,
     PREF_IMAGES_INLINE_MAX_ROWS,
@@ -269,6 +271,8 @@ pub struct Config {
     pub header_compact: bool,
     /// `ui.sidebar_collapsed`.
     pub sidebar_collapsed: bool,
+    /// `ui.attachments_panel` = show|hide (default hide: the 1-column strip).
+    pub attachments_panel: bool,
     /// `message.click_to_react`.
     pub click_to_react: bool,
     /// `notifications.claim_presence`.
@@ -305,6 +309,7 @@ impl Default for Config {
             esc_alt_ms: 50,
             header_compact: false,
             sidebar_collapsed: false,
+            attachments_panel: false,
             click_to_react: true,
         }
     }
@@ -339,6 +344,10 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_ESC_ALT_MS, c.esc_alt_ms.to_string()),
         (PREF_HEADER, "full".to_string()),
         (PREF_SIDEBAR_COLLAPSED, c.sidebar_collapsed.to_string()),
+        (
+            PREF_ATTACHMENTS_PANEL,
+            if c.attachments_panel { "show" } else { "hide" }.to_string(),
+        ),
         (PREF_CLICK_TO_REACT, c.click_to_react.to_string()),
     ]
 }
@@ -416,6 +425,8 @@ impl Config {
             header_compact: o(PREF_HEADER).is_some_and(|v| v.trim() == "compact"),
             sidebar_collapsed: o(PREF_SIDEBAR_COLLAPSED)
                 .is_some_and(|v| matches!(v.trim(), "true" | "1" | "yes" | "on")),
+            attachments_panel: o(PREF_ATTACHMENTS_PANEL)
+                .is_some_and(|v| matches!(v.trim(), "show" | "true" | "1" | "on")),
             click_to_react: o(PREF_CLICK_TO_REACT)
                 .map(|v| !matches!(v.trim(), "false" | "0" | "no" | "off"))
                 .unwrap_or(d.click_to_react),

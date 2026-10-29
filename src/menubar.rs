@@ -35,7 +35,7 @@ pub const MENUS: &[Menu] = &[
     Menu {
         label: "View",
         hint: 'v',
-        items: &["header", "sidebar", "menu"],
+        items: &["header", "sidebar", "attachments", "menu"],
     },
     Menu {
         label: "Web",

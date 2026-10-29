@@ -237,6 +237,9 @@ style_slots! {
     PRESENCE_INDICATOR = "presence_indicator", "Screen and header", false, "🔕 while the presence claim holds pushes to your other devices";
     COLLAPSE_BUTTON = "collapse_button", "Screen and header", false, "Header ▾/▴ and sidebar «/» collapse buttons";
     SIDEBAR_STRIP = "sidebar_strip", "Sidebar and lists", false, "The collapsed 1-column sidebar strip";
+    ATTACH_PANEL_FRAME = "attach_panel_frame", "Sidebar and lists", false, "Attachments panel border and title";
+    ATTACH_PANEL_FILTER = "attach_panel_filter", "Sidebar and lists", false, "Attachments panel search box";
+    ATTACH_PANEL_COUNT = "attach_panel_count", "Sidebar and lists", false, "Attachment count on the collapsed panel strip";
     DOWNLOAD_PATH = "download_path", "Modals", false, "Download modal: the save-path field";
     DOWNLOAD_DIR = "download_dir", "Modals", false, "Download modal: directories in the folder browser";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
@@ -811,6 +814,15 @@ pub fn collapse_button() -> Style {
 }
 pub fn sidebar_strip() -> Style {
     st(slot::SIDEBAR_STRIP)
+}
+pub fn attach_panel_frame() -> Style {
+    st(slot::ATTACH_PANEL_FRAME)
+}
+pub fn attach_panel_filter() -> Style {
+    st(slot::ATTACH_PANEL_FILTER)
+}
+pub fn attach_panel_count() -> Style {
+    st(slot::ATTACH_PANEL_COUNT)
 }
 pub fn presence_indicator() -> Style {
     st(slot::PRESENCE_INDICATOR)

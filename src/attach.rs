@@ -46,6 +46,9 @@ pub enum Then {
     /// Images open in the viewer, other files in the download modal.
     Open,
     Download,
+    /// Attachments panel [view]: images in the viewer, text in the built-in browser,
+    /// everything else in the system app (SSH asks first).
+    View,
     /// Only remember the read (inline image previews); never shows errors.
     Inline,
 }
@@ -457,7 +460,15 @@ impl App {
         let name = self.attachment_name(path);
         let image = r.content_type.starts_with("image/")
             || gw::AttachmentKind::from_name(&name) == gw::AttachmentKind::Image;
-        if then == Then::Open && image && self.view_image(Some(&r.url)) {
+        if matches!(then, Then::Open | Then::View) && image && self.view_image(Some(&r.url)) {
+            return;
+        }
+        if then == Then::View {
+            if crate::attpanel::textual(&name) {
+                self.open_browser(Some(&r.url));
+            } else {
+                self.open_system(&r.url);
+            }
             return;
         }
         self.open_download_named(&r.url, &name);

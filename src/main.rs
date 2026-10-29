@@ -3,6 +3,7 @@ mod api;
 mod app;
 mod appearance;
 mod attach;
+mod attpanel;
 mod browser;
 mod commands;
 mod complete;
@@ -704,6 +705,10 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 app.set_sidebar_collapsed(!app.config.sidebar_collapsed);
                 return true;
             }
+            if k.code == KeyCode::F(9) && app.keys_scheme_default() {
+                app.set_attachments_panel(!app.config.attachments_panel);
+                return true;
+            }
             if app.image_view.is_some() {
                 match k.code {
                     KeyCode::Esc | KeyCode::Char('q') => app.close_image_view(),
@@ -773,6 +778,10 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                     && app.mode == app::InputMode::Normal)
             {
                 app.open_help(if k.code == KeyCode::F(1) { "" } else { "keys" });
+                return true;
+            }
+            if app.attpanel.focused && app.config.attachments_panel {
+                app.attpanel_key(k);
                 return true;
             }
             match k.code {
@@ -961,6 +970,8 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
             MouseEventKind::ScrollUp if app.help.is_some() => app.help_scroll(-3),
             MouseEventKind::ScrollDown if app.help.is_some() => app.help_scroll(3),
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                if app.attpanel_wheel(m.column, m.row, m.kind == MouseEventKind::ScrollDown) => {}
             MouseEventKind::ScrollUp => app.scroll_up(3),
             MouseEventKind::ScrollDown => app.scroll_down(3),
             _ => {}
