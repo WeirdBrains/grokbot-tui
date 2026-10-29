@@ -473,6 +473,10 @@ pub struct App {
     pub unread_area: Rect,
     /// Links on screen in the last frame (clicks, OSC 8 hyperlinks).
     pub link_hits: Vec<crate::ui::LinkHit>,
+    /// React buttons on screen (url = message key).
+    pub react_hits: Vec<crate::ui::LinkHit>,
+    /// The emoji picker modal.
+    pub react_picker: Option<crate::emojipicker::EmojiPicker>,
     /// The image viewer modal.
     pub image_view: Option<crate::imageview::ImageView>,
     pub image_load_seq: u64,
@@ -686,6 +690,8 @@ impl App {
             body_inner_h: 0,
             unread_area: Rect::default(),
             link_hits: vec![],
+            react_hits: vec![],
+            react_picker: None,
             image_view: None,
             image_load_seq: 0,
             image_picker: ratatui_image::picker::Picker::halfblocks(),
@@ -2048,6 +2054,10 @@ impl App {
 
     // ------------------------------------------------------------ body log
 
+    pub(crate) fn key_of_active(&self) -> String {
+        self.key()
+    }
+
     fn key(&self) -> String {
         self.active_bot().map(|b| b.id.clone()).unwrap_or_default()
     }
@@ -2079,6 +2089,17 @@ impl App {
         if bot.is_empty() {
             anyhow::bail!("No active bot");
         }
+        let Some(key) = self.react_target(nth) else {
+            anyhow::bail!("No message to react to")
+        };
+        let added = self.store.toggle_reaction(&bot, &key, emoji)?;
+        self.reaction_cache = None;
+        Ok(added)
+    }
+
+    /// The message key `/react … nth` targets: the nth newest bot message, or the nth
+    /// newest message when the bot hasn't replied.
+    pub fn react_target(&self, nth: usize) -> Option<String> {
         let feed = self.feed();
         let bots: Vec<&Entry> = feed
             .iter()
@@ -2090,13 +2111,21 @@ impl App {
         } else {
             bots.get(nth.saturating_sub(1)).copied()
         };
-        let Some(e) = target else {
-            anyhow::bail!("No message to react to")
+        target.map(|e| crate::emoji::message_key(e.kind as u8, &e.text))
+    }
+
+    /// Emoji already on the target message, in the order added.
+    pub fn reactions_on(&self, nth: usize) -> Vec<String> {
+        let (Some(key), bot) = (self.react_target(nth), self.key()) else {
+            return vec![];
         };
-        let key = crate::emoji::message_key(e.kind as u8, &e.text);
-        let added = self.store.toggle_reaction(&bot, &key, emoji)?;
-        self.reaction_cache = None;
-        Ok(added)
+        self.store
+            .reactions(&bot)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, e)| e)
+            .collect()
     }
 
     /// Transient notices for the active view.
@@ -2294,6 +2323,7 @@ impl App {
             || self.completion.is_some()
             || self.menu.open.is_some()
             || self.image_view.is_some()
+            || self.react_picker.is_some()
     }
 
     /// Load prompt history for the active account from `context.db`. A failure is shown
@@ -2740,6 +2770,12 @@ impl App {
                 }
                 true
             }
+            "message.react_picker" => {
+                if !self.open_react_picker(1) {
+                    self.error("No message to react to".into());
+                }
+                true
+            }
             "message.react" => {
                 self.vim_mode = Mode::Command;
                 self.vim_command = Some("react :".to_string());
@@ -3122,6 +3158,15 @@ impl App {
 
     pub fn click(&mut self, col: u16, row: u16) {
         let at = ratatui::layout::Position::new(col, row);
+        if let Some(h) = self
+            .react_hits
+            .iter()
+            .find(|h| h.y == row && col >= h.x && col < h.x + h.w)
+        {
+            let k = h.url.clone();
+            self.open_react_picker_for(k);
+            return;
+        }
         if let Some(h) = self
             .link_hits
             .iter()

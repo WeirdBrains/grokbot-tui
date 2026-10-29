@@ -14,6 +14,7 @@
 [mode.normal]
 "i" = "mode.insert"
 "r" = "message.react"
+"shift-r" = "message.react_picker"
 "o" = "message.open"
 "shift-o" = "image.view"
 "a" = "mode.insert_end"

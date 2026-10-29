@@ -335,6 +335,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.menu.open.is_some() {
         crate::menubar::draw_dropdown(f, &mut app.menu, &app.registry, f.area());
     }
+    if let Some(p) = app.react_picker.as_mut() {
+        crate::emojipicker::draw(f, p);
+    }
     if app.image_view.is_some() {
         crate::imageview::draw(f, app);
     }
@@ -488,27 +491,44 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                 }
             })
             .collect();
+        // Per line: the message key of a react button drawn at the line's end.
+        let mut buttons: Vec<Option<String>> = vec![];
+        // A message with no reactions puts its button in the blank line after it.
+        let mut pending: Option<(String, bool)> = None;
         for (i, e) in app.feed().iter().enumerate() {
             if i > 0 {
-                lines.push(Line::default());
-            }
-            lines.extend(entry_lines(
-                e.kind,
-                &e.text,
-                bot_name.as_deref(),
-                Some(bubble),
-            ));
-            if !reactions.is_empty() {
-                let k = crate::emoji::message_key(e.kind as u8, &e.text);
-                let mine: Vec<&str> = reactions
-                    .iter()
-                    .filter(|(mk, _)| *mk == k)
-                    .map(|(_, em)| em.as_str())
-                    .collect();
-                if let Some(l) = reaction_line(&mine, e.kind == EntryKind::User) {
-                    lines.push(l);
+                match pending.take() {
+                    Some((k, mine)) => {
+                        lines.push(react_button_line(vec![], mine));
+                        buttons.push(Some(k));
+                    }
+                    None => {
+                        lines.push(Line::default());
+                        buttons.push(None);
+                    }
                 }
             }
+            let body = entry_lines(e.kind, &e.text, bot_name.as_deref(), Some(bubble));
+            buttons.extend(std::iter::repeat_n(None, body.len()));
+            lines.extend(body);
+            let k = crate::emoji::message_key(e.kind as u8, &e.text);
+            let mine_side = e.kind == EntryKind::User;
+            let mine: Vec<&str> = reactions
+                .iter()
+                .filter(|(mk, _)| *mk == k)
+                .map(|(_, em)| em.as_str())
+                .collect();
+            match reaction_line(&mine, mine_side) {
+                Some(l) => {
+                    lines.push(react_button_line(l.spans, mine_side));
+                    buttons.push(Some(k));
+                }
+                None => pending = Some((k, mine_side)),
+            }
+        }
+        if let Some((k, mine)) = pending.take() {
+            lines.push(react_button_line(vec![], mine));
+            buttons.push(Some(k));
         }
         let mut links = vec![];
         let lines: Vec<Line<'static>> = lines
@@ -525,6 +545,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             lines,
             rows,
             links,
+            buttons,
         });
     }
     let mut extra: Vec<Line<'static>> = vec![];
@@ -612,15 +633,22 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     app.scroll = scroll;
     // Where this frame's links are, for clicks and OSC 8 (feed lines are one row each).
     app.link_hits.clear();
+    app.react_hits.clear();
     let image_urls: std::collections::HashSet<String> =
         app.chat_images().into_iter().map(|o| o.url).collect();
     {
         let cache = app.feed_cache.as_ref().expect("built above");
         let mut row = 0usize;
-        for ((l, n), ls) in cache.lines.iter().zip(&cache.rows).zip(&cache.links) {
+        for (((l, n), ls), btn) in cache
+            .lines
+            .iter()
+            .zip(&cache.rows)
+            .zip(&cache.links)
+            .zip(&cache.buttons)
+        {
             let y = row as isize - off as isize;
             row += n;
-            if ls.is_empty() || *n != 1 || y < 0 || y >= inner_h as isize {
+            if (ls.is_empty() && btn.is_none()) || *n != 1 || y < 0 || y >= inner_h as isize {
                 continue;
             }
             let lw = l.width();
@@ -629,6 +657,16 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                 Some(Alignment::Center) => inner_w.saturating_sub(lw) / 2,
                 _ => 0,
             };
+            if let Some(k) = btn {
+                let bw = crate::input::str_width(REACT_BUTTON);
+                app.react_hits.push(LinkHit {
+                    x: (inner.x as usize + dx + lw - bw) as u16,
+                    y: inner.y + y as u16,
+                    w: bw as u16,
+                    url: k.clone(),
+                    image: false,
+                });
+            }
             for (a, b, url) in ls {
                 let x = inner.x as usize + dx + a;
                 let w = b
@@ -759,6 +797,8 @@ pub struct FeedCache {
     rows: Vec<usize>,
     /// Per line: clickable links as (first column, end column, url).
     links: Vec<Vec<(usize, usize, String)>>,
+    /// Per line: the message key whose react button ends this line.
+    buttons: Vec<Option<String>>,
 }
 
 /// A link drawn on screen this frame: one row, `x..x+w`.
@@ -895,6 +935,7 @@ fn feed_key(feed: &[crate::app::Entry], inner_w: usize, bot: Option<&str>) -> u6
         theme::md_rule(),
         theme::md_table_border(),
         theme::image_placeholder(),
+        theme::react_button(),
     ] {
         format!("{s:?}").hash(&mut h);
     }
@@ -928,6 +969,22 @@ pub fn reaction_line(emojis: &[&str], mine: bool) -> Option<Line<'static>> {
     } else {
         l
     })
+}
+
+/// The react button drawn after a message (or after its reaction pills).
+pub const REACT_BUTTON: &str = "[☺+]";
+
+fn react_button_line(mut spans: Vec<Span<'static>>, mine: bool) -> Line<'static> {
+    if !spans.is_empty() {
+        spans.push(Span::raw(" "));
+    }
+    spans.push(theme::react_button().span(REACT_BUTTON));
+    let l = Line::from(spans);
+    if mine {
+        l.alignment(Alignment::Right)
+    } else {
+        l
+    }
 }
 
 /// Wrapped height of each line at `width` (what `Paragraph` with `Wrap` would use).
@@ -1728,6 +1785,7 @@ pub(crate) mod tests {
             if let Some(f) = row.find(|c: char| c != ' ')
                 && f > inner_w / 4
                 && !row.contains("you")
+                && !row.contains("[☺+]")
             {
                 user_starts.push(f);
             }

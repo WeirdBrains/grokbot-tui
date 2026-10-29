@@ -402,7 +402,7 @@ pub fn draw(f: &mut Frame, s: &mut Search, history: &[String], meta: &[PromptEnt
     f.render_widget(Paragraph::new(lines), list);
 }
 
-fn centered(area: Rect, pct_w: u16, pct_h: u16) -> Rect {
+pub fn centered(area: Rect, pct_w: u16, pct_h: u16) -> Rect {
     let w = (area.width as u32 * pct_w as u32 / 100) as u16;
     let h = (area.height as u32 * pct_h as u32 / 100) as u16;
     let w = w.max(20).min(area.width);

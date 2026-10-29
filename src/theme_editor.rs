@@ -3361,6 +3361,7 @@ mod tests {
                 "selection",
                 "unread_badge",
                 "reaction_pill",
+                "react_button",
                 "md_heading",
                 "md_code",
                 "md_code_block",

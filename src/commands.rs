@@ -565,17 +565,89 @@ pub fn open_item(app: &mut App, args: &str) -> Result<()> {
     Ok(())
 }
 
-fn react_complete(_: &App, idx: usize, q: &str) -> Vec<crate::complete::Candidate> {
+/// `/react` / `/unreact` arguments: the emoji (on the target message first, then recent,
+/// then common, then all), and the optional message index `n`.
+fn react_complete(app: &App, idx: usize, q: &str) -> Vec<crate::complete::Candidate> {
+    use crate::emoji::Origin;
+    let unreact = app.input.trim_start().starts_with("/unreact");
+    if idx == 1 {
+        let n = app
+            .feed()
+            .iter()
+            .filter(|e| e.kind == EntryKind::Bot)
+            .count()
+            .clamp(1, 9);
+        return (1..=n)
+            .map(|i| crate::complete::Candidate {
+                replace: i.to_string(),
+                label: if i == 1 {
+                    "1 (newest bot message)".into()
+                } else {
+                    format!("{i}")
+                },
+            })
+            .collect();
+    }
     if idx != 0 {
         return vec![];
     }
-    crate::complete::emoji_candidates(q.trim_start_matches(':'))
+    let nth = app
+        .input
+        .split_whitespace()
+        .nth(2)
+        .and_then(|n| n.parse::<usize>().ok())
+        .unwrap_or(1);
+    let on = app.reactions_on(nth);
+    let recent = app.store.recent_reactions(12).unwrap_or_default();
+    let mut all = crate::emoji::choices(&on, &recent);
+    if unreact && !on.is_empty() {
+        all.retain(|c| c.origin == Origin::OnMessage);
+    }
+    let shown = crate::emoji::filter(&all, q);
+    let bare = q.trim_matches(':').to_lowercase();
+    shown
+        .into_iter()
+        .take(200)
+        .map(|mut c| {
+            // Show the shortcode the user is typing (👍 is :+1: and :thumbsup:).
+            if !bare.is_empty()
+                && let Some(e) = emojis::get(&c.glyph)
+                && let Some(code) = e.shortcodes().find(|s| s.contains(&bare))
+            {
+                c.code = code.to_string();
+            }
+            c
+        })
+        .map(|c| crate::complete::Candidate {
+            label: format!(
+                "{}{} {}",
+                if c.code.is_empty() {
+                    String::new()
+                } else {
+                    format!(":{}: ", c.code)
+                },
+                c.glyph,
+                match c.origin {
+                    Origin::OnMessage => "· on message",
+                    Origin::Recent => "· recent",
+                    _ => "",
+                }
+            )
+            .trim_end()
+            .to_string(),
+            replace: c.glyph,
+        })
+        .collect()
 }
 
 fn react(app: &mut App, args: &str) -> Result<()> {
     let mut it = args.split_whitespace();
     let Some(arg) = it.next() else {
-        bail!("Usage: /react <emoji|:code:> [n]  e.g. /react :thumbsup:")
+        // Bare /react: the picker on the newest bot message.
+        if !app.open_react_picker(1) {
+            bail!("No message to react to")
+        }
+        return Ok(());
     };
     let Some(emoji) = crate::emoji::parse_arg(arg) else {
         bail!("Unknown emoji {arg}. Type : and a name, then Tab, e.g. :thumbsup:")

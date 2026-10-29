@@ -117,7 +117,11 @@ Type `:` and part of a name, then **Tab**, to pick an emoji (`:tada` → 🎉), 
 popup as slash-command completion. Complete `:name:` shortcodes are turned into emoji when you
 send. Emoji (ZWJ families, flags, skin tones, `❤️` with VS16) count as one character and two
 columns in the input and in chat wrapping. `/react 👍` (or `/react :thumbsup:`, vim `r`)
-toggles a reaction pill under the newest bot message. **Reactions are local**: grokbot_api 1.1
+toggles a reaction pill under the newest bot message. Tab completes the emoji (already on the
+message, then recently used, then 👍 ❤️ 😂 🎉 🔥 👀 ✅…) and the message index; `/unreact` +
+Tab offers what's on the message. Every message has a `[☺+]` button (theme part
+`react_button`): click it, use bare `/react`, or vim `R` (`message.react_picker`) for a
+searchable emoji grid (by shortcode and name; recent and on-message first, then by category). **Reactions are local**: grokbot_api 1.1
 has no reaction endpoint and transcripts carry no reaction data, so they're kept in
 `context.db` (per account and bot) and never sent. Theme part: `reaction_pill`.
 

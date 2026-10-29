@@ -36,6 +36,7 @@ pub const ACTIONS: &[&str] = &[
     "command.complete",
     "keymap.reload",
     "message.react",
+    "message.react_picker",
     "message.open",
     "image.view",
 ];

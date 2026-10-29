@@ -214,6 +214,7 @@ style_slots! {
     SELECTION = "selection", "Chat", false, "In-app selected text in the chat body";
     UNREAD_BADGE = "unread_badge", "Chat", false, "'↓ N new' while scrolled up";
     REACTION_PILL = "reaction_pill", "Chat", false, "Reaction pills under a message ( 👍 )";
+    REACT_BUTTON = "react_button", "Chat", false, "The [☺+] react button after each message";
     MD_HEADING = "md_heading", "Chat", false, "Markdown headings";
     MD_CODE = "md_code", "Chat", false, "Markdown `inline code`";
     MD_CODE_BLOCK = "md_code_block", "Chat", false, "Markdown fenced code blocks";
@@ -370,6 +371,7 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
             fg: Some(r(c::ON_ACCENT)),
             ..StyleSpec::default()
         }),
+        s::REACT_BUTTON => fg(c::MUTED),
         s::REACTION_PILL => StyleSpec {
             bg: Some(r(c::HEADER)),
             fg: Some(r(c::TEXT)),
@@ -737,6 +739,9 @@ pub fn image_viewer_info() -> Style {
 pub fn image_placeholder() -> Style {
     st(slot::IMAGE_PLACEHOLDER)
 }
+pub fn react_button() -> Style {
+    st(slot::REACT_BUTTON)
+}
 pub fn reaction_pill() -> Style {
     st(slot::REACTION_PILL)
 }
@@ -970,6 +975,7 @@ mod tests {
                 if s.key == "theme_switch"
                     || s.key == "unread_badge"
                     || s.key == "reaction_pill"
+                    || s.key == "react_button"
                     || s.key.starts_with("md_")
                     || s.key.starts_with("image_")
                     || s.key == "menu_bar"

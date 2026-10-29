@@ -208,7 +208,11 @@ in between quits.
                                viewer (xdg-open / open / Windows handler); vim NORMAL: o.
                                Images show as [🖼 alt · file] placeholders
   /react <emoji|:code:> [n]    Toggle a reaction pill on the newest bot message (n=2 the one
-                               before; vim NORMAL: r). Stored locally: the Grok Bot API has
+                               before; vim NORMAL: r). Tab completes the emoji (on the
+                               message first, then recent, then common; :code or code) and n.
+                               Bare /react, vim R or a click on a message's [☺+] opens the
+                               emoji picker: type to search (vim: / first), arrows/hjkl or
+                               wheel move, Enter or click toggles, Esc/click outside closes. Stored locally: the Grok Bot API has
                                no reaction endpoint, so bots and other clients don't see them
   PgUp / PgDn, mouse wheel     Scroll the chat (not the prompt history).
                                Only the exact bottom follows new content; scroll up

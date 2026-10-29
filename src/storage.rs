@@ -953,6 +953,18 @@ impl Store {
         Ok(rows)
     }
 
+    /// Reactions this account used most recently (any bot), newest first, distinct.
+    pub fn recent_reactions(&self, limit: usize) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare(
+            "SELECT emoji FROM reactions WHERE account_id = ?1
+             GROUP BY emoji ORDER BY MAX(created_at) DESC, MAX(rowid) DESC LIMIT ?2",
+        )?;
+        let rows = st
+            .query_map(params![self.account.id, limit as i64], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        Ok(rows)
+    }
+
     /// Add the reaction, or remove it if it is already there. True when it was added.
     pub fn toggle_reaction(&self, bot_id: &str, msg_key: &str, emoji: &str) -> Result<bool> {
         let n = self.conn.execute(

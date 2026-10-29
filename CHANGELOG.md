@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.17.0] - 2026-10-28
+
+### Added
+- **`/react` / `/unreact` Tab completion** for the emoji: with no argument it lists the emoji
+  already on the target message (marked `· on message`), then recently used reactions
+  (`· recent`), then 👍 ❤️ 😂 🎉 🔥 👀 ✅ 🙏 😮 😢, then every emoji by category. Shortcodes
+  match with or without the colon (fuzzy); the popup shows `:code: glyph` and inserts the
+  glyph. `/unreact` offers only what's on the message. The `[n]` index completes too.
+- **React button and emoji picker:** every chat message gets a `[☺+]` button (after its
+  reaction pills, or in the blank line below it, so layout, scroll math and the jump-to-new
+  badge are unchanged). Clicking it, bare `/react`, or vim NORMAL `R` (keymap action
+  `message.react_picker`) opens a searchable emoji grid for that message: fuzzy search by
+  shortcodes and CLDR name; on-message and recent emoji first, then common, then by category;
+  arrows / hjkl / mouse wheel move (vim keys start in list mode, `/` searches); Enter or a click
+  toggles the reaction and closes; Esc, `q` or a click outside closes. The footer shows the
+  selection's shortcode, name and category.
+- Theme part **`react_button`** (Chat). The picker reuses `help_frame`, `help_title`,
+  `selected` and `reaction_pill` (on-message emoji).
+
 ## [1.16.1] - 2026-10-28
 
 ### Fixed
