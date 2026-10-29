@@ -69,6 +69,15 @@ pub const PREF_LINKS_OPEN_WITH: &str = "links.open_with";
 /// In an SSH session: `builtin` (always the built-in browser) or `respect_pref` (global).
 pub const PREF_LINKS_SSH_BEHAVIOR: &str = "links.ssh_behavior";
 
+/// Claim presence while grokbot-tui is focused and in use, so the server holds pushes to
+/// your other devices (account-scoped, default off).
+pub const PREF_CLAIM_PRESENCE: &str = "notifications.claim_presence";
+/// Minutes without input before the presence claim is released (account-scoped).
+pub const PREF_IDLE_MINUTES: &str = "notifications.idle_minutes";
+/// Per-account install id sent with presence reports (generated once).
+pub const PREF_INSTALL_ID: &str = "notifications.install_id";
+pub const DEFAULT_IDLE_MINUTES: u64 = 10;
+
 /// `links.open_with`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OpenWith {
@@ -223,6 +232,10 @@ pub struct Config {
     pub open_with: OpenWith,
     /// In SSH, links always use the built-in browser (`links.ssh_behavior = builtin`).
     pub ssh_builtin: bool,
+    /// `notifications.claim_presence`.
+    pub claim_presence: bool,
+    /// `notifications.idle_minutes` (1..=240).
+    pub idle_minutes: u64,
 }
 
 impl Default for Config {
@@ -245,6 +258,8 @@ impl Default for Config {
             download_max_mb: DEFAULT_DOWNLOAD_MAX_MB,
             open_with: OpenWith::Builtin,
             ssh_builtin: true,
+            claim_presence: false,
+            idle_minutes: DEFAULT_IDLE_MINUTES,
         }
     }
 }
@@ -270,6 +285,8 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_DOWNLOAD_MAX_MB, c.download_max_mb.to_string()),
         (PREF_LINKS_OPEN_WITH, c.open_with.as_str().to_string()),
         (PREF_LINKS_SSH_BEHAVIOR, "builtin".to_string()),
+        (PREF_CLAIM_PRESENCE, c.claim_presence.to_string()),
+        (PREF_IDLE_MINUTES, c.idle_minutes.to_string()),
     ]
 }
 
@@ -322,6 +339,12 @@ impl Config {
             ssh_builtin: o(PREF_LINKS_SSH_BEHAVIOR)
                 .map(|v| !matches!(v.trim(), "respect_pref" | "respect-pref" | "pref"))
                 .unwrap_or(d.ssh_builtin),
+            claim_presence: o(PREF_CLAIM_PRESENCE)
+                .is_some_and(|v| matches!(v.trim(), "true" | "1" | "yes" | "on")),
+            idle_minutes: o(PREF_IDLE_MINUTES)
+                .and_then(|v| v.trim().parse().ok())
+                .filter(|n| (1..=240).contains(n))
+                .unwrap_or(d.idle_minutes),
         }
     }
 }
@@ -351,6 +374,15 @@ mod tests {
         m.insert(PREF_LINKS_SSH_BEHAVIOR.into(), "respect_pref".into());
         assert_eq!(Config::from_prefs(&m).open_with, OpenWith::System);
         assert!(!Config::from_prefs(&m).ssh_builtin);
+        assert!(!c.claim_presence);
+        assert_eq!(c.idle_minutes, 10);
+        assert!(!is_global(PREF_CLAIM_PRESENCE), "per account");
+        m.insert(PREF_CLAIM_PRESENCE.into(), "true".into());
+        m.insert(PREF_IDLE_MINUTES.into(), "0".into());
+        assert!(Config::from_prefs(&m).claim_presence);
+        assert_eq!(Config::from_prefs(&m).idle_minutes, 10);
+        m.remove(PREF_CLAIM_PRESENCE);
+        m.remove(PREF_IDLE_MINUTES);
         m.remove(PREF_LINKS_OPEN_WITH);
         m.remove(PREF_LINKS_SSH_BEHAVIOR);
         m.insert(PREF_THEME_MODE.into(), "purple".into());

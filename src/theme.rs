@@ -234,6 +234,7 @@ style_slots! {
     BROWSER_HEADING = "browser_heading", "Modals", false, "Built-in browser: page headings";
     BROWSER_STATUS = "browser_status", "Modals", false, "Built-in browser: title / loading indicator";
     SSH_INDICATOR = "ssh_indicator", "Screen and header", false, "The SSH badge (links open in the built-in browser)";
+    PRESENCE_INDICATOR = "presence_indicator", "Screen and header", false, "🔕 while the presence claim holds pushes to your other devices";
     DOWNLOAD_PATH = "download_path", "Modals", false, "Download modal: the save-path field";
     DOWNLOAD_DIR = "download_dir", "Modals", false, "Download modal: directories in the folder browser";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
@@ -435,6 +436,7 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
             ..fg(c::ACCENT)
         },
         s::BROWSER_STATUS => fg(c::SUBTLE),
+        s::PRESENCE_INDICATOR => fg(c::SUBTLE),
         s::SSH_INDICATOR => StyleSpec {
             bold: true,
             ..fg(c::WARN)
@@ -800,6 +802,9 @@ pub fn browser_heading() -> Style {
 pub fn browser_status() -> Style {
     st(slot::BROWSER_STATUS)
 }
+pub fn presence_indicator() -> Style {
+    st(slot::PRESENCE_INDICATOR)
+}
 pub fn ssh_indicator() -> Style {
     st(slot::SSH_INDICATOR)
 }
@@ -1053,6 +1058,7 @@ mod tests {
                     || s.key.starts_with("attach_")
                     || s.key.starts_with("browser_")
                     || s.key == "ssh_indicator"
+                    || s.key == "presence_indicator"
                     || s.key.starts_with("md_")
                     || s.key.starts_with("image_")
                     || s.key == "menu_bar"

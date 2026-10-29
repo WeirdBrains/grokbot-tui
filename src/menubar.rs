@@ -45,7 +45,7 @@ pub const MENUS: &[Menu] = &[
     Menu {
         label: "Notify",
         hint: 'n',
-        items: &["notify"],
+        items: &["notify", "mute"],
     },
     Menu {
         label: "Help",

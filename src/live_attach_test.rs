@@ -38,10 +38,8 @@ fn keys(v: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "live: sends one real prompt with an attachment"]
-async fn live_attachment_round_trip() {
-    assert_eq!(std::env::var("GROKBOT_TUI_LIVE_ATTACH").as_deref(), Ok("1"));
+/// The signed-in account's client, built the way the app does. Prints no secrets.
+pub(crate) async fn live_client() -> (Store, gw::Client) {
     let (dir, _) = Store::default_dir().unwrap();
     let store = Store::open(dir, None).unwrap();
     let config = store.load_config().unwrap();
@@ -69,6 +67,14 @@ async fn live_attachment_round_trip() {
         }
         _ => panic!("STOP: login has no Cursor token; attachments need /login desktop or cursor"),
     };
+    (store, client)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "live: sends one real prompt with an attachment"]
+async fn live_attachment_round_trip() {
+    assert_eq!(std::env::var("GROKBOT_TUI_LIVE_ATTACH").as_deref(), Ok("1"));
+    let (_store, client) = live_client().await;
     assert!(client.has_cursor_session());
     let team = client.list_team_agents().await.unwrap().unwrap_or_default();
     println!(

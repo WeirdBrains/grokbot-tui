@@ -65,6 +65,7 @@ browser_link_number = { fg = "@warn" }
 browser_heading = { fg = "@accent", bold = true }
 browser_status = { fg = "@subtle" }
 ssh_indicator = { fg = "@warn", bold = true }
+presence_indicator = { fg = "@subtle" }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }
@@ -156,6 +157,7 @@ browser_link_number = { fg = "@warn" }
 browser_heading = { fg = "@accent", bold = true }
 browser_status = { fg = "@subtle" }
 ssh_indicator = { fg = "@warn", bold = true }
+presence_indicator = { fg = "@subtle" }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }

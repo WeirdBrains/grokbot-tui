@@ -22,11 +22,14 @@ mod keys;
 mod links;
 #[cfg(test)]
 mod live_attach_test;
+#[cfg(test)]
+mod live_presence_test;
 mod markdown;
 mod menubar;
 mod notify;
 mod notify_rules;
 mod picker;
+mod presence;
 mod select;
 mod ssh;
 mod storage;
@@ -189,6 +192,8 @@ fn main() -> Result<()> {
     app.image_picker = imageview::detect_picker();
     execute!(std::io::stdout(), EnableMouseCapture)?;
     let _ = execute!(std::io::stdout(), EnableBracketedPaste);
+    // Focus reports drive the presence claim (released on blur).
+    let _ = execute!(std::io::stdout(), event::EnableFocusChange);
     let enhancement = enable_shift_enter();
     app.keyboard_enhancement = enhancement;
     app.maybe_apple_terminal_hint();
@@ -200,6 +205,8 @@ fn main() -> Result<()> {
         hook(info);
     }));
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&mut term, &mut app)));
+    app.presence_release_blocking();
+    let _ = execute!(std::io::stdout(), event::DisableFocusChange);
     disable_shift_enter();
     let _ = execute!(std::io::stdout(), DisableBracketedPaste);
     let _ = execute!(std::io::stdout(), DisableMouseCapture);
@@ -304,6 +311,13 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             })
         })?;
         for ev in coalesce(batch) {
+            match &ev {
+                Event::Key(_) | Event::Paste(_) => app.presence_input(),
+                Event::Mouse(m) if !matches!(m.kind, MouseEventKind::Moved) => app.presence_input(),
+                Event::FocusGained => app.presence_focus(true),
+                Event::FocusLost => app.presence_focus(false),
+                _ => {}
+            }
             match ev {
                 Event::Key(k) if k.kind == KeyEventKind::Press => {
                     let now = std::time::Instant::now();

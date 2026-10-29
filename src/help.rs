@@ -202,6 +202,10 @@ in between quits.
                                Terminal, foot, Alacritty 0.13+; Ctrl/Cmd-click in the
                                terminal) always go to the system browser: the terminal opens
                                them, not grokbot-tui. GROKBOT_TUI_NO_HYPERLINKS=1 turns them off.
+  /mute [on|off|toggle]        Claim presence while you use grokbot-tui (focused, input in the
+                               last notifications.idle_minutes, default 10) so Grok Bot pushes
+                               to your other devices are held; 🔕 while held, /whoami shows
+                               the lease. Released on blur, idle, logout, account switch, quit.
   /browse [url] (/web)         Built-in text browser: no JavaScript, no cookies, 5 MiB / 20 s
                                cap. Tab completes recent URLs; vim NORMAL b. In it: e, Ctrl-L
                                or : edit the URL; j/k ↑/↓ PgUp/PgDn g/G Ctrl-d/u wheel scroll;

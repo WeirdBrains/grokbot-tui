@@ -194,6 +194,16 @@ built-in browser (`links.ssh_behavior = "builtin"`, the default; `"respect_pref"
 Theme parts: `browser_frame`, `browser_url`, `browser_link_number`, `browser_heading`,
 `browser_status`, `ssh_indicator`.
 
+## Muting other devices while you're here
+
+Set `notifications.claim_presence = true` (per account; `/mute`, or **Notify → mute**) and,
+while grokbot-tui is focused and you've used it in the last `notifications.idle_minutes`
+(default 10), it tells the Grok Bot service this install is active, the same report the desktop
+app sends, so pushes to your other devices can be held. 🔕 in the header shows a live claim;
+`/whoami` shows the lease. It's released when the terminal loses focus, you go idle, log out,
+switch accounts or quit; if the process is suspended the lease simply expires. It needs a
+Cursor session (`/login desktop` or `/login cursor`). Theme part: `presence_indicator`.
+
 ## Notifications, menu bar, tooltips
 
 Toasts honour `~/.grokbot-tui/notify-rules.toml` and `/notify` (dnd / per-kind). They never

@@ -158,6 +158,14 @@ pub fn registry() -> Registry {
                 run: links,
             },
             Command {
+                name: "mute",
+                aliases: &["presence"],
+                usage: "/mute [on|off|toggle]",
+                help: "Claim presence while you use grokbot-tui so pushes to your other devices are held (notifications.claim_presence)",
+                complete: mute_complete,
+                run: mute,
+            },
+            Command {
                 name: "detach",
                 aliases: &["unattach"],
                 usage: "/detach [n|all]",
@@ -333,6 +341,7 @@ fn logout(app: &mut App, _: &str) -> Result<()> {
 fn whoami(app: &mut App, _: &str) -> Result<()> {
     let alias = app.account().alias.clone();
     let mut lines = vec![format!("account: {alias}")];
+    lines.push(app.presence_summary());
     match &app.user_label {
         Some(l) => lines.push(format!("session: {l}")),
         None => lines.push(if app.connecting {
@@ -634,6 +643,25 @@ fn browse(app: &mut App, args: &str) -> Result<()> {
         };
         app.open_browser(Some(&url));
     }
+    Ok(())
+}
+
+fn mute_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(["on", "off", "toggle"])
+    } else {
+        vec![]
+    }
+}
+
+fn mute(app: &mut App, args: &str) -> Result<()> {
+    let on = match args.trim() {
+        "" | "toggle" => !app.config.claim_presence,
+        "on" | "true" | "1" => true,
+        "off" | "false" | "0" => false,
+        _ => bail!("Usage: /mute [on|off|toggle]"),
+    };
+    app.set_claim_presence(on);
     Ok(())
 }
 

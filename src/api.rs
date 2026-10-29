@@ -190,6 +190,15 @@ pub trait ApiClient: Send + Sync {
     ) -> gw::Result<Vec<gw::AttachmentRead>> {
         Err(gw::Error::Attachment(gw::UploadFailure::NoCursorSession))
     }
+    /// `ReportGrokBotDesktopActivity`: claim (`active`) or release this install's presence;
+    /// returns the lease.
+    async fn report_activity(
+        &self,
+        _install_id: &str,
+        _active: bool,
+    ) -> gw::Result<std::time::Duration> {
+        Err(gw::Error::Attachment(gw::UploadFailure::NoCursorSession))
+    }
 }
 
 /// Real gateway client (unofficial, undocumented API).
@@ -367,6 +376,15 @@ impl ApiClient for GatewayApi {
             .upload_attachment(bot_id, None, name, &data, |p| {
                 progress.store(p.sent, Ordering::Relaxed)
             })
+            .await
+    }
+    async fn report_activity(
+        &self,
+        install_id: &str,
+        active: bool,
+    ) -> gw::Result<std::time::Duration> {
+        self.client
+            .report_desktop_activity(install_id, active)
             .await
     }
     async fn resolve_attachments(
@@ -620,6 +638,14 @@ impl ApiClient for MockClient {
             size_bytes: data.len() as u64,
             content_type: String::new(),
         })
+    }
+    async fn report_activity(
+        &self,
+        _install_id: &str,
+        _active: bool,
+    ) -> gw::Result<std::time::Duration> {
+        self.check("ReportGrokBotDesktopActivity")?;
+        Ok(std::time::Duration::from_secs(60))
     }
     async fn resolve_attachments(
         &self,

@@ -406,6 +406,12 @@ pub enum Event {
         dest: std::path::PathBuf,
         result: std::result::Result<u64, String>,
     },
+    /// A presence report (claim or release) finished.
+    Presence {
+        epoch: u64,
+        active: bool,
+        result: std::result::Result<std::time::Duration, String>,
+    },
     /// A built-in browser page load finished.
     BrowserLoaded {
         id: u64,
@@ -510,6 +516,8 @@ pub struct App {
     pub chip_hits: Vec<crate::ui::LinkHit>,
     /// Per bot: (message key, attachments) for messages that carry files, in feed order.
     pub msg_attachments: HashMap<String, Vec<(String, Vec<crate::api::Attachment>)>>,
+    /// Presence claim state (1.21.0, `notifications.claim_presence`).
+    pub presence: crate::presence::Presence,
     /// The built-in text browser modal (1.20.0).
     pub browser: Option<crate::browser::Browser>,
     /// URLs visited in the browser this session, newest first (`/browse` completion).
@@ -740,6 +748,7 @@ impl App {
             attach: Default::default(),
             chip_hits: vec![],
             msg_attachments: HashMap::new(),
+            presence: Default::default(),
             browser: None,
             browser_visited: vec![],
             ssh: crate::ssh::detect(),
@@ -867,6 +876,7 @@ impl App {
         }
         self.awaiting
             .retain(|_, t| now.duration_since(*t) < AWAIT_TIMEOUT);
+        self.presence_tick();
         let (Some(api), Some((bot, session, team))) = (self.api.clone(), self.active_bot_route())
         else {
             return;
@@ -1040,6 +1050,11 @@ impl App {
             Event::ImageLoaded { id, result } => self.on_image_loaded(id, result),
             Event::Uploaded { id, result } => self.on_uploaded(id, result),
             Event::BrowserLoaded { id, url, result } => self.on_browser_loaded(id, url, result),
+            Event::Presence {
+                epoch,
+                active,
+                result,
+            } => self.on_presence(epoch, active, result),
             Event::AttachResolved {
                 paths,
                 then,
@@ -1407,6 +1422,7 @@ impl App {
 
     fn reset_session(&mut self) {
         self.epoch += 1;
+        self.presence = Default::default();
         self.api = None;
         self.user_label = None;
         self.login_method = None;
@@ -1445,6 +1461,8 @@ impl App {
     }
 
     pub fn switch_account(&mut self, alias: &str) -> Result<()> {
+        // Release with the old account's session and install id first.
+        self.presence_release();
         self.store.use_account(alias)?;
         self.reset_session();
         self.reload_config()?;
@@ -1660,6 +1678,7 @@ impl App {
     /// Delete this account's stored credential and clear session state. Chats and memory are kept.
     pub fn logout(&mut self) {
         let alias = self.account().alias.clone();
+        self.presence_release();
         self.reset_session();
         match self.store.delete_credentials() {
             Ok(true) => self.info(format!(

@@ -245,6 +245,9 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
             if app.ssh {
                 segs.push(seg("   SSH", theme::ssh_indicator()));
             }
+            if app.presence.claimed(std::time::Instant::now()) {
+                segs.push(seg("   🔕", theme::presence_indicator()));
+            }
             if app.mock {
                 segs.push(seg("   [MOCK]", theme::mock_tag()));
             }
@@ -295,6 +298,9 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
             let mut segs = vec![mouse_seg(app)];
             if app.ssh {
                 segs.push(seg("  SSH", theme::ssh_indicator()));
+            }
+            if app.presence.claimed(std::time::Instant::now()) {
+                segs.push(seg("  🔕", theme::presence_indicator()));
             }
             if app.mock {
                 segs.push(seg("   [MOCK]", theme::mock_tag()));

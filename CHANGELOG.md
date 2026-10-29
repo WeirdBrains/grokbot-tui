@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.21.0] - 2026-10-29
+
+### Added
+- Presence muting: with `notifications.claim_presence = true` (per account, default off;
+  `/mute [on|off|toggle]`, alias `/presence`, or **Notify → mute**) grokbot-tui reports
+  `ReportGrokBotDesktopActivity {installId, active: true}` while the terminal is focused and
+  you've used it within `notifications.idle_minutes` (default 10), so the server can hold
+  Grok Bot pushes to your other devices, as the desktop app does. Heartbeats at half the
+  returned lease (150 s live, so every 75 s). Released (`active: false`) on focus loss, idle,
+  logout, account switch and quit (waits up to 2 s). If the process is suspended or the
+  machine sleeps, heartbeats stop and the lease lapses on its own.
+- A per-account install id (`notifications.install_id`, a UUID generated once).
+- 🔕 in the header while the claim is held; `/whoami` shows the claim, lease and time left.
+- Theme part `presence_indicator` in all shipped themes.
+- Terminal focus reporting is turned on (FocusGained/FocusLost).
+
+### Verified
+- One live round trip on the default account: `active: true` → lease 150000 ms,
+  `active: false` → 0. Whether pushes are actually held depends on the server-side
+  `grok_bot_hold_push_until_desktop_inactive` gate.
+
 ## [1.20.0] - 2026-10-29
 
 ### Added
