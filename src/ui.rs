@@ -1758,25 +1758,16 @@ fn entry_lines(
     };
     let (label, style) = (theme::entry_label(kind), theme::entry(kind));
     let pw = unicode_width::UnicodeWidthStr::width(prefix.as_str());
-    // Bot replies are markdown: rendered pre-wrapped, one screen row per line.
+    // Bot replies mirror your bubbles (1.28.0): the bot's name on its own header row,
+    // the markdown body (pre-wrapped to the same bubble width) directly under it,
+    // left-aligned where yours are right-aligned.
     if let Some(max) = bubble
         && kind == EntryKind::Bot
     {
-        let w = max.saturating_sub(pw).max(max / 3).max(1);
         let base = ratatui::style::Style::from(&style);
-        return crate::markdown::render(text, w, base)
-            .into_iter()
-            .enumerate()
-            .map(|(i, mut l)| {
-                let p = if i == 0 {
-                    prefix.clone()
-                } else {
-                    " ".repeat(pw)
-                };
-                l.spans.insert(0, label.span(p));
-                l
-            })
-            .collect();
+        let mut out = vec![Line::from(label.span(bot.unwrap_or("bot").to_string()))];
+        out.extend(crate::markdown::render(text, max, base));
+        return out;
     }
     let body: Vec<String> = match bubble {
         // Prefix + text stay within the bubble; keep at least a third for text.
@@ -1800,6 +1791,90 @@ fn entry_lines(
 pub(crate) mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
+
+    /// Bot bubbles mirror yours: name header row, body directly under it at the same
+    /// edge (left for the bot, right for you), the same bubble width.
+    #[test]
+    fn bot_bubble_mirrors_user_bubble_layout() {
+        let max = 20;
+        let text = "alpha beta gamma delta epsilon zeta";
+        let user = entry_lines(EntryKind::User, text, None, Some(max));
+        let bot = entry_lines(EntryKind::Bot, text, Some("Rocky"), Some(max));
+        let plain = |l: &Line| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        };
+        assert_eq!(plain(&user[0]), "you");
+        assert_eq!(plain(&bot[0]), "Rocky", "name on its own header row");
+        assert_eq!(user.len(), bot.len(), "same wrap width → same rows");
+        for (u, b) in user.iter().zip(&bot).skip(1) {
+            assert_eq!(u.alignment, Some(Alignment::Right));
+            assert_ne!(b.alignment, Some(Alignment::Right));
+            assert_eq!(plain(u).trim_end(), plain(b).trim_end(), "same wrapping");
+            assert!(!plain(b).starts_with(' '), "body flush under the name");
+        }
+        // Rendered: the bot's name and first body row start at the same column,
+        // as your "you" and body end at the same column.
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        crate::app::tests::mock_login(&mut app, "t");
+        let id = app.active_bot().unwrap().id.clone();
+        let name = app.active_bot().unwrap().name.clone();
+        for (i, (role, t)) in [
+            (crate::api::Role::User, "USERBODY"),
+            (crate::api::Role::Bot, "BOTBODY"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            app.store
+                .append_message(
+                    &id,
+                    &crate::api::Message {
+                        role,
+                        text: t.into(),
+                        remote_id: Some(format!("m{i}")),
+                        attachments: vec![],
+                    },
+                )
+                .unwrap();
+        }
+        app.refresh_feed_from_db();
+        app.notices.clear();
+        let (w, h) = (100u16, 30u16);
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let find = |needle: &str| {
+            (0..h)
+                .find_map(|y| {
+                    let row: Vec<&str> = (0..w).map(|x| buf[(x, y)].symbol()).collect();
+                    let s: String = row.concat();
+                    s.find(needle).map(|i| (s[..i].chars().count() as u16, y))
+                })
+                .unwrap()
+        };
+        let (bx, by) = find("BOTBODY");
+        let row = |y: u16| (0..w).map(|x| buf[(x, y)].symbol()).collect::<Vec<_>>();
+        let at = |y: u16, x: u16, t: &str| row(y)[x as usize..].concat().starts_with(t);
+        assert!(
+            at(by - 1, bx, &name),
+            "bot body directly under the bot name"
+        );
+        let (ux, uy) = find("USERBODY");
+        // "you" ends where your body ends (right-aligned on the row above).
+        assert!(
+            at(uy - 1, ux + 8 - 3, "you"),
+            "your body right edge under 'you'"
+        );
+        if std::env::var("GBT_DUMP").is_ok() {
+            for y in 0..h {
+                println!("{}", row(y).concat());
+            }
+        }
+    }
 
     #[test]
     fn renders_history_browser_with_age_and_bot() {
@@ -2415,6 +2490,7 @@ pub(crate) mod tests {
             )
             .unwrap();
         app.refresh_feed_from_db();
+        app.config.attachments_panel = false;
         let width = 120u16;
         let mut term = Terminal::new(TestBackend::new(width, 60)).unwrap();
         term.draw(|f| draw(f, &mut app)).unwrap();
@@ -2655,7 +2731,10 @@ pub(crate) mod tests {
                 .unwrap()
         };
         let (a, b) = (row_of("FIRST-MSG"), row_of("SECOND-MSG"));
-        assert_eq!(b, a + 2, "one blank line between messages");
+        assert_eq!(b, a + 3, "one blank line, then the bot-name header row");
+        let name = app.active_bot().unwrap().name.clone();
+        let hdr: String = (0..100u16).map(|x| buf[(x, b - 1)].symbol()).collect();
+        assert!(hdr.contains(&name), "{hdr:?}");
         let blank: String = (0..100u16).map(|x| buf[(x, a + 1)].symbol()).collect();
         assert!(!blank.contains("MSG"));
         // Left padding: two spaces between the chat border and the text.

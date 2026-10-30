@@ -217,10 +217,14 @@ impl GatewayApi {
 }
 
 pub fn bot_from_agent(a: &gw::Agent) -> Bot {
+    let (name, description) = split_name(
+        &gw::sanitize_text(a.display_name()),
+        &gw::sanitize_text(&a.description),
+    );
     Bot {
         id: a.id.clone(),
-        name: gw::sanitize_text(a.display_name()),
-        description: gw::sanitize_text(&a.description),
+        name,
+        description,
         hidden: a.hidden_from_sidebar.unwrap_or(false),
         is_group: a.is_group,
         team: false,
@@ -228,7 +232,23 @@ pub fn bot_from_agent(a: &gw::Agent) -> Bot {
     }
 }
 
-/// Add shared team bots (from the backend team list) that the gateway list lacks.
+/// A bot named "Lippy · Very ratatui-focused developer" (description typed into the
+/// name): the sidebar shows "Lippy" and the rest becomes the description, unless the
+/// bot already has one (then the tail is kept in front of it).
+pub fn split_name(name: &str, desc: &str) -> (String, String) {
+    match name.split_once(" · ") {
+        Some((head, tail)) if !head.trim().is_empty() && !tail.trim().is_empty() => {
+            let d = if desc.trim().is_empty() {
+                tail.trim().to_string()
+            } else {
+                format!("{} · {}", tail.trim(), desc.trim())
+            };
+            (head.trim().to_string(), d)
+        }
+        _ => (name.to_string(), desc.to_string()),
+    }
+}
+
 /// What changed between two bot lists (by id): names for the status notice.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BotDiff {
@@ -289,6 +309,7 @@ pub fn diff_bots(old: &[Bot], new: &[Bot]) -> BotDiff {
     d
 }
 
+/// Add shared team bots (from the backend team list) that the gateway list lacks.
 pub fn merge_team_bots(mut bots: Vec<Bot>, team: &[gw::TeamAgent]) -> Vec<Bot> {
     for t in team {
         if t.viewer_is_owner || bots.iter().any(|b| b.id == t.agent_id) {
@@ -968,5 +989,22 @@ mod tests {
             diff_bots(&old[..1], &[b("a", "A"), b("r", "ratatoskn")]).notice(),
             "Bot list refreshed: 1 new (ratatoskn)"
         );
+    }
+
+    #[test]
+    fn split_name_moves_an_inline_description_out_of_the_name() {
+        assert_eq!(
+            split_name("Lippy · Very ratatui-lipgloss focused rust developer", ""),
+            (
+                "Lippy".into(),
+                "Very ratatui-lipgloss focused rust developer".into()
+            )
+        );
+        assert_eq!(
+            split_name("Lippy · x", "y"),
+            ("Lippy".into(), "x · y".into())
+        );
+        assert_eq!(split_name("Rocky", "d"), ("Rocky".into(), "d".into()));
+        assert_eq!(split_name(" · x", ""), (" · x".into(), "".into()));
     }
 }

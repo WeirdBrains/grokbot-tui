@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.28.0] - 2026-10-30
+
+### Added
+- Right column header: the open chat's bot name (bold) and description, wrapped, cut after
+  3 rows with a clickable **▾ more** / **▴ less**. It sits above the attachments panel and
+  follows the bot-list refresh. Theme parts `bot_header_name` and `bot_header_desc`.
+
+### Changed
+- The sidebar bot list shows names only. A name with the description typed into it after
+  " · " (e.g. "Lippy · Very ratatui-lipgloss focused rust developer") is split: the sidebar
+  shows "Lippy" and the rest becomes the description in the header.
+- Bot replies now look like your prompt bubbles: the bot's name is the bubble header on its
+  own row, and the reply sits directly under it at the same edge and 2/3 width, left-aligned
+  as yours are right-aligned. (Before, the name was a `Name: ` prefix with the reply indented
+  after it.) Inline media, images and download chips line up under the name too.
+- The right column (`ui.attachments_panel`) is now shown by default, since the header is
+  useful in every chat. `hide`, F9, `/attachments` and the «/» buttons still collapse the
+  whole column to the strip, and it still hides when the chat body is under 70 columns.
+  A saved `hide` is kept.
+
 ## [1.27.0] - 2026-10-30
 
 ### Added

@@ -846,6 +846,7 @@ mod tests {
                 ),
             }],
         );
+        app.config.attachments_panel = false;
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
         term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
         let s = crate::ui::tests::screen_rows(&term).join("\n");

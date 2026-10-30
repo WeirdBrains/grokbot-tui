@@ -89,6 +89,57 @@ pub struct Panel {
     pub type_hits: Vec<(Rect, TypeFilter)>,
     pub toggle_area: Rect,
     pub filter_area: Rect,
+    /// Bot header (1.28.0): long descriptions show in full when expanded.
+    pub header_expanded: bool,
+    /// The header's "▾ more" / "▴ less" control.
+    pub header_more_area: Rect,
+}
+
+/// Description rows shown before "▾ more".
+pub const HEADER_DESC_ROWS: usize = 3;
+
+/// The right column's bot header lines: bold name, wrapped description (cut to
+/// [`HEADER_DESC_ROWS`] with "▾ more" unless expanded). Returns (lines, more-row index).
+pub fn header_lines(
+    name: &str,
+    desc: &str,
+    width: usize,
+    expanded: bool,
+    max_rows: usize,
+) -> (Vec<Line<'static>>, Option<usize>) {
+    let mut out = vec![Line::from(Span::styled(
+        name.to_string(),
+        rs(theme::bot_header_name()),
+    ))];
+    let desc = desc.trim();
+    if desc.is_empty() {
+        return (out, None);
+    }
+    let rows = crate::ui::wrap_text(desc, width.max(1));
+    let cap = if expanded {
+        max_rows.saturating_sub(2).max(HEADER_DESC_ROWS)
+    } else {
+        HEADER_DESC_ROWS
+    };
+    let long = rows.len() > HEADER_DESC_ROWS;
+    for (i, r) in rows.iter().take(cap).enumerate() {
+        let mut r = r.clone();
+        if long && !expanded && i + 1 == HEADER_DESC_ROWS {
+            while crate::input::str_width(&r) + 1 > width && r.pop().is_some() {}
+            r.push('…');
+        }
+        out.push(Line::from(Span::styled(r, rs(theme::bot_header_desc()))));
+    }
+    if long {
+        let label = if expanded { "▴ less" } else { "▾ more" };
+        out.push(Line::from(Span::styled(
+            label,
+            rs(theme::collapse_button()),
+        )));
+        let i = out.len() - 1;
+        return (out, Some(i));
+    }
+    (out, None)
 }
 
 /// Every attachment in `feed`, oldest first.
@@ -198,6 +249,10 @@ fn rs(s: ratatui_lipgloss::Style) -> Style {
 /// Draw the panel (expanded or the 1-column strip) into `area`.
 pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     let collapsed = !app.config.attachments_panel;
+    let (bot_name, bot_desc) = app
+        .active_bot()
+        .map(|b| (b.name.clone(), b.description.clone()))
+        .unwrap_or_default();
     let list = filtered(app);
     let total = items(app).len();
     let p = &mut app.attpanel;
@@ -205,6 +260,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     p.hits.clear();
     p.type_hits.clear();
     p.filter_area = Rect::default();
+    p.header_more_area = Rect::default();
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -226,6 +282,36 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         p.toggle_area = area;
         return;
     }
+    // Bot header above the files (1.28.0): name and description.
+    let area = if bot_name.is_empty() || area.height < 8 {
+        area
+    } else {
+        let (lines, more) = header_lines(
+            &bot_name,
+            &bot_desc,
+            area.width.saturating_sub(2) as usize,
+            p.header_expanded,
+            (area.height / 2) as usize,
+        );
+        let h = (lines.len() as u16 + 2).min(area.height / 2);
+        let hdr = Rect { height: h, ..area };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(rs(theme::attach_panel_frame()));
+        let inner = block.inner(hdr);
+        f.render_widget(block, hdr);
+        if let Some(i) = more
+            && (i as u16) < inner.height
+        {
+            p.header_more_area = Rect::new(inner.x, inner.y + i as u16, 6, 1);
+        }
+        f.render_widget(Paragraph::new(lines), inner);
+        Rect {
+            y: area.y + h,
+            height: area.height - h,
+            ..area
+        }
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(rs(theme::attach_panel_frame()))
@@ -235,8 +321,9 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         ));
     let inner = block.inner(area);
     f.render_widget(block, area);
-    // » collapse button on the top border.
-    let t = Rect::new(area.x + area.width.saturating_sub(4), area.y, 3, 1);
+    // » collapse button on the column's top border.
+    let top = p.area.y;
+    let t = Rect::new(area.x + area.width.saturating_sub(4), top, 3, 1);
     f.render_widget(
         Paragraph::new(Span::styled(" » ", rs(theme::collapse_button()))),
         t,
@@ -458,6 +545,10 @@ impl App {
             self.set_attachments_panel(true);
             return true;
         }
+        if self.attpanel.header_more_area.contains(at) {
+            self.attpanel.header_expanded = !self.attpanel.header_expanded;
+            return true;
+        }
         self.attpanel.focused = true;
         if self.attpanel.filter_area.contains(at) {
             self.attpanel.editing = true;
@@ -592,6 +683,97 @@ mod tests {
     }
 
     #[test]
+    fn header_lines_cut_long_descriptions_with_more() {
+        let plain = |l: &Line| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        };
+        let (l, more) = header_lines("Rocky", "", 30, false, 20);
+        assert_eq!((l.len(), more), (1, None));
+        let (l, more) = header_lines("Rocky", "short one", 30, false, 20);
+        assert_eq!(plain(&l[1]), "short one");
+        assert_eq!(more, None);
+        let long = "word ".repeat(40);
+        let (l, more) = header_lines("Rocky", &long, 20, false, 20);
+        assert_eq!(l.len(), 1 + HEADER_DESC_ROWS + 1);
+        assert!(plain(&l[HEADER_DESC_ROWS]).ends_with('…'));
+        assert_eq!(more, Some(l.len() - 1));
+        assert_eq!(plain(&l[l.len() - 1]), "▾ more");
+        let (l, _) = header_lines("Rocky", &long, 20, true, 40);
+        assert!(l.len() > 1 + HEADER_DESC_ROWS + 1);
+        assert_eq!(plain(&l[l.len() - 1]), "▴ less");
+    }
+
+    #[test]
+    fn right_column_shows_the_bot_header_above_files_and_follows_refresh() {
+        let (mut app, _d, _rt) = setup();
+        assert!(app.config.attachments_panel, "shown by default");
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        let s = screen(&mut term, &mut app);
+        let col = |s: &[String]| -> Vec<String> {
+            s.iter()
+                .map(|l| l.chars().skip(120 - WIDTH as usize).collect())
+                .collect()
+        };
+        let c = col(&s);
+        let name = app.active_bot().unwrap().name.clone();
+        let desc = app.active_bot().unwrap().description.clone();
+        let ny = c
+            .iter()
+            .position(|l| l.contains(&name))
+            .expect("name in column");
+        let dy = c
+            .iter()
+            .position(|l| l.contains(&desc[..8]))
+            .expect("desc in column");
+        let fy = c
+            .iter()
+            .position(|l| l.contains("Files ("))
+            .expect("files block");
+        assert!(ny < dy && dy < fy, "name, description, then files: {c:#?}");
+        // The sidebar shows names only.
+        let side: Vec<String> = s
+            .iter()
+            .map(|l| l.chars().take(app.config.sidebar_width as usize).collect())
+            .collect();
+        assert!(!side.iter().any(|l| l.contains(&desc[..8])));
+        // A refresh that changes the description shows it on the next frame.
+        let mut all = app.all_bots.clone();
+        let id = app.active_bot().unwrap().id.clone();
+        for b in all.iter_mut().filter(|b| b.id == id) {
+            b.description = "Freshly described".into();
+        }
+        app.apply_bots(all);
+        let c = col(&screen(&mut term, &mut app));
+        assert!(c.iter().any(|l| l.contains("Freshly described")));
+        // F9 hides the whole column (strip), as before.
+        app.set_attachments_panel(false);
+        screen(&mut term, &mut app);
+        assert_eq!(app.attpanel.area.width, 1);
+    }
+
+    #[test]
+    fn long_description_expands_on_click() {
+        let (mut app, _d, _rt) = setup();
+        let mut all = app.all_bots.clone();
+        let id = app.active_bot().unwrap().id.clone();
+        for b in all.iter_mut().filter(|b| b.id == id) {
+            b.description = "lorem ipsum ".repeat(30);
+        }
+        app.apply_bots(all);
+        let mut term = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        screen(&mut term, &mut app);
+        let m = app.attpanel.header_more_area;
+        assert!(m.width > 0);
+        app.click(m.x, m.y);
+        assert!(app.attpanel.header_expanded);
+        let s = screen(&mut term, &mut app);
+        assert!(s.iter().any(|l| l.contains("▴ less")));
+    }
+
+    #[test]
     fn lists_received_items_and_filters_by_type_and_text() {
         let (mut app, _d, _rt) = setup();
         let all = items(&app);
@@ -610,10 +792,11 @@ mod tests {
     #[test]
     fn collapsed_strip_expands_on_click_and_rows_jump() {
         let (mut app, _d, _rt) = setup();
+        app.config.attachments_panel = false; // shown by default since 1.28.0
         let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
         let s = screen(&mut term, &mut app);
         let a = app.attpanel.area;
-        assert_eq!(a.width, 1, "collapsed by default");
+        assert_eq!(a.width, 1, "collapsed strip");
         assert_eq!(a.x, 119);
         assert!(s.iter().any(|l| l.ends_with('«')));
         assert!(app.attpanel_click(a.x, a.y + 2));

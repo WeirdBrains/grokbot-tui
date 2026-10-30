@@ -328,7 +328,7 @@ pub struct Config {
     pub header_compact: bool,
     /// `ui.sidebar_collapsed`.
     pub sidebar_collapsed: bool,
-    /// `ui.attachments_panel` = show|hide (default hide: the 1-column strip).
+    /// `ui.attachments_panel` = show|hide (default show since 1.28.0: bot header + files).
     pub attachments_panel: bool,
     /// `message.click_to_react`.
     pub click_to_react: bool,
@@ -372,7 +372,7 @@ impl Default for Config {
             kitty_protocol: KittyProtocol::Auto,
             header_compact: false,
             sidebar_collapsed: false,
-            attachments_panel: false,
+            attachments_panel: true,
             click_to_react: true,
         }
     }

@@ -305,7 +305,9 @@ Input focused (multi-line)
                             the open chat stays. Automatic every
                             agents.refresh_interval_secs (60; 0 = off) and on re-login
                             (keymap agents.refresh)
-  F9 / /attachments (/files) Right panel listing this chat's attachments (sent and
+  F9 / /attachments (/files) Right column (shown by default): the bot's name and
+                            description (▾ more for long ones), then the panel listing
+                            this chat's attachments (sent and
                             received) with [view] and [⤓]; click a row to jump to its
                             message. Collapses to a 1-column strip with the count (pref
                             ui.attachments_panel; keymap view.toggle_attachments).

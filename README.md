@@ -293,17 +293,28 @@ Prefs: `media.inline` (`on`), `media.fps` (`10`, 1–30), `media.decoder`
 (`auto`|`builtin`|`ffmpeg`|`system`), `media.gif_autoplay` (`on`). `/media
 pause|stop|decoders`. Theme part: `media_bar`. On Linux, sound needs ALSA (libasound2).
 
-### Attachments panel
+### Right column: bot header and attachments
 
-A collapsible bar on the right of each chat lists its attachments, sent and received, with
+The right column starts with a header for the open chat's bot: its name in bold and its
+description, wrapped (long ones are cut after 3 rows; click **▾ more** / **▴ less**). It
+follows the bot-list refresh, so renames and new descriptions show at once. The sidebar
+shows bot names only. A bot whose name has the description typed into it ("Lippy · Very
+ratatui-focused …") shows as "Lippy", with the rest as its description.
+
+Below the header, a collapsible bar on the right of each chat lists its attachments, sent and received, with
 type, name, size, sender and time. **[view]** opens images in the viewer, text/HTML/Markdown
 in the built-in browser and other files in the system app (with the SSH guard); **[⤓]** opens
 the download modal; clicking a row jumps to its message. It has a search box and
 All/Img/Vid/Aud/Doc filters, and keys j/k, Enter, v, d, /, t and Esc when focused.
 Toggle with F9, the «/» buttons, View ▸ attachments, `/attachments show|hide|toggle`
 (alias `/files`) or keymap `view.toggle_attachments`; pref `ui.attachments_panel`
-(`show`/`hide`, default `hide` = 1-column strip with the count). Hidden below 70 columns.
-Theme parts: `attach_panel_frame`, `attach_panel_filter`, `attach_panel_count`.
+(`show`/`hide`, default `show` since 1.28.0; `hide` = 1-column strip with the count). These
+toggle the whole column, header included. Hidden when the chat body is under 70 columns.
+Theme parts: `attach_panel_frame`, `attach_panel_filter`, `attach_panel_count`,
+`bot_header_name`, `bot_header_desc`.
+
+Bot replies are laid out like your messages: the bot's name on its own row, the reply
+directly under it, the same 2/3 bubble width, on the left where yours are on the right.
 
 ## Notifications, menu bar, tooltips
 

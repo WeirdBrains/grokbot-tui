@@ -72,6 +72,8 @@ attach_panel_frame = { fg = "@subtle" }
 attach_panel_filter = { fg = "@subtle" }
 attach_panel_count = { fg = "@accent", bold = true }
 media_bar = { fg = "@accent" }
+bot_header_name = { fg = "@text", bold = true }
+bot_header_desc = { fg = "@muted" }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }
@@ -170,6 +172,8 @@ attach_panel_frame = { fg = "@subtle" }
 attach_panel_filter = { fg = "@subtle" }
 attach_panel_count = { fg = "@accent", bold = true }
 media_bar = { fg = "@accent" }
+bot_header_name = { fg = "@text", bold = true }
+bot_header_desc = { fg = "@muted" }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }
