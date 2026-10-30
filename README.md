@@ -316,6 +316,25 @@ Theme parts: `attach_panel_frame`, `attach_panel_filter`, `attach_panel_count`,
 Bot replies are laid out like your messages: the bot's name on its own row, the reply
 directly under it, the same 2/3 bubble width, on the left where yours are on the right.
 
+### Grok Bot cards: questions, approvals, secrets, forms and drafts (1.29.0)
+
+When a bot asks you something, the chat shows a card with its state (● pending, answered,
+dismissed or expired) and a button. Click the button, press **F11** (keymap `card.open`,
+vim normal `c`) or run `/card` to open the newest pending one:
+
+| Card | Keys |
+|------|------|
+| Question (single, multi-select, your own answer, multi-step) | `1`-`9` or `↑↓` `Enter`; `Space` toggles; `Tab` type your own; `x` dismiss |
+| Auto-review approval / local tool permission | `a` approve (allow once), `d` deny |
+| Secret request | type (masked) and `Enter`; `Ctrl-D` dismiss |
+| Form | `Tab` between fields (secret fields masked), `Ctrl-S` submit, `Ctrl-D` dismiss |
+| Email / Slack / meeting draft | `s` send, `e` edit the body, `x` discard |
+
+Secrets are sent only through the gateway's `submitSecret` / `submitUserForm` calls; they
+are never logged, stored or shown and are wiped after sending or closing. Purchase
+approvals, connector grants and similar cards are shown read-only; act on them in the
+desktop app. Theme parts: `card_frame`, `card_pending`, `card_done`, `card_button`.
+
 ## Notifications, menu bar, tooltips
 
 Toasts honour `~/.grokbot-tui/notify-rules.toml` and `/notify` (dnd / per-kind). They never

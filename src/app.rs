@@ -386,6 +386,13 @@ pub enum Event {
         cmd: String,
         result: std::result::Result<ShellOutput, String>,
     },
+    /// A card action finished (`result`: the new answered text, None = dismissed).
+    CardDone {
+        epoch: u64,
+        key: String,
+        method: &'static str,
+        result: std::result::Result<Option<String>, String>,
+    },
     /// `/bot new` finished.
     BotCreated { epoch: u64, result: gw::Result<Bot> },
     /// `/bot delete` finished.
@@ -667,6 +674,11 @@ pub struct App {
     pub help: Option<HelpModal>,
     /// `/shell` output popup.
     pub shell: Option<ShellModal>,
+    /// Interactive cards by bubble message key: (bot id, card). See [`crate::cards`].
+    pub cards: HashMap<String, (String, crate::cards::Card)>,
+    /// Bumped when a card's state changes (part of the feed cache key).
+    pub cards_gen: u64,
+    pub card_modal: Option<crate::cardmodal::CardModal>,
     shell_seq: u64,
     /// Open selection modal (bots, accounts, …).
     pub picker: Option<crate::picker::Picker>,
@@ -882,6 +894,9 @@ impl App {
             desktop_lister: real_desktop_lister(),
             help: None,
             shell: None,
+            cards: HashMap::new(),
+            cards_gen: 0,
+            card_modal: None,
             shell_seq: 0,
             picker: None,
             client_version_source,
@@ -1165,6 +1180,16 @@ impl App {
                     self.info(format!("/shell {cmd} finished ({how}); output was closed."));
                 }
             },
+            Event::CardDone {
+                epoch,
+                key,
+                method,
+                result,
+            } => {
+                if epoch == self.epoch {
+                    self.card_done(key, method, result);
+                }
+            }
             Event::BotCreated { epoch, result } => {
                 if epoch != self.epoch {
                     return;
@@ -1313,6 +1338,10 @@ impl App {
                         let got_reply = added.iter().any(|m| m.role == Role::Bot);
                         // The chat feed is always rebuilt from SQLite (single source of truth).
                         self.reload_bot_log(&bot);
+                        if let Some(api) = self.api.clone() {
+                            let cards = api.take_cards(&bot);
+                            self.absorb_cards(&bot, cards);
+                        }
                         if got_reply {
                             self.awaiting.remove(&bot);
                         }
@@ -2569,6 +2598,7 @@ impl App {
             || self.browser.is_some()
             || self.react_picker.is_some()
             || self.download.is_some()
+            || self.card_modal.is_some()
     }
 
     /// Load prompt history for the active account from `context.db`. A failure is shown
@@ -3031,6 +3061,10 @@ impl App {
             }
             "view.toggle_attachments" => {
                 self.set_attachments_panel(!self.config.attachments_panel);
+                true
+            }
+            "card.open" => {
+                self.open_card(None);
                 true
             }
             "agents.refresh" => {
@@ -3610,7 +3644,10 @@ impl App {
             .find(|h| h.y == row && col >= h.x && col < h.x + h.w)
         {
             let url = h.url.clone();
-            if let Some(path) = url.strip_prefix(crate::attach::DL_SCHEME) {
+            if let Some(k) = url.strip_prefix(crate::cards::SCHEME) {
+                let k = k.to_string();
+                self.open_card(Some(&k));
+            } else if let Some(path) = url.strip_prefix(crate::attach::DL_SCHEME) {
                 self.open_attachment(path, crate::attach::Then::Download);
             } else if let Some(path) = url.strip_prefix(crate::attach::SCHEME) {
                 self.open_attachment(path, crate::attach::Then::Open);

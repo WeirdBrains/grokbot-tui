@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.29.0] - 2026-10-30
+
+### Added
+- Grok Bot cards in the chat: you can now see and act on the interactive prompts a bot
+  sends, as in the desktop app. Each card's bubble shows its state (pending, answered,
+  dismissed, expired), its details and a button; click it, press F11 (keymap `card.open`,
+  vim normal `c`) or run `/card` (newest pending card) to open it.
+  - Question widgets: single choice (1-9 or ↑↓ Enter), multi-select (Space toggles),
+    type-your-own answers (Tab) and multi-step questions; `x` dismisses.
+  - Auto-review approvals and local tool permissions: `a` approve / allow once, `d` deny.
+  - Secret requests: masked input, sent only through `submitSecret`; never logged,
+    echoed, stored or shown, and cleared after sending or closing.
+  - Forms (`user-form`): Tab between fields, password/OTP/secret fields masked, required
+    fields checked; Ctrl-S submits, Ctrl-D dismisses.
+  - Message drafts (email, Slack, meeting chat): `s` send, `e` edit the body, `x` discard.
+  - Other cards (purchase/virtual-card approvals, connector grants, cookie, publish and
+    similar confirmations) are shown read-only with a note to act in the desktop app.
+- Theme parts `card_frame`, `card_pending`, `card_done` and `card_button`.
+
 ## [1.28.0] - 2026-10-30
 
 ### Added

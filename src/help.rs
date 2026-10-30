@@ -313,6 +313,12 @@ Input focused (multi-line)
                             ui.attachments_panel; keymap view.toggle_attachments).
                             In the panel: j/k move, Enter jump, v view, d download,
                             / filter, t type (All/Img/Vid/Aud/Doc), Esc back to input
+  F11 / /card               Open a Grok Bot card (question, approval, secret, form or
+                            draft); also click its button in the chat (keymap card.open,
+                            vim c). Widgets: 1-9/↑↓ Enter, Space toggles, Tab your own,
+                            x dismiss. Approvals: a / d. Secrets and forms: typed masked,
+                            Enter/Ctrl-S submit, Ctrl-D dismiss. Drafts: s send, e edit,
+                            x discard. Purchase and grant cards are read-only here
   Video, GIFs, music        Play inline in the bubble: [▶]/[⏸] toggles, click the bar to
                             seek, click the picture for the full-size player (Space,
                             ←/→ 5 s, Home, Esc). One video/track plays at a time and

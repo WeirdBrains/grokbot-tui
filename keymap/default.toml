@@ -13,11 +13,13 @@
 "f7" = "view.toggle_header"
 "f8" = "view.toggle_sidebar"
 "f9" = "view.toggle_attachments"
+"f11" = "card.open"
 "f12" = "agents.refresh"
 
 [mode.normal]
 "i" = "mode.insert"
 "r" = "message.react"
+"c" = "card.open"
 "shift-r" = "message.react_picker"
 "o" = "message.open"
 "d" = "message.download"

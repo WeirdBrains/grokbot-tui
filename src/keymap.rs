@@ -46,6 +46,7 @@ pub const ACTIONS: &[&str] = &[
     "view.toggle_sidebar",
     "view.toggle_attachments",
     "agents.refresh",
+    "card.open",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -222,6 +222,14 @@ pub fn registry() -> Registry {
                 run: attachments,
             },
             Command {
+                name: "card",
+                aliases: &["cards", "answer"],
+                usage: "/card",
+                help: "Open the newest pending card in this chat (question, approval, secret, form or draft); also F11 or click its button",
+                complete: no_complete,
+                run: card,
+            },
+            Command {
                 name: "menu",
                 aliases: &[],
                 usage: "/menu [chat|account|view|web|theme|notify|help]",
@@ -892,6 +900,11 @@ fn attachments(app: &mut App, args: &str) -> Result<()> {
         _ => bail!("Usage: /attachments [show|hide|toggle]"),
     };
     app.set_attachments_panel(on);
+    Ok(())
+}
+
+fn card(app: &mut App, _: &str) -> Result<()> {
+    app.open_card(None);
     Ok(())
 }
 

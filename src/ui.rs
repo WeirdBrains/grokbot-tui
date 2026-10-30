@@ -506,6 +506,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.media.modal.is_some() {
         crate::media::modal::draw(f, app);
     }
+    if app.card_modal.is_some() {
+        crate::cardmodal::draw(f, app);
+    }
     draw_toasts(f, app);
     if let Some(tip) = app.tooltip.tip.clone() {
         crate::tooltip::paint(f, &tip, app.tooltip.tip_at, f.area());
@@ -705,6 +708,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             app.config.images_inline,
             app.config.inline_max_rows,
             app.config.media_inline,
+            app.cards_gen,
         )
             .hash(&mut h);
         h.finish()
@@ -765,6 +769,18 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                 .then(|| crate::emoji::message_key(e.kind as u8, &e.text));
             owners.extend(std::iter::repeat_n(owner, body.len()));
             lines.extend(body);
+            if e.kind == EntryKind::Bot {
+                let k = crate::emoji::message_key(e.kind as u8, &e.text);
+                if let Some((_, card)) = app.cards.get(&k) {
+                    for (l, hits) in crate::cardmodal::bubble_lines(card, &k) {
+                        if !hits.is_empty() {
+                            dl.push((lines.len(), hits));
+                        }
+                        lines.push(l);
+                        buttons.push(None);
+                    }
+                }
+            }
             if e.kind == EntryKind::User {
                 let k = crate::emoji::message_key(e.kind as u8, &e.text);
                 let atts = app.entry_attachments(&k);

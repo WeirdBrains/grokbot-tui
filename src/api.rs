@@ -154,6 +154,23 @@ pub trait ApiClient: Send + Sync {
     fn take_list_notice(&self) -> Option<String> {
         None
     }
+    /// Interactive cards seen by the last transcript call for `bot_id` (1.29.0).
+    fn take_cards(&self, _bot_id: &str) -> Vec<crate::cards::Card> {
+        vec![]
+    }
+    /// Run one card action (`respondToWidget`, `submitSecret`, ...). `agentId` and, for
+    /// a team bot, `sessionId` are added here. Never logs the body.
+    async fn card_call(
+        &self,
+        _bot_id: &str,
+        _session: Option<&str>,
+        call: crate::cards::Call,
+    ) -> gw::Result<()> {
+        Err(gw::Error::Validation(format!(
+            "{} is not supported by this client",
+            call.method
+        )))
+    }
     /// Send with attachments (aliases from [`ApiClient::upload`]).
     async fn send_with(
         &self,
@@ -205,6 +222,7 @@ pub trait ApiClient: Send + Sync {
 pub struct GatewayApi {
     pub client: gw::Client,
     list_notice: Mutex<Option<String>>,
+    cards: Mutex<HashMap<String, Vec<crate::cards::Card>>>,
 }
 
 impl GatewayApi {
@@ -212,7 +230,16 @@ impl GatewayApi {
         Self {
             client,
             list_notice: Mutex::new(None),
+            cards: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn keep_cards(&self, bot_id: &str, entries: &[gw::Entry]) {
+        let c: Vec<_> = entries
+            .iter()
+            .filter_map(|e| crate::cards::parse(&e.raw))
+            .collect();
+        self.cards.lock().unwrap().insert(bot_id.into(), c);
     }
 }
 
@@ -332,11 +359,45 @@ pub fn merge_team_bots(mut bots: Vec<Bot>, team: &[gw::TeamAgent]) -> Vec<Bot> {
     bots
 }
 
+/// The raw entry for a mock card (`card <kind>` in mock mode).
+pub fn mock_card(kind: &str, id: &str) -> serde_json::Value {
+    use serde_json::json;
+    let message = match kind {
+        "multi" => json!({"type": "widget", "widget": {"prompt": "Which toppings?",
+            "multiSelect": true, "allowCustom": true,
+            "options": [{"label": "Cheese"}, {"label": "Olives"}, {"label": "Basil"}]}}),
+        "steps" => json!({"type": "widget", "widget": {"prompt": "Order", "steps": [
+            {"prompt": "Size?", "options": [{"label": "Small"}, {"label": "Large"}]},
+            {"prompt": "Drink?", "options": [{"label": "Tea"}, {"label": "Coffee"}]}]}}),
+        "approval" => json!({"type": "auto-review-approval", "approval": {"status": "pending",
+            "requestId": format!("req-{id}"), "summary": "Run a shell command",
+            "command": "ls -la ~/Downloads", "reason": "Reads your files"}}),
+        "tool" => json!({"type": "local-tool-permission", "ask": {"status": "pending",
+            "requestId": format!("req-{id}"), "title": "Use the terminal on your computer"}}),
+        "secret" => json!({"type": "secret-request", "secretRequest": {"label": "Mock API key",
+            "description": "Stored on your box as MOCK_KEY."}}),
+        "form" => json!({"type": "user-form", "formRequest": {"title": "Sign in to Mockco",
+            "fields": [{"id": "user", "label": "Username", "type": "text", "required": true},
+                       {"id": "pass", "label": "Password", "type": "password", "required": true}]}}),
+        "draft" => json!({"type": "email-draft", "draft": {"from": "me@example.com",
+            "to": ["you@example.com"], "subject": "Hello", "body": "Hi there,\nSee you soon."}}),
+        "purchase" => json!({"type": "virtual-card-approval", "request": {"status": "pending",
+            "title": "Buy socks", "merchant": "Sockco", "amount": "12.00"}}),
+        _ => json!({"type": "widget", "widget": {"prompt": "Pick a color",
+            "options": [{"label": "Red"}, {"label": "Green"}, {"label": "Blue"}]}}),
+    };
+    json!({"id": id, "kind": "send-message", "message": message})
+}
+
 pub fn messages_from_entries(entries: &[gw::Entry]) -> Vec<Message> {
     entries
         .iter()
         .filter_map(|e| {
-            let text = gw::sanitize_text(&e.text);
+            // Interactive cards (1.29.0) are stored as their one-line summary.
+            let text = match crate::cards::parse(&e.raw) {
+                Some(c) => c.summary(),
+                None => gw::sanitize_text(&e.text),
+            };
             if text.trim().is_empty() {
                 return None;
             }
@@ -478,22 +539,37 @@ impl ApiClient for GatewayApi {
             .await
     }
     async fn transcript(&self, bot_id: &str, limit: u32) -> gw::Result<Vec<Message>> {
-        Ok(messages_from_entries(
-            &self
-                .client
-                .transcript_tail(bot_id, limit, None)
-                .await?
-                .entries,
-        ))
+        let t = self.client.transcript_tail(bot_id, limit, None).await?;
+        self.keep_cards(bot_id, &t.entries);
+        Ok(messages_from_entries(&t.entries))
     }
     async fn transcript_history(&self, bot_id: &str, max_entries: u32) -> gw::Result<Vec<Message>> {
-        Ok(messages_from_entries(
-            &self
-                .client
-                .transcript_history(bot_id, 200, max_entries as usize)
-                .await?
-                .entries,
-        ))
+        let t = self
+            .client
+            .transcript_history(bot_id, 200, max_entries as usize)
+            .await?;
+        self.keep_cards(bot_id, &t.entries);
+        Ok(messages_from_entries(&t.entries))
+    }
+    fn take_cards(&self, bot_id: &str) -> Vec<crate::cards::Card> {
+        self.cards
+            .lock()
+            .unwrap()
+            .remove(bot_id)
+            .unwrap_or_default()
+    }
+    async fn card_call(
+        &self,
+        bot_id: &str,
+        session: Option<&str>,
+        call: crate::cards::Call,
+    ) -> gw::Result<()> {
+        let mut body = call.body;
+        body["agentId"] = serde_json::Value::String(bot_id.into());
+        if let Some(s) = session {
+            body["sessionId"] = serde_json::Value::String(s.into());
+        }
+        self.client.call_raw(call.method, body).await.map(|_| ())
     }
     fn take_refreshed_session(&self) -> Option<Session> {
         self.client.take_refreshed_session()
@@ -523,6 +599,9 @@ pub struct MockClient {
     sessions: Mutex<HashMap<String, String>>,
     next: AtomicU64,
     pub reply_delay: Duration,
+    /// Raw card entries per bot (mock prompts `card <kind>`), and card calls made.
+    cards: Mutex<HashMap<String, Vec<serde_json::Value>>>,
+    pub card_calls: Mutex<Vec<(String, serde_json::Value)>>,
 }
 
 impl MockClient {
@@ -536,6 +615,8 @@ impl MockClient {
             sessions: Mutex::new(HashMap::new()),
             next: AtomicU64::new(1),
             reply_delay: Duration::from_millis(300),
+            cards: Mutex::new(HashMap::new()),
+            card_calls: Mutex::new(Vec::new()),
         }
     }
 
@@ -632,6 +713,62 @@ pub fn mock_ensure_sandbox(cursor_token: &str) -> gw::Result<Session> {
 
 #[async_trait]
 impl ApiClient for MockClient {
+    fn take_cards(&self, bot_id: &str) -> Vec<crate::cards::Card> {
+        self.cards
+            .lock()
+            .unwrap()
+            .get(bot_id)
+            .map(|v| v.iter().filter_map(crate::cards::parse).collect())
+            .unwrap_or_default()
+    }
+    async fn card_call(
+        &self,
+        bot_id: &str,
+        _session: Option<&str>,
+        call: crate::cards::Call,
+    ) -> gw::Result<()> {
+        self.check(call.method)?;
+        let id = call.body["entryId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let mut all = self.cards.lock().unwrap();
+        let Some(raw) = all
+            .get_mut(bot_id)
+            .and_then(|v| v.iter_mut().find(|r| r["id"] == id.as_str()))
+        else {
+            return Err(gw::Error::Http {
+                method: call.method.into(),
+                status: 404,
+                message: "unknown entry (mock)".into(),
+            });
+        };
+        // Mirror the server's state fields so the next poll shows the outcome.
+        match call.method {
+            "respondToWidget" => raw["respondedValue"] = call.body["value"].clone(),
+            "dismissWidget" => raw["widgetDismissed"] = true.into(),
+            "submitSecret" => raw["secretProvided"] = true.into(),
+            "submitUserForm" => raw["formResolution"] = "submitted".into(),
+            "dismissUserForm" => raw["formResolution"] = "dismissed".into(),
+            "sendDraft" => raw["draftSendState"] = "sent".into(),
+            "discardDraft" => raw["draftSendState"] = "discarded".into(),
+            "resolveAutoReviewApproval" => {
+                raw["message"]["approval"]["status"] = call.body["resolution"].clone()
+            }
+            "resolveLocalToolPermission" => {
+                raw["message"]["ask"]["status"] = call.body["resolution"].clone()
+            }
+            _ => {}
+        }
+        drop(all);
+        let mut body = call.body;
+        body["agentId"] = bot_id.into();
+        self.card_calls
+            .lock()
+            .unwrap()
+            .push((call.method.to_string(), body));
+        Ok(())
+    }
     async fn list_bots(&self) -> gw::Result<Vec<Bot>> {
         self.check("listAgents")?;
         let bots = self.current_bots();
@@ -780,6 +917,44 @@ impl ApiClient for MockClient {
         }
         let now = Instant::now();
         let mid = self.id();
+        if let Some(kind) = text.strip_prefix("card ") {
+            // Mock: `card widget|multi|approval|secret|form|draft|purchase` posts that card.
+            let id = self.id();
+            let raw = mock_card(kind.trim(), &id);
+            let card = crate::cards::parse(&raw).expect("mock card parses");
+            self.cards
+                .lock()
+                .unwrap()
+                .entry(bot_id.into())
+                .or_default()
+                .push(raw);
+            let mut c = self.chats.lock().unwrap();
+            let h = c.entry(bot_id.into()).or_default();
+            h.push((
+                Message {
+                    role: Role::User,
+                    text: text.into(),
+                    remote_id: Some(mid.clone()),
+                    attachments: attachments.to_vec(),
+                },
+                now,
+            ));
+            h.push((
+                Message {
+                    role: Role::Bot,
+                    text: card.summary(),
+                    remote_id: Some(id),
+                    attachments: vec![],
+                },
+                now,
+            ));
+            return Ok(SendReceipt {
+                message_id: Some(mid),
+                client_nonce: nonce.into(),
+                delivery: Delivery::Accepted,
+                raw: serde_json::json!({}),
+            });
+        }
         {
             let mut c = self.chats.lock().unwrap();
             let h = c.entry(bot_id.into()).or_default();

@@ -243,6 +243,10 @@ style_slots! {
     MEDIA_BAR = "media_bar", "Chat", false, "Video/GIF/music progress bar";
     BOT_HEADER_NAME = "bot_header_name", "Sidebar and lists", false, "Right column: the bot's name";
     BOT_HEADER_DESC = "bot_header_desc", "Sidebar and lists", false, "Right column: the bot's description";
+    CARD_FRAME = "card_frame", "Chat", false, "Cards: details and options of a question, approval, form or draft";
+    CARD_PENDING = "card_pending", "Chat", false, "Cards: the state line of a card waiting for you";
+    CARD_DONE = "card_done", "Chat", false, "Cards: the state line of an answered, dismissed or expired card";
+    CARD_BUTTON = "card_button", "Chat", false, "Cards: the clickable button that opens a card";
     DOWNLOAD_PATH = "download_path", "Modals", false, "Download modal: the save-path field";
     DOWNLOAD_DIR = "download_dir", "Modals", false, "Download modal: directories in the folder browser";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
@@ -827,6 +831,18 @@ pub fn bot_header_name() -> Style {
 pub fn bot_header_desc() -> Style {
     st(slot::BOT_HEADER_DESC)
 }
+pub fn card_frame() -> Style {
+    st(slot::CARD_FRAME)
+}
+pub fn card_pending() -> Style {
+    st(slot::CARD_PENDING)
+}
+pub fn card_done() -> Style {
+    st(slot::CARD_DONE)
+}
+pub fn card_button() -> Style {
+    st(slot::CARD_BUTTON)
+}
 pub fn attach_panel_frame() -> Style {
     st(slot::ATTACH_PANEL_FRAME)
 }
@@ -1097,6 +1113,7 @@ mod tests {
                     || s.key == "sidebar_strip"
                     || s.key == "media_bar"
                     || s.key.starts_with("bot_header_")
+                    || s.key.starts_with("card_")
                     || s.key.starts_with("md_")
                     || s.key.starts_with("image_")
                     || s.key == "menu_bar"

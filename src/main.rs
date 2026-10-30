@@ -5,6 +5,8 @@ mod appearance;
 mod attach;
 mod attpanel;
 mod browser;
+mod cardmodal;
+mod cards;
 mod commands;
 mod complete;
 mod config;
@@ -26,6 +28,8 @@ mod links;
 mod live_attach_test;
 #[cfg(test)]
 mod live_bots_test;
+#[cfg(test)]
+mod live_cards_survey;
 #[cfg(test)]
 mod live_presence_test;
 mod markdown;
@@ -554,6 +558,11 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                     QuitKey::CtrlC => app.ctrl_c(false, now),
                     // Ctrl-D: the theme editor's duplicate; delete forward while there's
                     // text; else like Ctrl-C.
+                    // Ctrl-D in a card modal dismisses the card.
+                    QuitKey::CtrlD if app.card_modal.is_some() => {
+                        app.quit_armed = None;
+                        app.card_modal_key(k)
+                    }
                     QuitKey::CtrlD if app.editor.is_some() && app.picker.is_none() => {
                         app.quit_armed = None;
                         app.editor_key(k)
@@ -576,6 +585,7 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 && app.help.is_none()
                 && app.shell.is_none()
                 && app.history_search.is_none()
+                && app.card_modal.is_none()
             {
                 use crate::keymap::{self, Mode};
                 if app.vim_mode == Mode::Command {
@@ -740,6 +750,14 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
             if k.code == KeyCode::F(9) && app.keys_scheme_default() {
                 app.set_attachments_panel(!app.config.attachments_panel);
+                return true;
+            }
+            if app.card_modal.is_some() {
+                app.card_modal_key(k);
+                return true;
+            }
+            if k.code == KeyCode::F(11) && app.keys_scheme_default() {
+                app.open_card(None);
                 return true;
             }
             if app.media.modal.is_some() {
@@ -989,6 +1007,11 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
         }
         Event::Mouse(m) if app.browser.is_some() && app.download.is_none() => app.browser_mouse(m),
+        Event::Mouse(m) if app.card_modal.is_some() => {
+            if let MouseEventKind::Down(MouseButton::Left) = m.kind {
+                app.card_modal_click(m.column, m.row);
+            }
+        }
         Event::Mouse(m) if app.history_search.is_some() => app.history_search_mouse(m),
         Event::Mouse(m) if app.react_picker.is_some() => app.react_picker_mouse(m),
         Event::Mouse(m) if app.download.is_some() => app.download_mouse(m),
