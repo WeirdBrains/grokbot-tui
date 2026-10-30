@@ -7,6 +7,7 @@ mod attpanel;
 mod browser;
 mod cardmodal;
 mod cards;
+mod clipboard;
 mod commands;
 mod complete;
 mod config;

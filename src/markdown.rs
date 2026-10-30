@@ -41,6 +41,9 @@ struct R {
     table: Option<Table>,
     /// Just after a gap or a container start: the next block needs no gap.
     fresh: bool,
+    /// Code blocks: (header line index, block width) — the header row carries the
+    /// language and (in the chat) the copy button.
+    code_heads: Vec<(usize, usize)>,
 }
 
 #[derive(Default)]
@@ -292,10 +295,10 @@ impl R {
             .unwrap_or(0)
             .max(str_width(&lang))
             .min(inner);
-        if !lang.is_empty() {
-            let label = truncate(&[(lang, rs(theme::md_rule()))], bw + 2);
-            self.emit(label);
-        }
+        // Header row (language, or blank): the chat puts the code copy button on it.
+        let label = truncate(&[(lang, rs(theme::md_rule()))], bw + 2);
+        self.code_heads.push((self.out.len(), bw + 2));
+        self.emit(label);
         for r in rows {
             let pad = bw.saturating_sub(str_width(&r));
             self.emit(vec![(format!(" {r}{} ", " ".repeat(pad)), st)]);
@@ -558,6 +561,15 @@ impl R {
 /// Render `text` as markdown in `base` style, wrapped to `width` columns. Every returned
 /// line is at most `width` columns wide.
 pub fn render(text: &str, width: usize, base: Style) -> Vec<Line<'static>> {
+    render_ex(text, width, base).0
+}
+
+/// [`render`], plus each code block's header line index and width (in source order).
+pub fn render_ex(
+    text: &str,
+    width: usize,
+    base: Style,
+) -> (Vec<Line<'static>>, Vec<(usize, usize)>) {
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let mut r = R {
         width: width.max(1),
@@ -573,6 +585,7 @@ pub fn render(text: &str, width: usize, base: Style) -> Vec<Line<'static>> {
         image: None,
         table: None,
         fresh: false,
+        code_heads: vec![],
     };
     for ev in Parser::new_ext(text, opts) {
         r.event(ev);
@@ -582,7 +595,9 @@ pub fn render(text: &str, width: usize, base: Style) -> Vec<Line<'static>> {
         r.out.push(Line::default());
     }
     // Defensive: never return a line wider than `width` (keeps row counts exact).
-    r.out
+    let heads = std::mem::take(&mut r.code_heads);
+    let lines = r
+        .out
         .into_iter()
         .map(|l| {
             if l.width() <= width.max(1) {
@@ -600,7 +615,8 @@ pub fn render(text: &str, width: usize, base: Style) -> Vec<Line<'static>> {
                     .collect::<Vec<_>>(),
             )
         })
-        .collect()
+        .collect();
+    (lines, heads)
 }
 
 /// The last path segment of a URL or path, without query or fragment.

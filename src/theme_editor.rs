@@ -3389,6 +3389,7 @@ mod tests {
                 "card_pending",
                 "card_done",
                 "card_button",
+                "copy_button",
                 "download_path",
                 "download_dir",
                 "menu_active",

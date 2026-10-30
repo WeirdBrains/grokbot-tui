@@ -351,7 +351,11 @@ Selecting and copying text
     when the chat has focus.
   • Hold Shift (or Option) while dragging to use the terminal's own selection instead.
   • F6 or /mouse off: release the mouse for terminal selection (clicks/wheel go off).
-  • /copy: copy the last bot message via OSC 52 (tmux: `set -g set-clipboard on`).
+    Only message text is copied: no borders, headers, buttons or soft-wrap newlines.
+  • [⧉] on a bubble copies that message's source; [⧉] on a code block copies its code.
+    The click-to-react popup has [⧉ copy] (Ctrl-Y); keymap message.copy (vim Y).
+  • /copy: copy the last bot message. Copies use OSC 52 (tmux: `set -g set-clipboard on`)
+    plus the system clipboard when local (wl-copy/xclip/xsel/pbcopy).
 
 In a pick list (F2, F3, F5, /bot, /account use)
   ↑ ↓ / j k, PgUp PgDn, Home End  Move      Enter  Pick      Esc / q  Cancel

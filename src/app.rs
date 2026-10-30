@@ -642,7 +642,10 @@ pub struct App {
     pub body_plain: String,
     /// Wrapped-row scroll offset of the chat body (for click→offset mapping).
     pub body_row_off: usize,
-    pub body_wrap: usize,
+    /// The chat pane inside its border and padding (selection is clipped to it).
+    pub body_inner: ratatui::layout::Rect,
+    /// Code-block copy buttons: id → code.
+    pub copy_targets: HashMap<String, String>,
     /// Vim-like editor mode (only when `ui.keys = vim`).
     pub vim_mode: crate::keymap::Mode,
     /// Loaded keymap (vim scheme).
@@ -870,7 +873,8 @@ impl App {
             body_sel: None,
             body_plain: String::new(),
             body_row_off: 0,
-            body_wrap: 1,
+            body_inner: ratatui::layout::Rect::default(),
+            copy_targets: HashMap::new(),
             vim_mode: crate::keymap::Mode::Insert,
             keymap,
             vim_command: None,
@@ -2561,11 +2565,38 @@ impl App {
         }
     }
 
-    /// Put `text` on the clipboard (OSC 52) and say how much.
+    /// Put `text` on the clipboard (OSC 52, plus the system clipboard when local) and
+    /// say how much ("Copied 12 lines").
     pub fn copy_text(&mut self, text: String) {
-        let n = text.chars().count();
+        let notice = crate::select::copied_notice(&text);
+        if !self.ssh {
+            crate::clipboard::system_copy(&text);
+        }
         self.pending_clipboard = Some(text);
-        self.info(format!("Copied {n} chars."));
+        self.info(notice);
+    }
+
+    /// A [⧉] button: `msg:<message key>` copies that message's source text, else a code
+    /// block id copies the block's code.
+    pub fn copy_button(&mut self, id: &str) {
+        if let Some(k) = id.strip_prefix("msg:") {
+            self.copy_message(k);
+        } else if let Some(code) = self.copy_targets.get(id).cloned() {
+            self.copy_text(code);
+        }
+    }
+
+    /// Copy the message with key `k` (its raw text / markdown source).
+    pub fn copy_message(&mut self, k: &str) {
+        let t = self
+            .feed()
+            .iter()
+            .find(|e| crate::emoji::message_key(e.kind as u8, &e.text) == k)
+            .map(|e| e.text.clone());
+        match t {
+            Some(t) => self.copy_text(t),
+            None => self.info("That message is gone.".into()),
+        }
     }
 
     /// The pane at a screen position.
@@ -2783,19 +2814,12 @@ impl App {
         let Some(sel) = self.body_sel.as_mut() else {
             return;
         };
-        if let Some(off) = crate::select::offset_at(
-            &self.body_plain,
-            self.body_area,
-            col,
-            row,
-            self.body_wrap,
-            self.body_row_off,
-        ) {
+        if let Some(off) = crate::select::pos_at(self.body_inner, col, row, self.body_row_off) {
             sel.cursor = off;
             // Scroll when dragging past the edge.
-            if row <= self.body_area.y {
+            if row < self.body_inner.y {
                 self.scroll_up(1);
-            } else if row + 1 >= self.body_area.bottom() {
+            } else if row >= self.body_inner.bottom() {
                 self.scroll_down(1);
             }
         }
@@ -2805,7 +2829,7 @@ impl App {
         if let Some(sel) = &self.body_sel
             && !sel.is_empty()
         {
-            let t = crate::select::selected_text(&self.body_plain, sel);
+            let t = crate::ui::selection_text(self, sel);
             if !t.is_empty() {
                 self.copy_text(t);
             }
@@ -2888,7 +2912,10 @@ impl App {
             "mode.visual" => {
                 self.vim_mode = Mode::Visual;
                 if self.body_sel.is_none() {
-                    let off = self.body_plain.len().saturating_sub(1);
+                    let off = crate::select::pos(
+                        self.body_row_off + self.body_inner.height.saturating_sub(1) as usize,
+                        0,
+                    );
                     self.body_sel = Some(crate::select::Selection {
                         anchor: off,
                         cursor: off,
@@ -2917,7 +2944,7 @@ impl App {
             "move.right" => {
                 if self.vim_mode == Mode::Visual {
                     if let Some(sel) = self.body_sel.as_mut() {
-                        sel.cursor = (sel.cursor + 1).min(self.body_plain.len());
+                        sel.cursor = sel.cursor.saturating_add(1);
                     }
                 } else if self.focus == Focus::Input {
                     self.input_right();
@@ -2982,7 +3009,7 @@ impl App {
             }
             "selection.copy" | "selection.copy_line" => {
                 if let Some(sel) = &self.body_sel {
-                    let t = crate::select::selected_text(&self.body_plain, sel);
+                    let t = crate::ui::selection_text(self, sel);
                     if !t.is_empty() {
                         self.copy_text(t);
                     }
@@ -3065,6 +3092,12 @@ impl App {
             }
             "card.open" => {
                 self.open_card(None);
+                true
+            }
+            "message.copy" => {
+                if let Err(e) = self.copy_last_message() {
+                    self.info(e.to_string());
+                }
                 true
             }
             "agents.refresh" => {
@@ -3157,7 +3190,7 @@ impl App {
         match act {
             CtrlC::CopyBodySelection => {
                 if let Some(sel) = &self.body_sel {
-                    let t = crate::select::selected_text(&self.body_plain, sel);
+                    let t = crate::ui::selection_text(self, sel);
                     if !t.is_empty() {
                         self.copy_text(t);
                     }
@@ -3227,10 +3260,7 @@ impl App {
             crate::keyctx::CtrlA::Input => self.input_select_all(),
             crate::keyctx::CtrlA::BodyMessage => {
                 if !self.body_plain.is_empty() {
-                    self.body_sel = Some(crate::select::Selection {
-                        anchor: 0,
-                        cursor: self.body_plain.len(),
-                    });
+                    self.body_sel = Some(crate::select::Selection::all());
                 }
             }
             crate::keyctx::CtrlA::None => {}
@@ -3435,11 +3465,7 @@ impl App {
             .or_else(|| feed.last())
             .ok_or("No message to copy.")?;
         let text = e.text.clone();
-        let n = text.chars().count();
-        self.pending_clipboard = Some(text);
-        self.info(format!(
-            "Copied last message ({n} chars) via OSC 52 (needs terminal support; in tmux: set -g set-clipboard on)."
-        ));
+        self.copy_text(text);
         Ok(())
     }
 
@@ -3644,7 +3670,10 @@ impl App {
             .find(|h| h.y == row && col >= h.x && col < h.x + h.w)
         {
             let url = h.url.clone();
-            if let Some(k) = url.strip_prefix(crate::cards::SCHEME) {
+            if let Some(id) = url.strip_prefix(crate::select::COPY_SCHEME) {
+                let id = id.to_string();
+                self.copy_button(&id);
+            } else if let Some(k) = url.strip_prefix(crate::cards::SCHEME) {
                 let k = k.to_string();
                 self.open_card(Some(&k));
             } else if let Some(path) = url.strip_prefix(crate::attach::DL_SCHEME) {
@@ -3674,14 +3703,10 @@ impl App {
             return;
         }
         if self.body_area.contains(at) && self.help.is_none() && self.shell.is_none() {
-            if let Some(off) = crate::select::offset_at(
-                &self.body_plain,
-                self.body_area,
-                col,
-                row,
-                self.body_wrap,
-                self.body_row_off,
-            ) {
+            if crate::select::inside(self.body_inner, col, row)
+                && let Some(off) =
+                    crate::select::pos_at(self.body_inner, col, row, self.body_row_off)
+            {
                 self.body_sel = Some(crate::select::Selection {
                     anchor: off,
                     cursor: off,

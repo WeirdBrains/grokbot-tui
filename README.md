@@ -368,9 +368,30 @@ Tab after `/` fuzzy-completes slash commands and arguments; Shift-Tab cycles.
 ## Selecting text
 
 With mouse capture on (the default; F6 / `/mouse` toggles and persists as `ui.mouse_capture`),
-drag in the chat to select. The selection is copied on mouse-up (OSC 52). Ctrl-C /
-Ctrl-Shift-C also copy a selection. Esc clears it. Shift-drag or Option-drag usually
-bypasses mouse capture so the terminal can select instead.
+drag in the chat to select. The selection is copied on mouse-up. Ctrl-C /
+Ctrl-Shift-C also copy a selection. Esc clears it.
+
+Since 1.30.0 a selection copies **only message text**: the selected cells are mapped back
+to each message's source (your text, or the bot's markdown source). Bubble padding, the
+name header, the [⧉]/[☺+] row, card and status rows, code-block headers, table borders,
+the sidebar and the right column are left out, and lines that were only soft-wrapped on
+screen join back into one line. The selection is clipped to the chat pane; a message
+selected from start to end copies whole.
+
+Copy buttons:
+
+- **[⧉] on every bubble** (yours and the bot's, left of [☺+]) copies that message's raw
+  text / markdown source. Also in the click-to-react popup (**[⧉ copy]**, Ctrl-Y, or `y`
+  in vim list mode) and keymap `message.copy` (vim normal `Y`; the last message).
+- **[⧉] at the top-right of every code block** copies just that block's code: no fences,
+  no wrapping, original indentation.
+
+Copying uses OSC 52 (works over SSH; in tmux `set -g set-clipboard on`) and, when running
+locally, also the system clipboard (`wl-copy`, `xclip`, `xsel` or `pbcopy` if installed). A
+notice says what was copied ("Copied 12 lines."). Theme part: `copy_button`.
+
+Shift-drag or Option-drag usually bypasses mouse capture so the terminal can select
+instead (that copies what's on screen, borders included).
 
 ## Themes
 

@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.30.0] - 2026-10-30
+
+### Added
+- [⧉] copy button on every chat bubble (yours and the bot's, left of [☺+]): copies the
+  message's raw text / markdown source, not the wrapped screen lines. Also in the
+  click-to-react popup ([⧉ copy], Ctrl-Y, `y` in vim list mode) and keymap action
+  `message.copy` (vim normal `Y`, the last message).
+- [⧉] copy button at the top-right of every code block: copies just the code (no fences,
+  no wrapping, original indentation). Code blocks always get a header row for it.
+- Copies also go to the system clipboard when running locally (wl-copy, xclip, xsel or
+  pbcopy), alongside OSC 52 (kept for SSH), with a notice like "Copied 12 lines.".
+- Theme part `copy_button`.
+
+### Fixed
+- Drag selection no longer picks up TUI chrome: selected cells map back to each
+  message's source text, leaving out bubble padding, the name header, button/status/card
+  rows, code-block headers and borders, the sidebar and the right column. Soft-wrapped
+  lines join back into one line, the selection is clipped to the chat pane, and only the
+  selected message text is highlighted.
+
 ## [1.29.0] - 2026-10-30
 
 ### Added

@@ -78,6 +78,7 @@ card_frame = { fg = "@text" }
 card_pending = { fg = "@accent", bold = true }
 card_done = { fg = "@muted" }
 card_button = { fg = "@accent", bold = true, underline = true }
+copy_button = { fg = "@muted" }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }
@@ -182,6 +183,7 @@ card_frame = { fg = "@text" }
 card_pending = { fg = "@accent", bold = true }
 card_done = { fg = "@muted" }
 card_button = { fg = "@accent", bold = true, underline = true }
+copy_button = { fg = "@muted" }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }

@@ -247,6 +247,7 @@ style_slots! {
     CARD_PENDING = "card_pending", "Chat", false, "Cards: the state line of a card waiting for you";
     CARD_DONE = "card_done", "Chat", false, "Cards: the state line of an answered, dismissed or expired card";
     CARD_BUTTON = "card_button", "Chat", false, "Cards: the clickable button that opens a card";
+    COPY_BUTTON = "copy_button", "Chat", false, "The [⧉] copy button on bubbles and code blocks";
     DOWNLOAD_PATH = "download_path", "Modals", false, "Download modal: the save-path field";
     DOWNLOAD_DIR = "download_dir", "Modals", false, "Download modal: directories in the folder browser";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
@@ -840,6 +841,9 @@ pub fn card_pending() -> Style {
 pub fn card_done() -> Style {
     st(slot::CARD_DONE)
 }
+pub fn copy_button() -> Style {
+    st(slot::COPY_BUTTON)
+}
 pub fn card_button() -> Style {
     st(slot::CARD_BUTTON)
 }
@@ -1114,6 +1118,7 @@ mod tests {
                     || s.key == "media_bar"
                     || s.key.starts_with("bot_header_")
                     || s.key.starts_with("card_")
+                    || s.key == "copy_button"
                     || s.key.starts_with("md_")
                     || s.key.starts_with("image_")
                     || s.key == "menu_bar"

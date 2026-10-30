@@ -748,6 +748,9 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         let mut wants: Vec<String> = vec![];
         let mut media_wants: Vec<(String, crate::media::Kind, String)> = vec![];
         let mut starts: Vec<usize> = vec![];
+        // Per line: the feed entry whose text it shows (selection → source text).
+        let mut entries: Vec<Option<usize>> = vec![];
+        let mut copy_targets: std::collections::HashMap<String, String> = Default::default();
         for (i, e) in app.feed().iter().enumerate() {
             if i > 0 {
                 match pending.take() {
@@ -761,8 +764,40 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                     }
                 }
             }
-            let body = entry_lines(e.kind, &e.text, bot_name.as_deref(), Some(bubble));
+            let (mut body, heads) =
+                entry_lines_ex(e.kind, &e.text, bot_name.as_deref(), Some(bubble));
             starts.push(lines.len());
+            entries.resize(lines.len(), None);
+            let header = matches!(e.kind, EntryKind::User | EntryKind::Bot);
+            entries
+                .extend((0..body.len()).map(|j| {
+                    (!(header && j == 0) && !heads.iter().any(|h| h.0 == j)).then_some(i)
+                }));
+            // A [⧉] copy button at the top-right of every code block (1.30.0).
+            if !heads.is_empty() {
+                let k = crate::emoji::message_key(e.kind as u8, &e.text);
+                let codes = crate::select::code_blocks(&e.text);
+                for (n, (hi, bw)) in heads.iter().enumerate() {
+                    let (Some(code), Some(l)) = (codes.get(n), body.get_mut(*hi)) else {
+                        continue;
+                    };
+                    let cw = crate::input::str_width(COPY_BUTTON);
+                    let lw = l.width();
+                    let end = (*bw).max(lw + 1 + cw).min(bubble);
+                    if end < lw + cw {
+                        continue;
+                    }
+                    let start = end - cw;
+                    l.spans.push(Span::raw(" ".repeat(start - lw)));
+                    l.spans.push(theme::copy_button().span(COPY_BUTTON));
+                    let id = format!("{k}:{n}");
+                    dl.push((
+                        lines.len() + hi,
+                        vec![(start, end, format!("{}{id}", crate::select::COPY_SCHEME))],
+                    ));
+                    copy_targets.insert(id, code.clone());
+                }
+            }
             buttons.extend(std::iter::repeat_n(None, body.len()));
             owners.resize(lines.len(), None);
             let owner = matches!(e.kind, EntryKind::User | EntryKind::Bot)
@@ -914,6 +949,8 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             .collect();
         let rows = row_counts(&lines, inner_w);
         owners.resize(lines.len(), None);
+        entries.resize(lines.len(), None);
+        app.copy_targets = copy_targets;
         let mut downloads = vec![vec![]; lines.len()];
         for (i, h) in dl {
             downloads[i] = h;
@@ -927,6 +964,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             buttons,
             owners,
             starts,
+            entries,
         });
         app.inline_slots = slots;
         for k in wants {
@@ -979,31 +1017,15 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
     let off = max_off - scroll;
     let cache = app.feed_cache.as_ref().expect("built above");
     // Only the lines that reach into the viewport are rendered.
-    let (mut lines, skip) = visible_lines(
+    let (lines, skip) = visible_lines(
         cache.lines.iter().chain(&extra),
         cache.rows.iter().chain(&extra_rows).copied(),
         off as usize,
         inner_h as usize,
     );
     app.body_plain = crate::select::plain_text(app.feed());
-    app.body_wrap = bubble;
+    app.body_inner = inner;
     app.body_row_off = off as usize;
-    if let Some(sel) = &app.body_sel
-        && !sel.is_empty()
-    {
-        // Restyle visible lines while a selection is active (theme `selection` / selected).
-        lines = lines
-            .into_iter()
-            .map(|l| {
-                Line::from(
-                    l.spans
-                        .into_iter()
-                        .map(|sp| theme::selected().span(sp.content.to_string()))
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect();
-    }
     let title = match &bot_name {
         Some(n) if app.is_typing() => {
             const SPIN: [char; 4] = ['⠋', '⠙', '⠹', '⠸'];
@@ -1027,6 +1049,37 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         body,
     );
     app.scroll = scroll;
+    // Selection highlight: only the selected cells of message text (1.30.0).
+    if let Some(sel) = app.body_sel.clone().filter(|s| !s.is_empty())
+        && let Some(cache) = app.feed_cache.as_ref()
+    {
+        let (a, b) = sel.range();
+        let st = ratatui::style::Style::from(theme::selected());
+        let buf = f.buffer_mut();
+        let mut row = 0usize;
+        for ((l, n), e) in cache.lines.iter().zip(&cache.rows).zip(&cache.entries) {
+            let (r0, rn) = (row, *n);
+            row += rn;
+            if e.is_none() || r0 + rn <= off as usize || r0 >= off as usize + inner_h as usize {
+                continue;
+            }
+            for (p, _) in crate::select::cells(l, r0, rn, inner_w) {
+                if p < a || p > b {
+                    continue;
+                }
+                let (pr, pc) = (p / crate::select::COLS, p % crate::select::COLS);
+                let Some(y) = pr
+                    .checked_sub(off as usize)
+                    .filter(|y| *y < inner_h as usize)
+                else {
+                    continue;
+                };
+                if pc < inner.width as usize {
+                    buf[(inner.x + pc as u16, inner.y + y as u16)].set_style(st);
+                }
+            }
+        }
+    }
     // Where this frame's links are, for clicks and OSC 8 (feed lines are one row each).
     app.link_hits.clear();
     app.react_hits.clear();
@@ -1102,6 +1155,16 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                     url: k.clone(),
                     image: false,
                 });
+                let cw = crate::input::str_width(COPY_BUTTON);
+                if let Some(cx) = (dx + lw).checked_sub(bw + 1 + cw) {
+                    app.download_hits.push(LinkHit {
+                        x: (inner.x as usize + cx) as u16,
+                        y: inner.y + y as u16,
+                        w: cw as u16,
+                        url: format!("{}msg:{k}", crate::select::COPY_SCHEME),
+                        image: false,
+                    });
+                }
             }
             for (a, b, url) in ls {
                 let x = inner.x as usize + dx + a;
@@ -1258,6 +1321,8 @@ pub struct FeedCache {
     owners: Vec<Option<String>>,
     /// Per feed entry: its first line (attachments panel jump).
     starts: Vec<usize>,
+    /// Per line: the feed entry whose message text it shows (None = chrome).
+    entries: Vec<Option<usize>>,
 }
 
 /// A link drawn on screen this frame: one row, `x..x+w`.
@@ -1470,11 +1535,36 @@ fn download_lines(text: &str, width: usize) -> Vec<(Line<'static>, Vec<ColHit>)>
 
 /// The react button drawn after a message (or after its reaction pills).
 pub const REACT_BUTTON: &str = "[☺+]";
+/// Message text under a selection, mapped back to each message's source
+/// ([`crate::select::extract`]).
+pub fn selection_text(app: &App, sel: &crate::select::Selection) -> String {
+    let Some(c) = app.feed_cache.as_ref() else {
+        return String::new();
+    };
+    let ml: Vec<crate::select::MapLine> = c
+        .lines
+        .iter()
+        .zip(&c.rows)
+        .zip(&c.entries)
+        .map(|((line, rows), e)| crate::select::MapLine {
+            line,
+            rows: *rows,
+            entry: *e,
+        })
+        .collect();
+    let src: Vec<&str> = app.feed().iter().map(|e| e.text.as_str()).collect();
+    crate::select::extract(&ml, app.body_inner.width as usize, &src, sel)
+}
+
+/// Copy button on every bubble (left of [☺+]) and code block (1.30.0).
+pub const COPY_BUTTON: &str = "[⧉]";
 
 fn react_button_line(mut spans: Vec<Span<'static>>, mine: bool) -> Line<'static> {
     if !spans.is_empty() {
         spans.push(Span::raw(" "));
     }
+    spans.push(theme::copy_button().span(COPY_BUTTON));
+    spans.push(Span::raw(" "));
     spans.push(theme::react_button().span(REACT_BUTTON));
     let l = Line::from(spans);
     if mine {
@@ -1754,6 +1844,16 @@ fn entry_lines(
     bot: Option<&str>,
     bubble: Option<usize>,
 ) -> Vec<Line<'static>> {
+    entry_lines_ex(kind, text, bot, bubble).0
+}
+
+/// [`entry_lines`] plus the bot reply's code-block header rows (line index, block width).
+fn entry_lines_ex(
+    kind: EntryKind,
+    text: &str,
+    bot: Option<&str>,
+    bubble: Option<usize>,
+) -> (Vec<Line<'static>>, Vec<(usize, usize)>) {
     if let Some(max) = bubble
         && kind == EntryKind::User
     {
@@ -1764,7 +1864,7 @@ fn entry_lines(
                 .into_iter()
                 .map(|l| Line::from(style.span(l)).alignment(Alignment::Right)),
         );
-        return out;
+        return (out, vec![]);
     }
     let prefix = match kind {
         EntryKind::System => String::new(),
@@ -1782,15 +1882,17 @@ fn entry_lines(
     {
         let base = ratatui::style::Style::from(&style);
         let mut out = vec![Line::from(label.span(bot.unwrap_or("bot").to_string()))];
-        out.extend(crate::markdown::render(text, max, base));
-        return out;
+        let (body, heads) = crate::markdown::render_ex(text, max, base);
+        out.extend(body);
+        return (out, heads.into_iter().map(|(i, w)| (i + 1, w)).collect());
     }
     let body: Vec<String> = match bubble {
         // Prefix + text stay within the bubble; keep at least a third for text.
         Some(max) => wrap_text(text, max.saturating_sub(pw).max(max / 3).max(1)),
         None => text.lines().map(str::to_string).collect(),
     };
-    body.into_iter()
+    let lines = body
+        .into_iter()
         .enumerate()
         .map(|(i, l)| {
             let p = if i == 0 {
@@ -1800,7 +1902,8 @@ fn entry_lines(
             };
             Line::from(vec![label.span(p), style.span(l)])
         })
-        .collect()
+        .collect();
+    (lines, vec![])
 }
 
 #[cfg(test)]
@@ -2758,5 +2861,133 @@ pub(crate) mod tests {
         let border = line[..line.find("FIRST-MSG").unwrap()].rfind('│').unwrap();
         let after_border = &line[border + '│'.len_utf8()..];
         assert!(after_border.starts_with("  "), "{line:?}");
+    }
+}
+
+#[cfg(test)]
+mod copy_tests {
+    use crate::app::{App, Entry, EntryKind};
+    use ratatui::{Terminal, backend::TestBackend};
+
+    const USER: &str = "please write a tiny rust program that prints hello and explain it";
+    const BOT: &str = "Sure! Here is **the** program:\n\n```rust\nfn main() {\n    println!(\"hello\");\n}\n```\n\nIt prints hello.";
+
+    fn setup(rt: &tokio::runtime::Runtime) -> (App, tempfile::TempDir, Terminal<TestBackend>) {
+        let (mut app, d) = crate::app::tests::test_app(rt);
+        crate::app::tests::mock_login(&mut app, "tok");
+        let bot = app.active_bot().unwrap().id.clone();
+        app.logs.insert(
+            bot,
+            vec![
+                Entry {
+                    kind: EntryKind::User,
+                    text: USER.into(),
+                },
+                Entry {
+                    kind: EntryKind::Bot,
+                    text: BOT.into(),
+                },
+            ],
+        );
+        app.config.attachments_panel = false;
+        let mut term = Terminal::new(TestBackend::new(100, 40)).unwrap();
+        term.draw(|f| super::draw(f, &mut app)).unwrap();
+        (app, d, term)
+    }
+
+    fn copies(app: &App) -> Vec<crate::ui::LinkHit> {
+        app.download_hits
+            .iter()
+            .filter(|h| h.url.starts_with(crate::select::COPY_SCHEME))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn bubble_and_code_copy_buttons_copy_source_text() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d, term) = setup(&rt);
+        let s = super::tests::screen_rows(&term).join("\n");
+        assert!(s.contains("[⧉] [☺+]"), "{s}");
+        let hits = copies(&app);
+        // you, the code block, the bot.
+        assert_eq!(hits.len(), 3, "{hits:?}");
+        let rows = super::tests::screen_rows(&term);
+        for h in &hits {
+            let row: String = rows[h.y as usize]
+                .chars()
+                .skip(h.x as usize)
+                .take(3)
+                .collect();
+            assert_eq!(row, "[⧉]", "hit lands on its button");
+        }
+        let msg: Vec<_> = hits.iter().filter(|h| h.url.contains("msg:")).collect();
+        app.click(msg[0].x, msg[0].y);
+        assert_eq!(app.pending_clipboard.take().as_deref(), Some(USER));
+        app.click(msg[1].x, msg[1].y);
+        assert_eq!(
+            app.pending_clipboard.take().as_deref(),
+            Some(BOT),
+            "markdown source"
+        );
+        let code = hits.iter().find(|h| !h.url.contains("msg:")).unwrap();
+        app.click(code.x, code.y);
+        assert_eq!(
+            app.pending_clipboard.take().as_deref(),
+            Some("fn main() {\n    println!(\"hello\");\n}")
+        );
+        assert!(app.notices().iter().any(|e| e.text == "Copied 3 lines."));
+    }
+
+    #[test]
+    fn drag_selection_copies_message_text_only() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d, mut term) = setup(&rt);
+        let rows = super::tests::screen_rows(&term);
+        let find = |needle: &str| -> (u16, u16) {
+            for (y, r) in rows.iter().enumerate() {
+                if let Some(b) = r.find(needle) {
+                    return (r[..b].chars().count() as u16, y as u16);
+                }
+            }
+            panic!("{needle} not on screen:\n{}", rows.join("\n"));
+        };
+        // From the pane's left edge (past the sidebar border) on the user's first row to
+        // "It prints" in the bot reply.
+        let (_, uy) = find("please write");
+        let (ix, iy) = find("It prints");
+        let inner = app.body_inner;
+        app.click(inner.x, uy);
+        app.body_drag(ix + 1, iy);
+        term.draw(|f| super::draw(f, &mut app)).unwrap();
+        app.body_mouse_up();
+        let t = app.pending_clipboard.take().unwrap();
+        assert_eq!(
+            t,
+            format!(
+                "{USER}\n\nSure! Here is **the** program:\n\n```rust\nfn main() {{\n    println!(\"hello\");\n}}\n```\n\nIt"
+            ),
+            "joined wraps, no borders/headers/buttons"
+        );
+        assert!(!t.contains('│') && !t.contains("[⧉]") && !t.contains("you\n"));
+        // Dragging into the sidebar clips to the pane edge.
+        app.click(inner.x + 2, uy);
+        app.body_drag(0, uy);
+        assert!(app.body_sel.as_ref().unwrap().cursor % crate::select::COLS == 0);
+    }
+
+    #[test]
+    fn react_popup_and_keymap_copy_the_message() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d, _term) = setup(&rt);
+        assert!(app.open_react_picker(0));
+        app.react_picker_key(ratatui::crossterm::event::KeyEvent::new(
+            ratatui::crossterm::event::KeyCode::Char('y'),
+            ratatui::crossterm::event::KeyModifiers::CONTROL,
+        ));
+        assert!(app.react_picker.is_none());
+        assert_eq!(app.pending_clipboard.take().as_deref(), Some(BOT));
+        assert!(app.vim_action("message.copy"));
+        assert_eq!(app.pending_clipboard.take().as_deref(), Some(BOT));
     }
 }

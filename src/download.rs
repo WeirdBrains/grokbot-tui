@@ -851,8 +851,15 @@ mod tests {
         term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
         let s = crate::ui::tests::screen_rows(&term).join("\n");
         assert!(s.contains("[⤓] chart.png  [⤓] notes.pdf"), "{s}");
-        assert_eq!(app.download_hits.len(), 2);
-        let h = app.download_hits[0].clone();
+        // Download buttons (the bubble's [⧉] copy button is a hit too, 1.30.0).
+        let dls: Vec<_> = app
+            .download_hits
+            .iter()
+            .filter(|h| !h.url.starts_with(crate::select::COPY_SCHEME))
+            .cloned()
+            .collect();
+        assert_eq!(dls.len(), 2);
+        let h = dls[0].clone();
         app.click(h.x, h.y);
         let m = app.download.as_mut().expect("modal");
         assert_eq!(m.url, src.display().to_string());

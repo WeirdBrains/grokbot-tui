@@ -20,6 +20,7 @@
 "i" = "mode.insert"
 "r" = "message.react"
 "c" = "card.open"
+"shift-y" = "message.copy"
 "shift-r" = "message.react_picker"
 "o" = "message.open"
 "d" = "message.download"

@@ -29,6 +29,8 @@ pub struct EmojiPicker {
     pub area: Rect,
     pub grid: Rect,
     pub cols: usize,
+    /// The [⧉ copy] button (copies the message).
+    pub copy_area: Rect,
 }
 
 impl EmojiPicker {
@@ -46,6 +48,7 @@ impl EmojiPicker {
             area: Rect::default(),
             grid: Rect::default(),
             cols: 1,
+            copy_area: Rect::default(),
         }
     }
 
@@ -72,6 +75,8 @@ pub enum Outcome {
     None,
     Close,
     Pick(String),
+    /// Copy the message (Ctrl-Y, `y` in list mode, or the [⧉ copy] button).
+    Copy,
 }
 
 /// Keys: arrows always move; in list mode (vim) hjkl move and `/` starts typing; Enter
@@ -94,6 +99,7 @@ pub fn key(p: &mut EmojiPicker, k: KeyEvent) -> Outcome {
         KeyCode::Down => p.step(cols),
         KeyCode::PageUp => p.step(-cols * 5),
         KeyCode::PageDown => p.step(cols * 5),
+        KeyCode::Char('y') if ctrl => return Outcome::Copy,
         KeyCode::Char('n') if ctrl => p.step(cols),
         KeyCode::Char('p') if ctrl => p.step(-cols),
         KeyCode::Char(c) if !p.typing && !ctrl => match c {
@@ -104,6 +110,7 @@ pub fn key(p: &mut EmojiPicker, k: KeyEvent) -> Outcome {
             'g' => p.cursor = 0,
             'G' => p.cursor = p.shown.len().saturating_sub(1),
             '/' | 'i' => p.typing = true,
+            'y' => return Outcome::Copy,
             'q' => return Outcome::Close,
             _ => {}
         },
@@ -130,6 +137,9 @@ pub fn mouse(p: &mut EmojiPicker, m: MouseEvent) -> Outcome {
             if !p.area.contains(at) {
                 return Outcome::Close;
             }
+            if p.copy_area.contains(at) {
+                return Outcome::Copy;
+            }
             if p.grid.contains(at) {
                 let c = ((m.column - p.grid.x) / CELL) as usize;
                 let r = (m.row - p.grid.y) as usize + p.top;
@@ -149,9 +159,9 @@ pub fn draw(f: &mut Frame, p: &mut EmojiPicker) {
     p.area = area;
     f.render_widget(Clear, area);
     let hint = if p.typing {
-        "type to search · arrows move · Enter toggles · Esc closes"
+        "type to search · arrows move · Enter toggles · Ctrl-Y copies · Esc closes"
     } else {
-        "hjkl move · / search · Enter toggles · q closes"
+        "hjkl move · / search · Enter toggles · y copies · q closes"
     };
     let block = theme::block(&theme::help_frame())
         .title(theme::help_title().span(format!(" React ({}) ", p.shown.len())))
@@ -167,6 +177,14 @@ pub fn draw(f: &mut Frame, p: &mut EmojiPicker) {
         theme::modal_text().span(format!("{}{}", p.query, if p.typing { "▏" } else { "" })),
     ]);
     f.render_widget(Paragraph::new(search), Rect { height: 1, ..inner });
+    const COPY: &str = "[⧉ copy]";
+    let cw = crate::input::str_width(COPY) as u16;
+    p.copy_area = Rect::default();
+    if inner.width > cw + 12 {
+        let r = Rect::new(inner.x + inner.width - cw, inner.y, cw, 1);
+        f.render_widget(Paragraph::new(theme::copy_button().span(COPY)), r);
+        p.copy_area = r;
+    }
     let grid = Rect {
         x: inner.x,
         y: inner.y + 1,
@@ -259,6 +277,11 @@ impl App {
         match o {
             Outcome::None => {}
             Outcome::Close => self.react_picker = None,
+            Outcome::Copy => {
+                if let Some(p) = self.react_picker.take() {
+                    self.copy_message(&p.msg_key);
+                }
+            }
             Outcome::Pick(g) => {
                 if let Some(p) = self.react_picker.take() {
                     match self.store.toggle_reaction(&p.bot, &p.msg_key, &g) {
