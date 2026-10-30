@@ -102,6 +102,14 @@ pub fn registry() -> Registry {
                 run: bots,
             },
             Command {
+                name: "refresh",
+                aliases: &[],
+                usage: "/refresh",
+                help: "Re-fetch the bot list now (new, deleted and renamed bots; F12)",
+                complete: no_complete,
+                run: refresh,
+            },
+            Command {
                 name: "bot",
                 aliases: &["use"],
                 usage: "/bot [name|id] | /bot new <name> | /bot delete [name]",
@@ -515,7 +523,12 @@ fn copy(app: &mut App, _: &str) -> Result<()> {
 }
 
 fn bots(app: &mut App, _: &str) -> Result<()> {
-    app.refresh_bots(true);
+    app.refresh_bots(crate::app::BotsFetch::List);
+    Ok(())
+}
+
+fn refresh(app: &mut App, _: &str) -> Result<()> {
+    app.refresh_bots(crate::app::BotsFetch::Manual);
     Ok(())
 }
 

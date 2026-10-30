@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.27.0] - 2026-10-30
+
+### Added
+- Refresh the bot list without restarting: `/refresh`, F12 (keymap action
+  `agents.refresh`, also in the vim keymap) and a ↻ button in the sidebar header and in the
+  collapsed sidebar strip.
+- Automatic refresh every `agents.refresh_interval_secs` seconds (pref, default 60, `0` = off),
+  and after a re-login (reconnect). The gateway has no agent create/delete/rename events, so
+  this polls `listAgents` (plus team bots), the same call as at startup.
+- The new list is merged in place: the open chat stays selected, with no transcript reload,
+  scroll jump or media stop, and the sidebar cursor stays on the same bot. New bots are
+  added, deleted bots removed (if the open one is gone you get a notice and the next bot is
+  shown), and names, descriptions and hidden/group/team flags are updated. A status notice
+  says what changed ("Bot list refreshed: 1 new (ratatoskn)"); background refreshes stay
+  quiet when nothing changed, and their errors are not reported while a list is showing.
+
+### Notes
+- `/reload` was not used as an alias because it already reloads the open chat's transcript.
+- Bot avatars are not shown in the TUI, so there is nothing to update for them.
+
 ## [1.26.0] - 2026-10-29
 
 ### Added

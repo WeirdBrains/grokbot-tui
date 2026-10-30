@@ -134,6 +134,8 @@ pub const PREF_MEDIA_DECODER: &str = "media.decoder";
 pub const PREF_MEDIA_FPS: &str = "media.fps";
 /// Animated GIFs loop on their own (on|off).
 pub const PREF_GIF_AUTOPLAY: &str = "media.gif_autoplay";
+/// Re-fetch the bot list every N seconds (0 = off).
+pub const PREF_AGENTS_REFRESH: &str = "agents.refresh_interval_secs";
 
 /// `links.open_with`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -194,6 +196,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_MEDIA_DECODER,
     PREF_MEDIA_FPS,
     PREF_GIF_AUTOPLAY,
+    PREF_AGENTS_REFRESH,
 ];
 
 /// Which block glyphs draw the big header title (pref `ui.title_glyphs`).
@@ -313,6 +316,8 @@ pub struct Config {
     pub media_fps: u32,
     /// `media.gif_autoplay`.
     pub gif_autoplay: bool,
+    /// `agents.refresh_interval_secs` (0 = off).
+    pub agents_refresh_secs: u64,
     /// `commands.status_prompt`.
     pub status_prompt: String,
     /// `keys.esc_alt_timeout_ms`.
@@ -360,6 +365,7 @@ impl Default for Config {
             media_inline: true,
             media_decoder: crate::media::Decoder::Auto,
             media_fps: 10,
+            agents_refresh_secs: 60,
             gif_autoplay: true,
             status_prompt: DEFAULT_STATUS_PROMPT.to_string(),
             esc_alt_ms: 50,
@@ -401,6 +407,7 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_MEDIA_DECODER, "auto".to_string()),
         (PREF_MEDIA_FPS, c.media_fps.to_string()),
         (PREF_GIF_AUTOPLAY, "on".to_string()),
+        (PREF_AGENTS_REFRESH, c.agents_refresh_secs.to_string()),
         (PREF_STATUS_PROMPT, c.status_prompt.clone()),
         (PREF_ESC_ALT_MS, c.esc_alt_ms.to_string()),
         (PREF_KITTY_PROTOCOL, c.kitty_protocol.as_str().to_string()),
@@ -486,6 +493,9 @@ impl Config {
                 .and_then(|v| v.trim().parse().ok())
                 .filter(|n| (1..=30).contains(n))
                 .unwrap_or(d.media_fps),
+            agents_refresh_secs: o(PREF_AGENTS_REFRESH)
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(d.agents_refresh_secs),
             gif_autoplay: o(PREF_GIF_AUTOPLAY)
                 .map(|v| !matches!(v.trim(), "off" | "false" | "0" | "no"))
                 .unwrap_or(d.gif_autoplay),

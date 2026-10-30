@@ -246,6 +246,14 @@ Cursor session (`/login desktop` or `/login cursor`). Theme part: `presence_indi
   to a one-row header that keeps the bot, account, login status, SSH and 🔕.
 - `/sidebar collapse|expand|toggle` (F8, the «/» buttons; pref `ui.sidebar_collapsed`) shrinks
   the bot list to a 1-column strip; click it to expand.
+- `/refresh` (F12, the ↻ button in the sidebar header or the collapsed strip; keymap
+  `agents.refresh`) re-fetches the bot list, so a bot made in the desktop app shows up without
+  a restart. The list also refreshes on its own every `agents.refresh_interval_secs` seconds
+  (default 60, `0` = off) and after a re-login. The merge keeps the open chat, its scroll and
+  the sidebar cursor; new bots are added, deleted ones dropped (with a notice if it was the
+  open one), renames and descriptions updated. A status line says what changed, e.g.
+  "Bot list refreshed: 1 new (ratatoskn)". (`/bots` still prints the list; `/reload` still
+  reloads the open chat's transcript.)
 - Menus are clickable (title opens, hover highlights, click runs, outside closes). Without the
   mouse: F10, Alt-M, Alt+<underlined letter>, or `/menu [name]`.
 - Clicking an empty part of a message bubble opens its reaction picker

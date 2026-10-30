@@ -353,7 +353,7 @@ pub enum Event {
     },
     Bots {
         epoch: u64,
-        announce: bool,
+        mode: BotsFetch,
         result: gw::Result<Vec<Bot>>,
     },
     Transcript {
@@ -526,6 +526,8 @@ pub struct App {
     /// Header ▾/▴ and sidebar «/» buttons.
     pub header_toggle_area: Rect,
     pub sidebar_toggle_area: Rect,
+    /// The sidebar's ↻ (refresh the bot list) button.
+    pub sidebar_refresh_area: Rect,
     /// The attachments panel (1.23.0).
     pub attpanel: crate::attpanel::Panel,
     /// Feed entry to scroll to at the next draw.
@@ -676,6 +678,8 @@ pub struct App {
     login_retry: Option<(Instant, Duration)>,
     /// Last local DB refresh of the feed, and the (count, max id) stamp it saw.
     db_refresh: (Instant, Option<(i64, i64, i64)>),
+    /// Last bot-list fetch start, and whether one is in flight (auto refresh gate).
+    bots_refresh: (Instant, bool),
     tx: mpsc::UnboundedSender<Event>,
     rx: mpsc::UnboundedReceiver<Event>,
     pub should_quit: bool,
@@ -725,6 +729,17 @@ async fn login_task(
     let bots = client.list_bots().await.map_err(es)?;
     let session = client.take_refreshed_session().unwrap_or(session);
     Ok((client, session, bots))
+}
+
+/// Why the bot list is being fetched (decides what is announced).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BotsFetch {
+    /// `/bots`: print the list.
+    List,
+    /// `/refresh`, F12, the sidebar ↻: always say what changed.
+    Manual,
+    /// Timer or after create/delete: say something only if the list changed.
+    Auto,
 }
 
 impl App {
@@ -782,6 +797,7 @@ impl App {
             press_at: None,
             header_toggle_area: Rect::default(),
             sidebar_toggle_area: Rect::default(),
+            sidebar_refresh_area: Rect::default(),
             attpanel: Default::default(),
             pending_jump: None,
             msg_times: HashMap::new(),
@@ -872,6 +888,7 @@ impl App {
             desktop_reread_tried: false,
             login_retry: None,
             db_refresh: (Instant::now(), None),
+            bots_refresh: (Instant::now(), false),
             tx,
             rx,
             should_quit: false,
@@ -929,6 +946,14 @@ impl App {
         self.awaiting
             .retain(|_, t| now.duration_since(*t) < AWAIT_TIMEOUT);
         self.presence_tick();
+        let every = self.config.agents_refresh_secs;
+        if every > 0
+            && self.api.is_some()
+            && !self.bots_refresh.1
+            && now.duration_since(self.bots_refresh.0) >= Duration::from_secs(every)
+        {
+            self.refresh_bots(BotsFetch::Auto);
+        }
         let (Some(api), Some((bot, session, team))) = (self.api.clone(), self.active_bot_route())
         else {
             return;
@@ -1050,7 +1075,18 @@ impl App {
                             LoginSource::Env => self
                                 .info(format!("Logged in with {TOKEN_ENV} ({label}); not saved.")),
                         }
+                        // A re-login (reconnect) may bring bots created or deleted meanwhile.
+                        let before = std::mem::take(&mut self.all_bots);
+                        self.bots_refresh = (Instant::now(), false);
                         self.apply_bots(bots);
+                        // New credential: poll the open chat right away.
+                        self.poll_now();
+                        if !before.is_empty() {
+                            let d = crate::api::diff_bots(&before, &self.all_bots);
+                            if !d.is_empty() {
+                                self.info(d.notice());
+                            }
+                        }
                         if let Some(n) = self.api.as_ref().and_then(|a| a.take_list_notice()) {
                             self.error(n);
                         }
@@ -1144,7 +1180,7 @@ impl App {
                             self.select_bot(i);
                         }
                         self.info(format!("Created bot {} ({}).", b.name, b.id));
-                        self.refresh_bots(false);
+                        self.refresh_bots(BotsFetch::Auto);
                     }
                     Err(e) => self.error(format!("Could not create bot: {e}")),
                 }
@@ -1168,22 +1204,42 @@ impl App {
                             .collect();
                         self.apply_bots(all);
                         self.info(format!("Deleted bot {name}."));
-                        self.refresh_bots(false);
+                        self.refresh_bots(BotsFetch::Auto);
                     }
                     Err(e) => self.error(format!("Could not delete bot {name}: {e}")),
                 }
             }
             Event::Bots {
                 epoch,
-                announce,
+                mode,
                 result,
             } => {
+                self.bots_refresh.1 = false;
                 if epoch != self.epoch {
                     return;
                 }
+                let announce = mode == BotsFetch::List;
                 match result {
                     Ok(b) => {
+                        let diff = crate::api::diff_bots(&self.all_bots, &b);
+                        let open = self.active_bot().map(|x| (x.id.clone(), x.name.clone()));
                         self.apply_bots(b);
+                        if matches!(mode, BotsFetch::Manual | BotsFetch::Auto) {
+                            if let Some((id, name)) = open
+                                && !self.all_bots.iter().any(|x| x.id == id)
+                            {
+                                let now = self
+                                    .active_bot()
+                                    .map(|x| format!("; now showing {}", x.name))
+                                    .unwrap_or_default();
+                                self.error(format!(
+                                    "The bot you had open ({name}) no longer exists{now}."
+                                ));
+                            }
+                            if mode == BotsFetch::Manual || !diff.is_empty() {
+                                self.info(diff.notice());
+                            }
+                        }
                         if let Some(n) = self.api.as_ref().and_then(|a| a.take_list_notice()) {
                             self.error(n);
                         }
@@ -1213,6 +1269,9 @@ impl App {
                                 .join("\n");
                             self.info(format!("Bots:\n{list}"));
                         }
+                    }
+                    Err(_) if mode == BotsFetch::Auto && !self.bots.is_empty() => {
+                        // Background refresh: keep the list we have; try again next interval.
                     }
                     Err(e) => {
                         self.error(format!("Could not list bots: {e}"));
@@ -1754,17 +1813,26 @@ impl App {
 
     // ------------------------------------------------------------ bots
 
-    pub fn refresh_bots(&mut self, announce: bool) {
+    pub fn refresh_bots(&mut self, mode: BotsFetch) {
         let Some(api) = self.api.clone() else {
-            self.error("Not logged in. Use /login gateway or /login cursor.".into());
+            if mode != BotsFetch::Auto {
+                self.error("Not logged in. Use /login gateway or /login cursor.".into());
+            }
             return;
         };
+        if mode == BotsFetch::Auto && self.bots_refresh.1 {
+            return;
+        }
+        if mode == BotsFetch::Manual {
+            self.info("Refreshing the bot list…".into());
+        }
+        self.bots_refresh = (Instant::now(), true);
         let epoch = self.epoch;
         self.spawn(async move {
             let result = api.list_bots().await;
             Event::Bots {
                 epoch,
-                announce,
+                mode,
                 result,
             }
         });
@@ -1868,6 +1936,7 @@ impl App {
             self.error(format!("Could not save bots: {e:#}"));
         }
         let current = self.active_bot().map(|b| b.id.clone());
+        let cursor = self.bots.get(self.sidebar_cursor).map(|b| b.id.clone());
         self.all_bots = all;
         self.bots = self
             .all_bots
@@ -1879,6 +1948,18 @@ impl App {
             })
             .cloned()
             .collect();
+        // Same chat still there: re-point at it without reloading, scrolling or
+        // stopping media, and keep the sidebar cursor on the same bot.
+        if let Some(i) = current
+            .as_deref()
+            .and_then(|id| self.bots.iter().position(|b| b.id == id))
+        {
+            self.active = Some(i);
+            self.sidebar_cursor = cursor
+                .and_then(|id| self.bots.iter().position(|b| b.id == id))
+                .unwrap_or(i);
+            return;
+        }
         self.active = None;
         let want = current
             .or(self.config.active_bot.clone())
@@ -2952,6 +3033,10 @@ impl App {
                 self.set_attachments_panel(!self.config.attachments_panel);
                 true
             }
+            "agents.refresh" => {
+                self.refresh_bots(BotsFetch::Manual);
+                true
+            }
             "browser.open" => {
                 self.open_browser(None);
                 true
@@ -3581,6 +3666,10 @@ impl App {
             self.set_header_compact(!self.config.header_compact);
             return;
         }
+        if self.sidebar_refresh_area.contains(at) {
+            self.refresh_bots(BotsFetch::Manual);
+            return;
+        }
         if self.sidebar_toggle_area.contains(at) {
             self.set_sidebar_collapsed(!self.config.sidebar_collapsed);
             return;
@@ -3741,6 +3830,89 @@ pub mod tests {
 
     fn texts(app: &App) -> Vec<String> {
         app.current_log().iter().map(|e| e.text.clone()).collect()
+    }
+
+    fn bots_event(app: &mut App, mode: BotsFetch, bots: Vec<Bot>) {
+        let epoch = app.epoch;
+        app.handle(Event::Bots {
+            epoch,
+            mode,
+            result: Ok(bots),
+        });
+    }
+
+    #[test]
+    fn bot_refresh_merges_without_moving_the_open_chat() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "tok");
+        let coder = app.find_bot("coder").unwrap();
+        app.select_bot(coder);
+        app.sidebar_cursor = app.find_bot("scribe").unwrap();
+        // New bot sorted first, "helper" deleted, "scribe" renamed.
+        let mut list = vec![Bot {
+            id: "ratatoskn".into(),
+            name: "ratatoskn".into(),
+            ..Default::default()
+        }];
+        list.extend(
+            app.all_bots
+                .iter()
+                .filter(|b| b.id != "helper")
+                .cloned()
+                .map(|mut b| {
+                    if b.id == "scribe" {
+                        b.name = "Scribe 2".into();
+                    }
+                    b
+                }),
+        );
+        bots_event(&mut app, BotsFetch::Auto, list.clone());
+        assert_eq!(app.active_bot().unwrap().id, "coder", "open chat kept");
+        assert_eq!(app.bots[app.sidebar_cursor].id, "scribe", "cursor kept");
+        assert!(app.find_bot("ratatoskn").is_some());
+        assert!(app.find_bot("helper").is_none());
+        let all = texts(&app).join("\n");
+        assert!(
+            all.contains("Bot list refreshed: 1 new (ratatoskn), 1 removed (Helper), 1 updated (Scribe → Scribe 2)"),
+            "{all}"
+        );
+        // An auto refresh with no changes says nothing; a manual one says so.
+        let n = texts(&app).len();
+        bots_event(&mut app, BotsFetch::Auto, list.clone());
+        assert_eq!(texts(&app).len(), n);
+        bots_event(&mut app, BotsFetch::Manual, list.clone());
+        assert!(
+            texts(&app)
+                .join("\n")
+                .contains("Bot list refreshed: no changes.")
+        );
+        // The open bot deleted elsewhere: notice, and another chat is shown.
+        let gone: Vec<Bot> = list.into_iter().filter(|b| b.id != "coder").collect();
+        bots_event(&mut app, BotsFetch::Auto, gone);
+        assert_ne!(app.active_bot().unwrap().id, "coder");
+        assert!(
+            texts(&app)
+                .iter()
+                .any(|t| t.contains("The bot you had open (Coder) no longer exists"))
+        );
+    }
+
+    #[test]
+    fn bot_list_auto_refresh_follows_the_pref() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "tok");
+        app.config.agents_refresh_secs = 60;
+        app.bots_refresh = (Instant::now() - Duration::from_secs(61), false);
+        app.tick();
+        assert!(app.bots_refresh.1, "due: a fetch started");
+        app.wait_idle(WAIT);
+        assert!(!app.bots_refresh.1);
+        app.config.agents_refresh_secs = 0;
+        app.bots_refresh.0 = Instant::now() - Duration::from_secs(3600);
+        app.tick();
+        assert!(!app.bots_refresh.1, "0 = off");
     }
 
     #[test]

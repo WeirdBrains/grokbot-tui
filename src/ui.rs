@@ -426,14 +426,20 @@ fn media_slot(
     }
 }
 
-/// The collapsed sidebar: a 1-column strip. Top: » (expand); then one marker per bot
+/// The collapsed sidebar: a 1-column strip. Top: » (expand), ↻ (refresh the bot list);
+/// then one marker per bot
 /// (● active, · others, ◆ the keyboard cursor when the sidebar has focus).
 fn draw_sidebar_strip(f: &mut Frame, app: &mut App, side: Rect) {
     if side.height == 0 {
         return;
     }
     let mut lines = vec![Line::from(theme::collapse_button().span("»"))];
-    for (i, _) in app.bots.iter().enumerate().take(side.height as usize - 1) {
+    if side.height >= 2 {
+        lines.push(Line::from(theme::collapse_button().span("↻")));
+        app.sidebar_refresh_area = Rect::new(side.x, side.y + 1, 1, 1);
+    }
+    let rows = (side.height as usize).saturating_sub(2);
+    for (i, _) in app.bots.iter().enumerate().take(rows) {
         let l = if Some(i) == app.active {
             theme::selected().span("●")
         } else if app.focus == Focus::Sidebar && i == app.sidebar_cursor {
@@ -651,6 +657,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         })
         .collect();
     app.sidebar_toggle_area = Rect::default();
+    app.sidebar_refresh_area = Rect::default();
     if app.config.sidebar_collapsed {
         draw_sidebar_strip(f, app, side);
     } else {
@@ -664,6 +671,12 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             let r = Rect::new(side.x + side.width - 4, side.y, 3, 1);
             f.render_widget(Paragraph::new(theme::collapse_button().span(" « ")), r);
             app.sidebar_toggle_area = r;
+            // ↻ refresh, left of «.
+            if side.width >= 14 {
+                let r = Rect::new(side.x + side.width - 7, side.y, 3, 1);
+                f.render_widget(Paragraph::new(theme::collapse_button().span(" ↻ ")), r);
+                app.sidebar_refresh_area = r;
+            }
         }
     }
 
@@ -1984,6 +1997,12 @@ pub(crate) mod tests {
             app.body_area
                 .contains(ratatui::layout::Position::new(l.x, l.y))
         );
+        // The strip's ↻ (row 2) refreshes the bot list instead of expanding.
+        assert_eq!(
+            app.sidebar_refresh_area,
+            Rect::new(0, app.sidebar_area.y + 1, 1, 1)
+        );
+        assert_eq!(buf[(0, app.sidebar_area.y + 1)].symbol(), "↻");
         // Clicking the strip expands; ▾ in the compact header expands it.
         app.click(0, app.sidebar_area.y + 2);
         assert!(!app.config.sidebar_collapsed);

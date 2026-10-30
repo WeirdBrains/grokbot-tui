@@ -45,6 +45,7 @@ pub const ACTIONS: &[&str] = &[
     "view.toggle_header",
     "view.toggle_sidebar",
     "view.toggle_attachments",
+    "agents.refresh",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

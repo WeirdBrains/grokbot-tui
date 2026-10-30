@@ -229,6 +229,66 @@ pub fn bot_from_agent(a: &gw::Agent) -> Bot {
 }
 
 /// Add shared team bots (from the backend team list) that the gateway list lacks.
+/// What changed between two bot lists (by id): names for the status notice.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BotDiff {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+    /// Renamed, re-described, hidden/shown, or otherwise changed.
+    pub updated: Vec<String>,
+}
+
+impl BotDiff {
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.removed.is_empty() && self.updated.is_empty()
+    }
+
+    /// e.g. "Bot list refreshed: 1 new (ratatoskn)".
+    pub fn notice(&self) -> String {
+        if self.is_empty() {
+            return "Bot list refreshed: no changes.".into();
+        }
+        let part = |n: &[String], what: &str| {
+            (!n.is_empty()).then(|| format!("{} {what} ({})", n.len(), n.join(", ")))
+        };
+        let parts: Vec<String> = [
+            part(&self.added, "new"),
+            part(&self.removed, "removed"),
+            part(&self.updated, "updated"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        format!("Bot list refreshed: {}", parts.join(", "))
+    }
+}
+
+pub fn diff_bots(old: &[Bot], new: &[Bot]) -> BotDiff {
+    let mut d = BotDiff::default();
+    for n in new {
+        match old.iter().find(|o| o.id == n.id) {
+            None => d.added.push(n.name.clone()),
+            Some(o)
+                if (&o.name, &o.description, o.hidden, o.is_group, o.team)
+                    != (&n.name, &n.description, n.hidden, n.is_group, n.team) =>
+            {
+                if o.name != n.name {
+                    d.updated.push(format!("{} → {}", o.name, n.name));
+                } else {
+                    d.updated.push(n.name.clone());
+                }
+            }
+            Some(_) => {}
+        }
+    }
+    for o in old {
+        if !new.iter().any(|n| n.id == o.id) {
+            d.removed.push(o.name.clone());
+        }
+    }
+    d
+}
+
 pub fn merge_team_bots(mut bots: Vec<Bot>, team: &[gw::TeamAgent]) -> Vec<Bot> {
     for t in team {
         if t.viewer_is_owner || bots.iter().any(|b| b.id == t.agent_id) {
@@ -883,5 +943,30 @@ mod tests {
         assert_eq!(m.len(), 2);
         assert_eq!(m[0].role, Role::User);
         assert_eq!((m[1].role, m[1].text.as_str()), (Role::Bot, "red"));
+    }
+
+    #[test]
+    fn diff_bots_reports_new_removed_and_updated() {
+        let b = |id: &str, name: &str| Bot {
+            id: id.into(),
+            name: name.into(),
+            ..Default::default()
+        };
+        let old = vec![b("a", "A"), b("b", "B"), b("c", "C")];
+        let mut new = vec![b("a", "A"), b("c", "C2"), b("r", "ratatoskn")];
+        new[0].viewer_session_id = Some("s".into()); // session churn is not a change
+        let d = diff_bots(&old, &new);
+        assert_eq!(d.added, ["ratatoskn"]);
+        assert_eq!(d.removed, ["B"]);
+        assert_eq!(d.updated, ["C → C2"]);
+        assert_eq!(
+            d.notice(),
+            "Bot list refreshed: 1 new (ratatoskn), 1 removed (B), 1 updated (C → C2)"
+        );
+        assert!(diff_bots(&old, &old).is_empty());
+        assert_eq!(
+            diff_bots(&old[..1], &[b("a", "A"), b("r", "ratatoskn")]).notice(),
+            "Bot list refreshed: 1 new (ratatoskn)"
+        );
     }
 }

@@ -300,6 +300,11 @@ Input focused (multi-line)
   F8 / /sidebar             Collapse the bot list to a 1-column strip (● active); click
                             the strip or » to expand, « to collapse (pref
                             ui.sidebar_collapsed; keymap view.toggle_sidebar)
+  F12 / /refresh            Re-fetch the bot list now (also the ↻ in the sidebar header
+                            or strip). New bots appear, deleted ones go, renames show;
+                            the open chat stays. Automatic every
+                            agents.refresh_interval_secs (60; 0 = off) and on re-login
+                            (keymap agents.refresh)
   F9 / /attachments (/files) Right panel listing this chat's attachments (sent and
                             received) with [view] and [⤓]; click a row to jump to its
                             message. Collapses to a 1-column strip with the count (pref

@@ -25,6 +25,8 @@ mod links;
 #[cfg(test)]
 mod live_attach_test;
 #[cfg(test)]
+mod live_bots_test;
+#[cfg(test)]
 mod live_presence_test;
 mod markdown;
 mod media;
@@ -730,6 +732,10 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
             if k.code == KeyCode::F(8) && app.keys_scheme_default() {
                 app.set_sidebar_collapsed(!app.config.sidebar_collapsed);
+                return true;
+            }
+            if k.code == KeyCode::F(12) && app.keys_scheme_default() {
+                app.refresh_bots(crate::app::BotsFetch::Manual);
                 return true;
             }
             if k.code == KeyCode::F(9) && app.keys_scheme_default() {
