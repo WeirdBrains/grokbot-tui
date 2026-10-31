@@ -253,6 +253,10 @@ style_slots! {
     SETTINGS_FRAME = "settings_frame", "Modals", true, "Settings page frame and text";
     SETTINGS_TAB = "settings_tab", "Modals", false, "Settings page: the selected tab and row";
     SETTINGS_BUTTON = "settings_button", "Screen and header", false, "Header: the [⚙ Settings] button";
+    BELL = "bell", "Screen and header", false, "Header: the notifications bell and unread count";
+    NOTIFICATION_TOAST = "notification_toast", "Modals", true, "Grok Bot notification toast (top right)";
+    NOTIFICATION_UNREAD = "notification_unread", "Modals", false, "Notifications: unread items and the toast [x]";
+    NOTIFICATION_READ = "notification_read", "Modals", false, "Notifications: read items";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
     MENU_ACTIVE = "menu_active", "Screen and header", false, "Open / focused menu label";
     TOOLTIP = "tooltip", "Modals", true, "Hover tooltip frame and text";
@@ -421,6 +425,15 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
             ..StyleSpec::default()
         },
         s::SETTINGS_BUTTON => bold(fg(c::ACCENT)),
+        s::BELL => bold(fg(c::WARN)),
+        s::NOTIFICATION_TOAST => StyleSpec {
+            fg: Some(r(c::MODAL_TEXT)),
+            bg: Some(r(c::MODAL_BACKGROUND)),
+            border: Some(r(c::WARN)),
+            ..StyleSpec::default()
+        },
+        s::NOTIFICATION_UNREAD => bold(fg(c::ACCENT)),
+        s::NOTIFICATION_READ => fg(c::MUTED),
         s::REACTION_PILL => StyleSpec {
             bg: Some(r(c::HEADER)),
             fg: Some(r(c::TEXT)),
@@ -884,6 +897,18 @@ pub fn settings_tab() -> Style {
 pub fn settings_button() -> Style {
     st(slot::SETTINGS_BUTTON)
 }
+pub fn bell() -> Style {
+    st(slot::BELL)
+}
+pub fn notification_toast() -> Style {
+    st(slot::NOTIFICATION_TOAST)
+}
+pub fn notification_unread() -> Style {
+    st(slot::NOTIFICATION_UNREAD)
+}
+pub fn notification_read() -> Style {
+    st(slot::NOTIFICATION_READ)
+}
 pub fn card_button() -> Style {
     st(slot::CARD_BUTTON)
 }
@@ -1167,6 +1192,8 @@ mod tests {
                     || s.key == "loading"
                     || s.key == "spinner"
                     || s.key.starts_with("settings_")
+                    || s.key == "bell"
+                    || s.key.starts_with("notification_")
                     || s.key.starts_with("toast")
                     || s.key.starts_with("mode_n")
                     || s.key.starts_with("mode_i")

@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.34.0] - 2026-10-31
+
+### Added
+- Grok Bot notifications: a header **🔔** bell with the unread count, a notifications page
+  (bell, **Alt-b**, `/notifications`, vim `N` / keymap `notifications.open`) and small
+  toasts stacked in the top-right corner.
+- Sources (the gateway has no notifications API, so these are what it really returns):
+  transcript `kind: notice` entries (Grok Bot system notices), `listAgents`
+  `unreadCount`/`hasUnread` and `awaitingUserResponse` for bots you aren't viewing, and
+  pending cards. **Usage / low credits** is derived: a notice or message preview that
+  mentions running out of usage or credits becomes a *Usage* notification that opens
+  Settings → Usage & Billing (there is no usage API).
+- Read state: clicking a toast marks it read, removes it and opens its context (the bot's
+  chat, the card, or Settings). Closing with **[x]** or the timeout only removes the toast;
+  it stays unread on the page. The bell counts unread only. Read items stay on the page,
+  dimmed and marked *read*, until cleared.
+- Page: newest first; Enter open, m toggle read, a mark all read, c / [Clear all] clear
+  (asks y/n); `/notifications read|clear`. Clear and read state are local (per account,
+  `notifications-<account>.json` next to `context.db`); cleared items don't come back.
+- Pref `notifications.toast_timeout_secs` (default 20, 1–600). Theme parts `bell`,
+  `notification_toast`, `notification_unread`, `notification_read`.
+
 ## [1.33.0] - 2026-10-31
 
 ### Added

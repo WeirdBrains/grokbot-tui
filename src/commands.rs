@@ -158,6 +158,14 @@ pub fn registry() -> Registry {
                 run: browse,
             },
             Command {
+                name: "notifications",
+                aliases: &["inbox", "bell"],
+                usage: "/notifications [read|clear]",
+                help: "Grok Bot notifications (also the header 🔔 and Alt-b): read marks all read, clear removes all (on this computer)",
+                complete: notifications_complete,
+                run: notifications,
+            },
+            Command {
                 name: "settings",
                 aliases: &[],
                 usage: "/settings [general|computer|vault|usage|updates|bot|local]",
@@ -1600,6 +1608,33 @@ fn settings_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candi
     } else {
         vec![]
     }
+}
+
+fn notifications_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(["read", "clear"])
+    } else {
+        vec![]
+    }
+}
+
+/// `/notifications [read|clear]`.
+fn notifications(app: &mut App, arg: &str) -> Result<()> {
+    match arg.trim() {
+        "" => app.open_notifications(),
+        "read" => {
+            app.inbox.mark_all_read();
+            app.inbox.save()?;
+            app.info("All notifications marked read.".into());
+        }
+        "clear" => {
+            app.inbox.clear_all();
+            app.inbox.save()?;
+            app.info("Notifications cleared (on this computer; the API has no clear).".into());
+        }
+        x => anyhow::bail!("unknown option '{x}': try read or clear"),
+    }
+    Ok(())
 }
 
 /// `/settings [tab]`.

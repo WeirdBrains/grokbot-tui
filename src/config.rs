@@ -124,6 +124,8 @@ pub const DEFAULT_STATUS_PROMPT: &str =
 
 /// Animate the loading spinner (global, on|off; off = static glyph, reduced motion).
 pub const PREF_UI_SPINNER: &str = "ui.spinner";
+/// Grok Bot notification toasts close after N seconds (global, 1..=600; 1.34.0).
+pub const PREF_TOAST_TIMEOUT: &str = "notifications.toast_timeout_secs";
 /// Draw images inline in chat bubbles (global).
 pub const PREF_IMAGES_INLINE: &str = "images.inline";
 /// Height cap for inline images, in rows (global, 2..=60).
@@ -193,6 +195,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_ATTACHMENTS_PANEL,
     PREF_CLICK_TO_REACT,
     PREF_UI_SPINNER,
+    PREF_TOAST_TIMEOUT,
     PREF_IMAGES_INLINE,
     PREF_IMAGES_INLINE_MAX_ROWS,
     PREF_MEDIA_INLINE,
@@ -309,6 +312,8 @@ pub struct Config {
     pub ssh_builtin: bool,
     /// `ui.spinner`: animate the loading spinner.
     pub spinner: bool,
+    /// `notifications.toast_timeout_secs`.
+    pub toast_timeout_secs: u64,
     /// `images.inline`.
     pub images_inline: bool,
     /// `images.inline_max_rows`.
@@ -366,6 +371,7 @@ impl Default for Config {
             claim_presence: false,
             idle_minutes: DEFAULT_IDLE_MINUTES,
             spinner: true,
+            toast_timeout_secs: crate::inbox::DEFAULT_TOAST_SECS,
             images_inline: true,
             inline_max_rows: 12,
             media_inline: true,
@@ -408,6 +414,7 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_CLAIM_PRESENCE, c.claim_presence.to_string()),
         (PREF_IDLE_MINUTES, c.idle_minutes.to_string()),
         (PREF_UI_SPINNER, "on".to_string()),
+        (PREF_TOAST_TIMEOUT, c.toast_timeout_secs.to_string()),
         (PREF_IMAGES_INLINE, "on".to_string()),
         (PREF_IMAGES_INLINE_MAX_ROWS, c.inline_max_rows.to_string()),
         (PREF_MEDIA_INLINE, "on".to_string()),
@@ -483,6 +490,10 @@ impl Config {
                 .and_then(|v| v.trim().parse().ok())
                 .filter(|n| (1..=240).contains(n))
                 .unwrap_or(d.idle_minutes),
+            toast_timeout_secs: o(PREF_TOAST_TIMEOUT)
+                .and_then(|v| v.trim().parse().ok())
+                .filter(|n| (1..=600).contains(n))
+                .unwrap_or(d.toast_timeout_secs),
             spinner: o(PREF_UI_SPINNER)
                 .map(|v| !matches!(v.trim(), "off" | "false" | "0" | "no"))
                 .unwrap_or(d.spinner),

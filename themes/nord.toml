@@ -84,6 +84,10 @@ download_dir = { fg = "@accent", bold = true }
 settings_frame = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
 settings_tab = { fg = "@on_accent", bg = "@accent", bold = true }
 settings_button = { fg = "@accent", bold = true }
+bell = { fg = "@warn", bold = true }
+notification_toast = { fg = "@modal_text", bg = "@modal_background", border = "@warn" }
+notification_unread = { fg = "@accent", bold = true }
+notification_read = { fg = "@muted" }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
 tooltip = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
@@ -194,6 +198,10 @@ download_dir = { fg = "@accent", bold = true }
 settings_frame = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
 settings_tab = { fg = "@on_accent", bg = "@accent", bold = true }
 settings_button = { fg = "@accent", bold = true }
+bell = { fg = "@warn", bold = true }
+notification_toast = { fg = "@modal_text", bg = "@modal_background", border = "@warn" }
+notification_unread = { fg = "@accent", bold = true }
+notification_read = { fg = "@muted" }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
 tooltip = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }

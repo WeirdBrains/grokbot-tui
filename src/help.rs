@@ -313,6 +313,10 @@ Input focused (multi-line)
                             ui.attachments_panel; keymap view.toggle_attachments).
                             In the panel: j/k move, Enter jump, v view, d download,
                             / filter, t type (All/Img/Vid/Aud/Doc), Esc back to input
+  Alt-b / /notifications    Grok Bot notifications (header 🔔 shows unread; keymap
+                            notifications.open, vim N). Enter open, m read/unread, a all
+                            read, c clear all, Esc back. Toasts: click opens + marks read,
+                            [x] or 20 s timeout hides (stays unread)
   Alt-, / /settings [tab]   Settings page (also the header [⚙ Settings] button; keymap
                             settings.open, vim s): Grok Bot's tabs (General, Computer,
                             Vault, Usage & Billing, Updates), the selected bot, and

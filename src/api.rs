@@ -166,6 +166,14 @@ pub trait ApiClient: Send + Sync {
             "bot settings are not supported by this client".into(),
         ))
     }
+    /// Grok Bot `kind: notice` entries seen by the last transcript call (1.34.0).
+    fn take_notices(&self, _bot_id: &str) -> Vec<crate::inbox::RemoteNotice> {
+        vec![]
+    }
+    /// Unread / waiting signals from the last `list_bots` (1.34.0).
+    fn take_bot_signals(&self) -> Vec<crate::inbox::BotSignal> {
+        vec![]
+    }
     /// Interactive cards seen by the last transcript call for `bot_id` (1.29.0).
     fn take_cards(&self, _bot_id: &str) -> Vec<crate::cards::Card> {
         vec![]
@@ -235,6 +243,67 @@ pub struct GatewayApi {
     pub client: gw::Client,
     list_notice: Mutex<Option<String>>,
     cards: Mutex<HashMap<String, Vec<crate::cards::Card>>>,
+    notices: Mutex<HashMap<String, Vec<crate::inbox::RemoteNotice>>>,
+    signals: Mutex<Vec<crate::inbox::BotSignal>>,
+}
+
+/// `kind: notice` entries (Grok Bot system notices).
+pub fn notices_from_entries(entries: &[gw::Entry]) -> Vec<crate::inbox::RemoteNotice> {
+    entries
+        .iter()
+        .filter(|e| e.raw.get("kind").and_then(|k| k.as_str()) == Some("notice"))
+        .filter_map(|e| {
+            Some(crate::inbox::RemoteNotice {
+                id: e.id.clone()?,
+                text: gw::sanitize_text(&e.text),
+                at_ms: e
+                    .raw
+                    .get("timestampMs")
+                    .and_then(|t| t.as_i64())
+                    .unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
+/// Unread / waiting fields of raw `listAgents` records.
+pub fn signals_from_raw(raw: &serde_json::Value) -> Vec<crate::inbox::BotSignal> {
+    raw_agents(raw)
+        .iter()
+        .filter_map(|a| {
+            let id = a
+                .get("id")
+                .or_else(|| a.get("agentId"))?
+                .as_str()?
+                .to_string();
+            let unread = a
+                .get("unreadCount")
+                .and_then(|v| v.as_u64())
+                .unwrap_or_else(|| {
+                    u64::from(
+                        a.get("hasUnread")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                    )
+                }) as u32;
+            let s = |k: &str| {
+                a.get(k)
+                    .and_then(|v| v.as_str())
+                    .filter(|v| !v.is_empty())
+                    .map(gw::sanitize_text)
+            };
+            Some(crate::inbox::BotSignal {
+                bot_id: id,
+                unread,
+                awaiting: a
+                    .get("awaitingUserResponse")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                last_message_id: s("lastMessageId").or_else(|| s("newestEntryId")),
+                preview: s("lastMessagePreview"),
+            })
+        })
+        .collect()
 }
 
 impl GatewayApi {
@@ -243,10 +312,16 @@ impl GatewayApi {
             client,
             list_notice: Mutex::new(None),
             cards: Mutex::new(HashMap::new()),
+            notices: Mutex::new(HashMap::new()),
+            signals: Mutex::new(Vec::new()),
         }
     }
 
     fn keep_cards(&self, bot_id: &str, entries: &[gw::Entry]) {
+        self.notices
+            .lock()
+            .unwrap()
+            .insert(bot_id.into(), notices_from_entries(entries));
         let c: Vec<_> = entries
             .iter()
             .filter_map(|e| crate::cards::parse(&e.raw))
@@ -527,6 +602,16 @@ pub fn messages_from_entries(entries: &[gw::Entry]) -> Vec<Message> {
 
 #[async_trait]
 impl ApiClient for GatewayApi {
+    fn take_notices(&self, bot_id: &str) -> Vec<crate::inbox::RemoteNotice> {
+        self.notices
+            .lock()
+            .unwrap()
+            .remove(bot_id)
+            .unwrap_or_default()
+    }
+    fn take_bot_signals(&self) -> Vec<crate::inbox::BotSignal> {
+        std::mem::take(&mut *self.signals.lock().unwrap())
+    }
     async fn agent_settings(&self, bot_id: &str) -> gw::Result<AgentSettings> {
         let raw = self
             .client
@@ -564,12 +649,15 @@ impl ApiClient for GatewayApi {
     /// from the backend's `ListGrokBotTeamAgents`. A team-list failure keeps your bots
     /// and records a notice via [`ApiClient::take_list_notice`].
     async fn list_bots(&self) -> gw::Result<Vec<Bot>> {
-        let own: Vec<Bot> = self
+        let raw = self
             .client
-            .list_agents()
-            .await?
+            .call_raw("listAgents", serde_json::json!({}))
+            .await?;
+        *self.signals.lock().unwrap() = signals_from_raw(&raw);
+        let own: Vec<Bot> = raw_agents(&raw)
             .iter()
-            .map(bot_from_agent)
+            .filter_map(gw::Agent::from_value)
+            .map(|a| bot_from_agent(&a))
             .collect();
         match self.client.list_team_agents().await {
             Ok(Some(team)) => {
@@ -745,6 +833,8 @@ pub struct MockClient {
     /// Per-bot settings edited through the Settings page, and the writes made.
     settings: Mutex<HashMap<String, AgentSettings>>,
     pub setting_calls: Mutex<Vec<(String, AgentChange)>>,
+    /// `notice <text>` prompts become Grok Bot notices (1.34.0).
+    notices: Mutex<HashMap<String, Vec<crate::inbox::RemoteNotice>>>,
 }
 
 impl MockClient {
@@ -762,6 +852,7 @@ impl MockClient {
             card_calls: Mutex::new(Vec::new()),
             settings: Mutex::new(HashMap::new()),
             setting_calls: Mutex::new(Vec::new()),
+            notices: Mutex::new(HashMap::new()),
         }
     }
 
@@ -858,6 +949,14 @@ pub fn mock_ensure_sandbox(cursor_token: &str) -> gw::Result<Session> {
 
 #[async_trait]
 impl ApiClient for MockClient {
+    fn take_notices(&self, bot_id: &str) -> Vec<crate::inbox::RemoteNotice> {
+        self.notices
+            .lock()
+            .unwrap()
+            .get(bot_id)
+            .cloned()
+            .unwrap_or_default()
+    }
     async fn agent_settings(&self, bot_id: &str) -> gw::Result<AgentSettings> {
         self.check("listAgents")?;
         if let Some(s) = self.settings.lock().unwrap().get(bot_id) {
@@ -1122,6 +1221,19 @@ impl ApiClient for MockClient {
         }
         let now = Instant::now();
         let mid = self.id();
+        if let Some(t) = text.strip_prefix("notice ") {
+            let id = format!("mock-notice-{}", self.id());
+            self.notices
+                .lock()
+                .unwrap()
+                .entry(bot_id.into())
+                .or_default()
+                .push(crate::inbox::RemoteNotice {
+                    id,
+                    text: t.into(),
+                    at_ms: crate::inbox::now_ms(),
+                });
+        }
         if let Some(kind) = text.strip_prefix("card ") {
             // Mock: `card widget|multi|approval|secret|form|draft|purchase` posts that card.
             let id = self.id();

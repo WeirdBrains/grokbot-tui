@@ -1432,7 +1432,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "grokbot-tui"
-version = "1.33.0"
+version = "1.34.0"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -19,6 +19,7 @@ mod fuzzy;
 mod help;
 mod history;
 mod imageview;
+mod inbox;
 mod inline;
 mod input;
 mod keyctx;
@@ -524,6 +525,12 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
     {
         return true;
     }
+    if let Event::Mouse(m) = &ev
+        && matches!(m.kind, MouseEventKind::Down(MouseButton::Left))
+        && app.inbox_toast_click(m.column, m.row)
+    {
+        return true;
+    }
     if let Event::Mouse(m) = &ev {
         app.mouse_pos = Some((m.column, m.row));
         if matches!(m.kind, MouseEventKind::Down(_)) {
@@ -614,6 +621,7 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 && app.history_search.is_none()
                 && app.card_modal.is_none()
                 && app.settings.is_none()
+                && app.inbox.page.is_none()
             {
                 use crate::keymap::{self, Mode};
                 if app.vim_mode == Mode::Command {
@@ -784,8 +792,17 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 app.card_modal_key(k);
                 return true;
             }
+            if app.inbox.page.is_some() {
+                app.notifications_key(k);
+                return true;
+            }
             if app.settings.is_some() {
                 app.settings_key(k);
+                return true;
+            }
+            // Alt-b: Grok Bot notifications.
+            if k.code == KeyCode::Char('b') && k.modifiers == KeyModifiers::ALT {
+                app.open_notifications();
                 return true;
             }
             // Alt-, (any terminal) or Ctrl-, (kitty protocol): Settings.
@@ -1047,6 +1064,11 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
         }
         Event::Mouse(m) if app.browser.is_some() && app.download.is_none() => app.browser_mouse(m),
+        Event::Mouse(m) if app.inbox.page.is_some() && app.card_modal.is_none() => {
+            if let MouseEventKind::Down(MouseButton::Left) = m.kind {
+                app.notifications_click(m.column, m.row);
+            }
+        }
         Event::Mouse(m) if app.settings.is_some() && app.card_modal.is_none() => {
             if let MouseEventKind::Down(MouseButton::Left) = m.kind {
                 app.settings_click(m.column, m.row);

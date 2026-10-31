@@ -105,6 +105,7 @@ enum Target {
     Mode(Mode),
     Collapse,
     Settings,
+    Bell,
 }
 
 /// A piece of header text, optionally clickable.
@@ -147,6 +148,7 @@ fn render_segs(f: &mut Frame, app: &mut App, area: Rect, segs: Vec<Seg>) {
                 Target::Mode(m) => app.theme_areas.push((r, m)),
                 Target::Collapse => app.header_toggle_area = r,
                 Target::Settings => app.settings_button_area = r,
+                Target::Bell => app.bell_area = r,
             }
         }
         x = x.saturating_add(w);
@@ -216,6 +218,18 @@ fn login_and_bot(app: &App) -> (String, String) {
     (user, bot)
 }
 
+/// "🔔 3" (unread Grok Bot notifications), clickable.
+fn bell_seg(app: &App, compact: bool) -> Seg {
+    let n = app.inbox.unread();
+    let text = match (compact, n) {
+        (true, 0) => "🔔".to_string(),
+        (true, n) => format!("🔔{n}"),
+        (false, 0) => "[🔔]".to_string(),
+        (false, n) => format!("[🔔 {n}]"),
+    };
+    hit(text, theme::bell(), Target::Bell)
+}
+
 fn mouse_seg(app: &App) -> Seg {
     if app.mouse_capture {
         seg("mouse: on (F6)", theme::mouse_on())
@@ -230,6 +244,7 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
     app.theme_switch_area = Rect::default();
     app.header_toggle_area = Rect::default();
     app.settings_button_area = Rect::default();
+    app.bell_area = Rect::default();
     app.theme_areas.clear();
     f.render_widget(Block::new().style(theme::top_bar()), area);
     let (user, bot) = login_and_bot(app);
@@ -239,7 +254,8 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
             let mut segs = vec![
                 hit("▾", theme::collapse_button(), Target::Collapse),
                 seg(" grokbot-tui ", theme::brand()),
-                hit("[⚙]", theme::settings_button(), Target::Settings),
+                hit("⚙", theme::settings_button(), Target::Settings),
+                bell_seg(app, true),
                 seg(" ", theme::top_bar()),
             ];
             segs.extend(account_segs(app, true));
@@ -303,7 +319,8 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
                 seg(bot, theme::top_bar()),
                 seg("   ", theme::top_bar()),
                 hit("[⚙ Settings]", theme::settings_button(), Target::Settings),
-                seg(" Alt-,", theme::key_hint()),
+                seg(" ", theme::top_bar()),
+                bell_seg(app, false),
             ];
             render_segs(f, app, rows[2], segs);
             let mut segs = vec![mouse_seg(app)];
@@ -519,9 +536,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.settings.is_some() {
         crate::settings::draw(f, app);
     }
+    if app.inbox.page.is_some() {
+        crate::inbox::draw_page(f, app);
+    }
     if let Some(l) = &app.loading {
         crate::loading::draw(f, l, app.config.spinner, f.area());
     }
+    crate::inbox::draw_toasts(f, app);
     draw_toasts(f, app);
     if let Some(tip) = app.tooltip.tip.clone() {
         crate::tooltip::paint(f, &tip, app.tooltip.tip_at, f.area());
@@ -553,7 +574,7 @@ fn draw_toasts(f: &mut Frame, app: &mut App) {
         .take(n)
         .cloned()
         .collect();
-    let mut y = area.y + 1;
+    let mut y = area.y + 1 + app.inbox.toast_rows;
     for t in toasts {
         let w = area.width.saturating_sub(4).clamp(20, 56);
         let x = area.x + area.width.saturating_sub(w + 1);

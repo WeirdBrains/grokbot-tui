@@ -838,7 +838,7 @@ mod tests {
     fn header_button_opens_and_esc_goes_back() {
         let (_rt, mut app, _d) = ready();
         let s = screen(&mut app);
-        assert!(s.contains("[⚙ Settings]") || s.contains("[⚙]"), "{s}");
+        assert!(s.contains("[⚙ Settings]") || s.contains("⚙"), "{s}");
         let b = app.settings_button_area;
         app.click(b.x, b.y);
         assert!(app.settings.is_some());

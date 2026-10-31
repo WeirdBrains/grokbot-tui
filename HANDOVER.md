@@ -2,7 +2,7 @@
 
 ## Where things stand
 - Repo: github.com/WeirdBrains/grokbot-tui, checkout at `~/Projects/WeirdBrains/grokbot-tui` on alien-blue (machineId 5803cd4d…; the old fb57ab15 entry is stale).
-- Latest release: **v1.33.0** (settings page); 1.32.0 = loading spinner; 1.31.0 = MCP server. See git log for main.
+- Latest release: **v1.34.0** (notifications); 1.33.0 = settings page; 1.32.0 = loading spinner; 1.31.0 = MCP server. See git log for main.
   - 1.30.0: copy buttons on bubbles (raw markdown source) and code blocks (code only), selection that skips borders/chrome, OSC 52 + system clipboard.
   - 1.30.1: macOS builds moved to `macos-15` / `macos-15-intel` (GitHub retires macos-14 on Nov 2).
 - Leftover worktree: `~/Projects/WeirdBrains/grokbot-tui-1301` (branch `v1301`), now merged into main, so it's safe to remove with `git worktree remove`.

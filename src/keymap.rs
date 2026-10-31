@@ -49,6 +49,7 @@ pub const ACTIONS: &[&str] = &[
     "card.open",
     "message.copy",
     "settings.open",
+    "notifications.open",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

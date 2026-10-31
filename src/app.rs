@@ -709,6 +709,10 @@ pub struct App {
     pub settings: Option<crate::settings::Settings>,
     /// Header: the [⚙ Settings] button.
     pub settings_button_area: Rect,
+    /// Grok Bot notifications (1.34.0).
+    pub inbox: crate::inbox::Inbox,
+    /// Header: the 🔔 bell.
+    pub bell_area: Rect,
     shell_seq: u64,
     /// Open selection modal (bots, accounts, …).
     pub picker: Option<crate::picker::Picker>,
@@ -941,6 +945,8 @@ impl App {
             card_modal: None,
             settings: None,
             settings_button_area: Rect::default(),
+            inbox: crate::inbox::Inbox::default(),
+            bell_area: Rect::default(),
             shell_seq: 0,
             picker: None,
             client_version_source,
@@ -990,6 +996,7 @@ impl App {
     /// Called every UI loop iteration: apply results and poll the active bot when due.
     pub fn tick(&mut self) {
         self.notices_board.tick(std::time::Instant::now());
+        self.inbox.tick(std::time::Instant::now());
         self.pump();
         let now = Instant::now();
         if let Some((at, _)) = self.login_retry
@@ -1323,6 +1330,11 @@ impl App {
                         let diff = crate::api::diff_bots(&self.all_bots, &b);
                         let open = self.active_bot().map(|x| (x.id.clone(), x.name.clone()));
                         self.apply_bots(b);
+                        if let Some(api) = self.api.clone() {
+                            let signals = api.take_bot_signals();
+                            self.inbox_reload();
+                            self.inbox_signals(signals);
+                        }
                         if matches!(mode, BotsFetch::Manual | BotsFetch::Auto) {
                             if let Some((id, name)) = open
                                 && !self.all_bots.iter().any(|x| x.id == id)
@@ -1423,6 +1435,10 @@ impl App {
                         if let Some(api) = self.api.clone() {
                             let cards = api.take_cards(&bot);
                             self.absorb_cards(&bot, cards);
+                            let notices = api.take_notices(&bot);
+                            self.inbox_reload();
+                            self.inbox_notices(&bot, notices);
+                            self.inbox_cards();
                         }
                         if got_reply {
                             self.awaiting.remove(&bot);
@@ -2795,6 +2811,7 @@ impl App {
             || self.download.is_some()
             || self.card_modal.is_some()
             || self.settings.is_some()
+            || self.inbox.page.is_some()
     }
 
     /// Load prompt history for the active account from `context.db`. A failure is shown
@@ -3263,6 +3280,10 @@ impl App {
                 if let Err(e) = self.copy_last_message() {
                     self.info(e.to_string());
                 }
+                true
+            }
+            "notifications.open" => {
+                self.open_notifications();
                 true
             }
             "settings.open" => {
@@ -3891,6 +3912,10 @@ impl App {
             return;
         }
         if self.media_click(col, row) {
+            return;
+        }
+        if self.bell_area.contains(at) {
+            self.open_notifications();
             return;
         }
         if self.settings_button_area.contains(at) {
