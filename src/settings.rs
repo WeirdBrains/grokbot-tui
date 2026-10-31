@@ -914,12 +914,16 @@ mod tests {
         assert!(app.ssh_confirm.is_none(), "cancel opens nothing");
         key(&mut app, KeyCode::Enter);
         key(&mut app, KeyCode::Char('y'));
+        assert!(app.ssh_confirm.is_none(), "SSH: no remote app launch");
         assert_eq!(
-            app.ssh_confirm.as_ref().unwrap().0,
-            app_link("reset-computer"),
-            "grokbot:// links go through open_link to the system opener"
+            app.browser
+                .as_ref()
+                .and_then(|b| b.current.as_ref())
+                .map(|f| f.url().to_string()),
+            Some(app_link("reset-computer")),
+            "SSH: grokbot:// links show the built-in deep-link page"
         );
-        app.ssh_confirm = None;
+        app.browser = None;
         goto(&mut app, 4, "tui-version");
         key(&mut app, KeyCode::Enter);
         assert!(app.browser.is_some(), "https opens in the built-in browser");

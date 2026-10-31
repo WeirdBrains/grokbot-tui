@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.34.1] - 2026-10-31
+
+### Fixed
+- Over SSH, Settings rows that open the Grok Bot app (`grokbot://app/v1/settings?id=…`)
+  now open in the built-in browser instead of offering to launch the app on the remote
+  machine. Grok Bot has no web settings URL, so the page names the setting, shows the
+  deep link, and copies it to your local clipboard (OSC 52) to open where Grok Bot is
+  installed. Follows `links.ssh_behavior` (default `builtin`; `respect_pref` keeps the old
+  behavior). Back/forward to such a link re-renders the page instead of failing.
+
 ## [1.34.0] - 2026-10-31
 
 ### Added

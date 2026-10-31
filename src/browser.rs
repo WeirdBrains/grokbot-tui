@@ -874,6 +874,20 @@ impl App {
         }
         b.load_id += 1;
         let id = b.load_id;
+        if crate::links::is_app_link(&url) {
+            // grokbot:// deep links (settings rows) can't be fetched: show a local page.
+            let body = crate::links::app_link_page(&url);
+            self.on_browser_loaded(
+                id,
+                url.clone(),
+                Ok(Fetched::Text {
+                    url,
+                    content_type: "text/html".into(),
+                    body,
+                }),
+            );
+            return;
+        }
         b.status = Status::Loading(url.clone());
         b.editing = false;
         b.bar = url.clone();

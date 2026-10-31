@@ -226,6 +226,9 @@ Over SSH (detected from `SSH_CONNECTION`, `SSH_CLIENT`, `SSH_TTY`, or a parent `
 built-in browser (`links.ssh_behavior = "builtin"`, the default; `"respect_pref"` follows
 `links.open_with`). Anything that would launch an app on the remote machine (browser `o`,
 `/open`, Ctrl-click, the image viewer's `o`) warns first and runs only if repeated within 5 s.
+Settings rows that open the Grok Bot app (`grokbot://app/v1/settings?id=…`) show a built-in
+browser page with the deep link instead (Grok Bot has no web settings URL) and copy the link
+to your local clipboard over OSC 52, so you can open it where Grok Bot is installed.
 
 Theme parts: `browser_frame`, `browser_url`, `browser_link_number`, `browser_heading`,
 `browser_status`, `ssh_indicator`.
