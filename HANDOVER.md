@@ -1,0 +1,55 @@
+# grokbot-tui handover (Oct 31, 2026, 1 AM EDT)
+
+## Where things stand
+- Repo: github.com/WeirdBrains/grokbot-tui, checkout at `~/Projects/WeirdBrains/grokbot-tui` on alien-blue (machineId 5803cd4d…; the old fb57ab15 entry is stale).
+- Latest release: **v1.30.1** (45 assets, Latest). main = `a37a9f5`.
+  - 1.30.0: copy buttons on bubbles (raw markdown source) and code blocks (code only), selection that skips borders/chrome, OSC 52 + system clipboard.
+  - 1.30.1: macOS builds moved to `macos-15` / `macos-15-intel` (GitHub retires macos-14 on Nov 2).
+- Leftover worktree: `~/Projects/WeirdBrains/grokbot-tui-1301` (branch `v1301`), now merged into main, so it's safe to remove with `git worktree remove`.
+- Progress logs: `~/.cache/grokbot-tui-attach/progress-1.2x.md`, `progress-1.30.md`.
+
+## Release process (standing rules)
+1. Bump the version (minor for features, patch for fixes), add a CHANGELOG entry.
+2. `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, all on alien-blue.
+3. Annotated tag `vX.Y.Z`, then push the tag alone. Wait for **Auto release** and **Release**, and expect 45 assets.
+4. Fast-forward main (never force).
+   - **Lesson from 1.30.1:** if the tagged commit changes a workflow file and isn't on main yet, the Release `host` job fails with `HTTP 403: Resource not accessible by integration`. Fast-forward main to the tag commit first, then rerun the failed jobs.
+5. Rerun only failed jobs, and only on errors that look transient.
+6. `cargo publish` needs Michael's explicit OK every time. Git pushes are pre-approved once a build is tested and tagged.
+
+## Hard don'ts
+Never print or store tokens or secrets. Don't touch `.gitignore`, `~/.grokbot/`, local-exec-file-key, cursor-machine-id, Cookies, or the commented-out Homebrew config. Never force-push. Work only on grokbot-tui unless another repo is named.
+
+## SSH fallback
+The box key `grokbot-lippy@box` is in alien-blue's `authorized_keys`. The real `~/.ssh` is at `/mnt/ext1/home/m3talsmith/.ssh` (700), and `authorized_keys` is 600. The box **can't** reach `alien-blue.duckdns.org:5250`: its network proxy never passes the SSH handshake. Another machine with ordinary internet access could use it.
+
+## Next up: MCP (proposal, not started; nothing decided)
+Goal: grokbot-tui both **is** an MCP server and **hosts** MCP servers, so agents can talk to each other through it.
+
+### A. grokbot-tui as an MCP server (`grokbot-tui mcp serve`)
+- Transports: stdio first (for Claude Code, Cursor, Codex, other CLIs), then streamable HTTP on localhost with a bearer token from the OS keyring.
+- Tools, all mapped onto the existing `gw::Client` calls:
+  - `list_bots`, `get_bot(id)`
+  - `send_message(bot_id, text, attachments?)`, returning the message id
+  - `read_messages(bot_id, since?, limit?)`
+  - `wait_for_reply(bot_id, message_id, timeout)`, for request/response between agents
+  - `list_pending_cards(bot_id)`, `answer_card(card_id, value)`. Only safe card kinds go through MCP by default (widgets, forms); approval and secret cards stay human-only unless the config opts in.
+  - `list_attachments(bot_id)`, `download_attachment(id)`
+- Resources: `grokbot://bots`, `grokbot://bots/{id}/transcript`.
+- Safety: a per-bot allowlist in config (`mcp.server.allowed_bots`), read-only mode, an audit log to `~/.cache/grokbot-tui/mcp-audit.log` (no message bodies by default), and no tokens ever in tool output.
+
+### B. grokbot-tui as an MCP host/client
+- Config `[[mcp.servers]]` with name, command/args/env for stdio or url/headers for HTTP, `enabled`, and a per-server tool allowlist.
+- `/mcp` panel: list servers, connect or disconnect, show tools, call a tool manually, show status and errors. Add/remove with `/mcp add`, `/mcp remove`, and keybinds plus a theme part like the existing ones.
+- Tool calls run in the TUI, and the results can go into a chat as an attachment or a message.
+
+### C. Cross-agent communication
+- Each Grok Bot becomes an addressable MCP endpoint through A: an outside agent (Claude Code, another grokbot-tui) calls `send_message` + `wait_for_reply`.
+- Through B, grokbot-tui can connect to another agent's MCP server and relay results into a Grok Bot chat.
+- Later: a simple `relay` mode that bridges two bots (A asks, B answers) with loop and rate limits.
+
+### Open questions for Michael
+1. Which crate: the official `rmcp` Rust SDK (likely), or hand-rolled JSON-RPC?
+2. Should the server be able to answer approval and secret cards at all, or stay human-only?
+3. Is HTTP transport needed in v1, or stdio only?
+4. Release split: 1.31.0 server (A), 1.32.0 host (B), then relay?
