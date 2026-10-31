@@ -388,6 +388,17 @@ Cursor (`~/.cursor/mcp.json`) and Claude Code (`.mcp.json`) examples are in
 `docs/mcp/cursor.mcp.json` and `docs/mcp/claude-code.mcp.json`; the HTTP entries read the
 token from `GROKBOT_TUI_MCP_TOKEN` (`export GROKBOT_TUI_MCP_TOKEN=$(grokbot-tui mcp token)`).
 
+## Loading spinner
+
+While grokbot-tui signs in, loads the bot list and opens the first chat (at startup, on
+`/account use <name>`, and during `/login gateway|cursor|desktop`), a centered overlay shows a
+braille spinner and the current stage: *Signing in to <account>…*, *Checking gateway <host>…*,
+*Exchanging Cursor token…* (the EnsureSandBox exchange), *Reading the desktop app session…*,
+*Loading bots…*, *Loading chat with <bot>…*. The work runs in the background, so input keeps
+working (Ctrl-C / Ctrl-Q still quit). If a step fails, the error replaces the spinner with a
+retry hint; **Esc** dismisses it. Pref `ui.spinner = off` shows a static glyph instead of the
+animation (reduced motion). Theme parts: `loading` (frame and message) and `spinner` (glyph).
+
 ## Notifications, menu bar, tooltips
 
 Toasts honour `~/.grokbot-tui/notify-rules.toml` and `/notify` (dnd / per-kind). They never

@@ -509,6 +509,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.card_modal.is_some() {
         crate::cardmodal::draw(f, app);
     }
+    if let Some(l) = &app.loading {
+        crate::loading::draw(f, l, app.config.spinner, f.area());
+    }
     draw_toasts(f, app);
     if let Some(tip) = app.tooltip.tip.clone() {
         crate::tooltip::paint(f, &tip, app.tooltip.tip_at, f.area());

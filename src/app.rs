@@ -343,6 +343,11 @@ pub fn cap_output(s: &str) -> (String, bool) {
 }
 
 pub enum Event {
+    /// A login task moved to a new stage (drives the loading overlay; not a task result).
+    LoginStage {
+        epoch: u64,
+        stage: crate::loading::Stage,
+    },
     Login {
         epoch: u64,
         method: LoginMethod,
@@ -475,6 +480,13 @@ pub struct PollState {
 }
 
 pub struct App {
+    /// The loading overlay (startup, account switch, login); None = hidden.
+    pub loading: Option<crate::loading::Loading>,
+    /// Title for the overlay of the current sign-in flow.
+    loading_title: Option<String>,
+    /// Every stage the overlay showed (tests).
+    #[cfg(test)]
+    pub loading_trace: Vec<String>,
     pub store: Store,
     pub config: Config,
     pub rt: tokio::runtime::Handle,
@@ -720,6 +732,7 @@ async fn login_task(
     opts: ClientOptions,
     session: Option<Session>,
     cursor_token: Option<String>,
+    progress: Option<(mpsc::UnboundedSender<Event>, u64)>,
 ) -> std::result::Result<LoginOk, String> {
     let es = |e: gw::Error| e.to_string();
     let (client, session): (Arc<dyn ApiClient>, Session) = if mock {
@@ -740,6 +753,12 @@ async fn login_task(
         let s = c.session();
         (Arc::new(GatewayApi::new(c)), s)
     };
+    if let Some((tx, epoch)) = &progress {
+        let _ = tx.send(Event::LoginStage {
+            epoch: *epoch,
+            stage: crate::loading::Stage::LoadingBots,
+        });
+    }
     // There is no whoami call; listAgents validates the credential.
     let bots = client.list_bots().await.map_err(es)?;
     let session = client.take_refreshed_session().unwrap_or(session);
@@ -776,6 +795,10 @@ impl App {
         let keymap_path = crate::keymap::user_path(&store.dir);
         let (keymap, _keymap_err) = crate::keymap::load(&keymap_path, None);
         Ok(Self {
+            loading: None,
+            loading_title: None,
+            #[cfg(test)]
+            loading_trace: vec![],
             store,
             config,
             rt,
@@ -1036,6 +1059,13 @@ impl App {
     }
 
     pub fn handle(&mut self, ev: Event) {
+        // Progress, not a task result: does not count against `inflight`.
+        if let Event::LoginStage { epoch, stage } = ev {
+            if epoch == self.epoch && self.loading.is_some() {
+                self.loading_stage(stage);
+            }
+            return;
+        }
         self.inflight = self.inflight.saturating_sub(1);
         match ev {
             Event::Login {
@@ -1100,6 +1130,15 @@ impl App {
                         self.apply_bots(bots);
                         // New credential: poll the open chat right away.
                         self.poll_now();
+                        if self.loading.is_some() {
+                            match self.active_bot() {
+                                Some(b) if !(b.team && b.viewer_session_id.is_none()) => {
+                                    let n = b.name.clone();
+                                    self.loading_stage(crate::loading::Stage::LoadingChat(n));
+                                }
+                                _ => self.loading_done(),
+                            }
+                        }
                         if !before.is_empty() {
                             let d = crate::api::diff_bots(&before, &self.all_bots);
                             if !d.is_empty() {
@@ -1114,6 +1153,7 @@ impl App {
                         let hint = crate::help::hint_for_error(&e)
                             .map(|h| format!(" → {h}"))
                             .unwrap_or_else(|| " → /help login".into());
+                        let fail = format!("Sign-in failed: {e}{hint}");
                         match source {
                             LoginSource::Interactive => {
                                 self.error(format!("Login failed: {e}{hint}"))
@@ -1151,9 +1191,20 @@ impl App {
                                 self.error(format!("{TOKEN_ENV} login failed: {e}{hint}"))
                             }
                         }
+                        // A desktop re-read keeps the spinner going; otherwise show the error.
+                        if !self.connecting {
+                            let fail = match self.login_retry {
+                                Some((_, d)) if source == LoginSource::Stored => {
+                                    format!("{fail} (retrying in {}s)", d.as_secs())
+                                }
+                                _ => fail,
+                            };
+                            self.loading_fail(fail);
+                        }
                     }
                 }
             }
+            Event::LoginStage { .. } => {}
             Event::ImageLoaded { id, result } => self.on_image_loaded(id, result),
             Event::Uploaded { id, result } => self.on_uploaded(id, result),
             Event::BrowserLoaded { id, url, result } => self.on_browser_loaded(id, url, result),
@@ -1328,6 +1379,14 @@ impl App {
                     return;
                 }
                 let waiting = self.awaiting.contains_key(&bot);
+                if self.loading.as_ref().is_some_and(|l| {
+                    l.error.is_none() && matches!(l.stage, crate::loading::Stage::LoadingChat(_))
+                }) {
+                    match &result {
+                        Ok(_) => self.loading_done(),
+                        Err(e) => self.loading_fail(format!("Could not load the chat: {e}")),
+                    }
+                }
                 match result {
                     Ok(msgs) => {
                         self.last_poll_error = None;
@@ -1427,6 +1486,7 @@ impl App {
                     return;
                 }
                 self.connecting = false;
+                self.loading_done();
                 let items = choices
                     .into_iter()
                     .map(|(label, value)| crate::picker::PickItem::new(label, value))
@@ -1579,6 +1639,8 @@ impl App {
         self.login_retry = None;
         self.db_refresh.1 = None;
         self.connecting = false;
+        self.loading = None;
+        self.loading_title = None;
         self.all_bots.clear();
         self.bots.clear();
         self.active = None;
@@ -1608,6 +1670,60 @@ impl App {
         Ok(())
     }
 
+    // ------------------------------------------------------------ loading overlay
+
+    /// Show (or advance) the loading overlay at `stage`.
+    pub(crate) fn loading_stage(&mut self, stage: crate::loading::Stage) {
+        let title = self
+            .loading_title
+            .get_or_insert_with(|| "Signing in".into())
+            .clone();
+        #[cfg(test)]
+        self.loading_trace.push(stage.message());
+        match &mut self.loading {
+            Some(l) => {
+                l.title = title;
+                l.stage = stage;
+                l.error = None;
+            }
+            None => self.loading = Some(crate::loading::Loading::new(title, stage)),
+        }
+    }
+
+    /// Replace the spinner with `err` (stays until Esc or the next attempt).
+    pub(crate) fn loading_fail(&mut self, err: String) {
+        #[cfg(test)]
+        self.loading_trace.push(format!("error: {err}"));
+        let title = self
+            .loading_title
+            .get_or_insert_with(|| "Signing in".into())
+            .clone();
+        let l = self.loading.get_or_insert_with(|| {
+            crate::loading::Loading::new(title, crate::loading::Stage::LoadingBots)
+        });
+        l.error = Some(err);
+    }
+
+    /// Everything is loaded: hide the overlay.
+    pub(crate) fn loading_done(&mut self) {
+        if self.loading.take().is_some() {
+            #[cfg(test)]
+            self.loading_trace.push("done".into());
+        }
+        self.loading_title = None;
+    }
+
+    /// Esc on a failed load: hide it. Returns whether it was shown.
+    pub fn dismiss_loading(&mut self) -> bool {
+        if self.loading.as_ref().is_some_and(|l| l.error.is_some()) {
+            self.loading = None;
+            self.loading_title = None;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn switch_account(&mut self, alias: &str) -> Result<()> {
         // Release with the old account's session and install id first.
         self.presence_release();
@@ -1616,6 +1732,7 @@ impl App {
         self.reload_config()?;
         self.reload_history();
         self.info(format!("Switched to account '{}'.", self.account().alias));
+        self.loading_title = Some(format!("Switching to {}", self.account().alias));
         self.connect();
         Ok(())
     }
@@ -1646,6 +1763,7 @@ impl App {
         if let Some(e) = err {
             self.error(format!("Keymap: {e} (kept previous / default)."));
         }
+        self.loading_title = Some("Starting grokbot-tui".into());
         self.connect();
     }
 
@@ -1661,7 +1779,11 @@ impl App {
                 .filter(|u| !u.trim().is_empty())
                 .or_else(|| stored.as_ref().map(|l| l.session.gateway_url.clone()));
             let Some(url) = url else {
-                self.error(format!("{TOKEN_ENV} is set but no gateway URL: set {GATEWAY_URL_ENV} or log in once with /login gateway."));
+                let m = format!(
+                    "{TOKEN_ENV} is set but no gateway URL: set {GATEWAY_URL_ENV} or log in once with /login gateway."
+                );
+                self.loading_fail(m.clone());
+                self.error(m);
                 return;
             };
             let headers: BTreeMap<String, String> = match std::env::var(GATEWAY_HEADERS_ENV) {
@@ -1669,9 +1791,11 @@ impl App {
                     match serde_json::from_str::<BTreeMap<String, String>>(&h) {
                         Ok(m) => m,
                         Err(e) => {
-                            self.error(format!(
+                            let m = format!(
                                 "{GATEWAY_HEADERS_ENV} must be a JSON object of strings: {e}"
-                            ));
+                            );
+                            self.loading_fail(m.clone());
+                            self.error(m);
                             return;
                         }
                     }
@@ -1695,6 +1819,7 @@ impl App {
                 );
             }
         } else {
+            self.loading_done();
             self.info(format!(
                 "Account '{}' is not logged in. Recommended: sign in to the Grok Bot desktop app, then /login desktop. Other options: /help login · keys: F1",
                 self.account().alias
@@ -1724,13 +1849,23 @@ impl App {
             && !self.mock
             && let Err(e) = self.opts.policy.check_gateway(&s.gateway_url)
         {
+            self.loading_fail(e.clone());
             self.error(e);
             return;
         }
         self.connecting = true;
+        let stage = match (&method, &source, &session) {
+            (LoginMethod::Cursor, _, None) => crate::loading::Stage::ExchangingCursor,
+            (LoginMethod::Gateway, LoginSource::Interactive, Some(s)) => {
+                crate::loading::Stage::CheckingGateway(host_of(&s.gateway_url).to_string())
+            }
+            _ => crate::loading::Stage::SigningIn(self.account().alias.clone()),
+        };
+        self.loading_stage(stage);
         let (epoch, mock, opts) = (self.epoch, self.mock, self.opts.clone());
+        let progress = Some((self.tx.clone(), epoch));
         self.spawn(async move {
-            let result = login_task(mock, opts, session, cursor_token.clone()).await;
+            let result = login_task(mock, opts, session, cursor_token.clone(), progress).await;
             Event::Login {
                 epoch,
                 method,
@@ -1750,7 +1885,9 @@ impl App {
         // Refresh detected desktop app version right before EnsureSandBox (env/prefs still win).
         self.client_version_source = apply_client_identity(&mut self.opts, &self.config, true);
         self.connecting = true;
+        self.loading_stage(crate::loading::Stage::ReadingDesktop);
         let (epoch, mock, opts) = (self.epoch, self.mock, self.opts.clone());
+        let progress = Some((self.tx.clone(), epoch));
         let reader = self.desktop_reader.clone();
         let lister = self.desktop_lister.clone();
         let ask = source == LoginSource::Interactive && entry.is_none();
@@ -1777,13 +1914,21 @@ impl App {
                 .and_then(|(r, _)| r.map_err(|e| desktop_error_text(&e)));
             let (result, desktop_entry) = match read {
                 Ok((gw::desktop::DesktopCredential::Session(session), stored)) => (
-                    login_task(mock, opts, Some(session), None).await,
+                    login_task(mock, opts, Some(session), None, progress).await,
                     stored.or(entry),
                 ),
                 Ok((gw::desktop::DesktopCredential::CursorToken(tok), stored)) => (
+                    {
+                        if let Some((tx, ep)) = &progress {
+                            let _ = tx.send(Event::LoginStage {
+                                epoch: *ep,
+                                stage: crate::loading::Stage::ExchangingCursor,
+                            });
+                        }
                     // Exchange like `/login cursor`, but do NOT persist the Cursor token:
                     // on 401 we re-read sand-secrets instead.
-                    login_task(mock, opts, None, Some(tok)).await,
+                    login_task(mock, opts, None, Some(tok), progress).await
+                    },
                     stored.or(entry),
                 ),
                 Err(e) => (Err(e), entry),
@@ -4735,6 +4880,105 @@ pub mod tests {
         assert!(app.user_label.is_none());
         assert!(app.store.load_login().unwrap().is_none());
         assert_eq!(app.store.messages("coder").unwrap().len(), 2, "chats kept");
+    }
+
+    fn assert_full_load(trace: &[String], first: &str) {
+        assert_eq!(trace.first().map(String::as_str), Some(first), "{trace:?}");
+        assert!(trace.iter().any(|t| t == "Loading bots…"), "{trace:?}");
+        assert!(
+            trace.iter().any(|t| t.starts_with("Loading chat with ")),
+            "{trace:?}"
+        );
+        assert_eq!(trace.last().map(String::as_str), Some("done"), "{trace:?}");
+    }
+
+    #[test]
+    fn loading_overlay_gateway_login_stages() {
+        use crate::loading::Stage;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        type_line(&mut app, "/login gateway https://box.cursorvm.com");
+        type_line(&mut app, "tok");
+        let l = app.loading.as_ref().expect("overlay while signing in");
+        assert_eq!(l.stage, Stage::CheckingGateway("box.cursorvm.com".into()));
+        assert_eq!(l.title, "Signing in");
+        settle(&mut app);
+        assert!(app.loading.is_none());
+        assert_full_load(&app.loading_trace, "Checking gateway box.cursorvm.com…");
+        assert_eq!(app.inflight, 0);
+    }
+
+    #[test]
+    fn loading_overlay_cursor_exchange_and_error_dismiss() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        type_line(&mut app, "/login cursor");
+        type_line(&mut app, "bad");
+        assert_eq!(
+            app.loading.as_ref().unwrap().stage,
+            crate::loading::Stage::ExchangingCursor
+        );
+        settle(&mut app);
+        let err = app.loading.as_ref().and_then(|l| l.error.clone());
+        assert!(
+            err.is_some_and(|e| e.starts_with("Sign-in failed")),
+            "{:?}",
+            app.loading_trace
+        );
+        assert!(app.dismiss_loading());
+        assert!(app.loading.is_none());
+        assert!(!app.dismiss_loading());
+        app.loading_trace.clear();
+        type_line(&mut app, "/login cursor");
+        type_line(&mut app, "cur");
+        settle(&mut app);
+        assert!(app.loading.is_none());
+        assert_full_load(&app.loading_trace, "Exchanging Cursor token…");
+    }
+
+    #[test]
+    fn loading_overlay_on_startup_with_saved_login() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, d) = test_app(&rt);
+        mock_login(&mut app, "t");
+        drop(app);
+        let store = Store::open(d.path().join("gb"), None).unwrap();
+        let mut app = App::new(store, rt.handle().clone(), true).unwrap();
+        app.init();
+        let l = app.loading.as_ref().expect("overlay at startup");
+        assert_eq!(l.title, "Starting grokbot-tui");
+        settle(&mut app);
+        assert!(app.loading.is_none());
+        assert_full_load(&app.loading_trace, "Signing in to default…");
+    }
+
+    #[test]
+    fn loading_overlay_hidden_when_not_logged_in() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        app.init();
+        assert!(app.loading.is_none());
+    }
+
+    #[test]
+    fn loading_overlay_on_account_switch() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "t");
+        type_line(&mut app, "/account add work");
+        type_line(&mut app, "/account use work");
+        // Not logged in yet: no overlay left hanging.
+        assert!(app.loading.is_none());
+        mock_login(&mut app, "w");
+        type_line(&mut app, "/account use default");
+        let l = app.loading.as_ref().expect("overlay while switching");
+        assert_eq!(l.title, "Switching to default");
+        app.loading_trace.clear();
+        app.loading_trace.push(l.stage.message());
+        settle(&mut app);
+        assert!(app.loading.is_none());
+        assert_full_load(&app.loading_trace, "Signing in to default…");
+        assert!(app.user_label.is_some());
     }
 
     #[test]

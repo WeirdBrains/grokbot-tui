@@ -33,6 +33,7 @@ mod live_bots_test;
 mod live_cards_survey;
 #[cfg(test)]
 mod live_presence_test;
+mod loading;
 mod markdown;
 mod mcp;
 mod media;
@@ -514,6 +515,12 @@ fn tooltip_hit(
 }
 
 fn handle_event(app: &mut App, ev: Event) -> bool {
+    if let Event::Key(k) = &ev
+        && k.code == KeyCode::Esc
+        && app.dismiss_loading()
+    {
+        return true;
+    }
     if let Event::Mouse(m) = &ev {
         app.mouse_pos = Some((m.column, m.row));
         if matches!(m.kind, MouseEventKind::Down(_)) {

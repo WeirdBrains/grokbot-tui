@@ -84,6 +84,8 @@ download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
 tooltip = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
+loading = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
+spinner = { fg = "@accent", bold = true }
 toast = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
 toast_warn = { fg = "@on_accent", bg = "@warn", border = "@warn" }
 toast_error = { fg = "@on_accent", bg = "@danger", border = "@danger" }
@@ -189,6 +191,8 @@ download_dir = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
 tooltip = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
+loading = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
+spinner = { fg = "@accent", bold = true }
 toast = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
 toast_warn = { fg = "@on_accent", bg = "@warn", border = "@warn" }
 toast_error = { fg = "@on_accent", bg = "@danger", border = "@danger" }

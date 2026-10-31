@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.32.0] - 2026-10-31
+
+### Added
+- Loading overlay with an animated braille spinner and a stage message at startup, on
+  account switch (`/account use`) and during sign-in (`/login gateway`, `/login cursor`'s
+  EnsureSandBox exchange, `/login desktop`, saved-login restore): *Signing in to <account>…*,
+  *Checking gateway <host>…*, *Exchanging Cursor token…*, *Reading the desktop app
+  session…*, *Loading bots…*, *Loading chat with <bot>…*. Non-blocking: input and quit keys
+  keep working.
+- Errors replace the spinner with a retry hint (Esc dismisses) instead of hanging.
+- Pref `ui.spinner` (default on; `off` = static glyph). Theme parts `loading` and `spinner`.
+
 ## [1.31.0] - 2026-10-31
 
 ### Added

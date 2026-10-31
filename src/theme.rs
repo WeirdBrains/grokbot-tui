@@ -253,6 +253,8 @@ style_slots! {
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
     MENU_ACTIVE = "menu_active", "Screen and header", false, "Open / focused menu label";
     TOOLTIP = "tooltip", "Modals", true, "Hover tooltip frame and text";
+    LOADING = "loading", "Modals", true, "Loading overlay (startup, account switch, login) frame and message";
+    SPINNER = "spinner", "Modals", false, "Loading overlay: the spinner glyph";
     TOAST = "toast", "Modals", true, "Notification toast (info/message)";
     TOAST_WARN = "toast_warn", "Modals", true, "Warning toast";
     TOAST_ERROR = "toast_error", "Modals", true, "Error toast";
@@ -468,6 +470,13 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
             border: Some(r(c::ACCENT)),
             ..StyleSpec::default()
         },
+        s::LOADING => StyleSpec {
+            fg: Some(r(c::MODAL_TEXT)),
+            bg: Some(r(c::MODAL_BACKGROUND)),
+            border: Some(r(c::ACCENT)),
+            ..StyleSpec::default()
+        },
+        s::SPINNER => bold(fg(c::ACCENT)),
         s::TOAST => StyleSpec {
             fg: Some(r(c::MODAL_TEXT)),
             bg: Some(r(c::MODAL_BACKGROUND)),
@@ -751,6 +760,12 @@ pub fn menu_bar() -> Style {
 }
 pub fn menu_active() -> Style {
     st(slot::MENU_ACTIVE)
+}
+pub fn loading() -> Style {
+    st(slot::LOADING)
+}
+pub fn spinner() -> Style {
+    st(slot::SPINNER)
 }
 pub fn tooltip() -> Style {
     st(slot::TOOLTIP)
@@ -1124,6 +1139,8 @@ mod tests {
                     || s.key == "menu_bar"
                     || s.key == "menu_active"
                     || s.key == "tooltip"
+                    || s.key == "loading"
+                    || s.key == "spinner"
                     || s.key.starts_with("toast")
                     || s.key.starts_with("mode_n")
                     || s.key.starts_with("mode_i")

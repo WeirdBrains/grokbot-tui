@@ -3394,6 +3394,8 @@ mod tests {
                 "download_dir",
                 "menu_active",
                 "tooltip",
+                "loading",
+                "spinner",
                 "toast",
                 "toast_warn",
                 "toast_error"

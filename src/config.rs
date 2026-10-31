@@ -122,6 +122,8 @@ pub const PREF_STATUS_PROMPT: &str = "commands.status_prompt";
 pub const DEFAULT_STATUS_PROMPT: &str =
     "Where are we now? Give me a brief status of your current tasks.";
 
+/// Animate the loading spinner (global, on|off; off = static glyph, reduced motion).
+pub const PREF_UI_SPINNER: &str = "ui.spinner";
 /// Draw images inline in chat bubbles (global).
 pub const PREF_IMAGES_INLINE: &str = "images.inline";
 /// Height cap for inline images, in rows (global, 2..=60).
@@ -190,6 +192,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_SIDEBAR_COLLAPSED,
     PREF_ATTACHMENTS_PANEL,
     PREF_CLICK_TO_REACT,
+    PREF_UI_SPINNER,
     PREF_IMAGES_INLINE,
     PREF_IMAGES_INLINE_MAX_ROWS,
     PREF_MEDIA_INLINE,
@@ -304,6 +307,8 @@ pub struct Config {
     pub open_with: OpenWith,
     /// In SSH, links always use the built-in browser (`links.ssh_behavior = builtin`).
     pub ssh_builtin: bool,
+    /// `ui.spinner`: animate the loading spinner.
+    pub spinner: bool,
     /// `images.inline`.
     pub images_inline: bool,
     /// `images.inline_max_rows`.
@@ -360,6 +365,7 @@ impl Default for Config {
             ssh_builtin: true,
             claim_presence: false,
             idle_minutes: DEFAULT_IDLE_MINUTES,
+            spinner: true,
             images_inline: true,
             inline_max_rows: 12,
             media_inline: true,
@@ -401,6 +407,7 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_LINKS_SSH_BEHAVIOR, "builtin".to_string()),
         (PREF_CLAIM_PRESENCE, c.claim_presence.to_string()),
         (PREF_IDLE_MINUTES, c.idle_minutes.to_string()),
+        (PREF_UI_SPINNER, "on".to_string()),
         (PREF_IMAGES_INLINE, "on".to_string()),
         (PREF_IMAGES_INLINE_MAX_ROWS, c.inline_max_rows.to_string()),
         (PREF_MEDIA_INLINE, "on".to_string()),
@@ -476,6 +483,9 @@ impl Config {
                 .and_then(|v| v.trim().parse().ok())
                 .filter(|n| (1..=240).contains(n))
                 .unwrap_or(d.idle_minutes),
+            spinner: o(PREF_UI_SPINNER)
+                .map(|v| !matches!(v.trim(), "off" | "false" | "0" | "no"))
+                .unwrap_or(d.spinner),
             images_inline: o(PREF_IMAGES_INLINE)
                 .map(|v| !matches!(v.trim(), "off" | "false" | "0" | "no"))
                 .unwrap_or(d.images_inline),
