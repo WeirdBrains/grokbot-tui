@@ -1,0 +1,13 @@
+# <data dir>/mcp.toml (default data dir: ~/.grokbot-tui). All keys are optional.
+[mcp.server]
+# Bot ids or names MCP clients may use. Empty = all bots.
+allowed_bots = []
+# true = refuse send_message and answer_card (same as `mcp serve --read-only`).
+read_only = false
+# Address for `mcp serve --http` with no ADDR. Loopback only.
+http_addr = "127.0.0.1:8765"
+# ~/.cache/grokbot-tui/mcp-audit.log: tool, bot id, card kind/action, ok/error. Never
+# message text, card answers, secrets or tokens.
+audit = true
+# Where download_attachment saves files (default: your Downloads folder).
+# download_dir = "~/Downloads/grokbot"

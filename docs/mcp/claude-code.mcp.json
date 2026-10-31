@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "grokbot": {
+      "command": "grokbot-tui",
+      "args": ["--account", "default", "mcp", "serve", "--stdio"]
+    },
+    "grokbot-http": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp",
+      "headers": { "Authorization": "Bearer ${GROKBOT_TUI_MCP_TOKEN}" }
+    }
+  }
+}

@@ -34,6 +34,7 @@ mod live_cards_survey;
 #[cfg(test)]
 mod live_presence_test;
 mod markdown;
+mod mcp;
 mod media;
 mod menubar;
 mod notify;
@@ -79,6 +80,18 @@ struct Cli {
     /// and exit.
     #[arg(long)]
     list_themes: bool,
+    #[command(subcommand)]
+    cmd: Option<Cmd>,
+}
+
+#[derive(clap::Subcommand)]
+enum Cmd {
+    /// MCP server for other agents (Claude Code, Cursor, ...): `mcp serve [--stdio|--http [ADDR]]`,
+    /// `mcp token`, `mcp config`.
+    Mcp {
+        #[command(subcommand)]
+        cmd: mcp::McpCmd,
+    },
 }
 
 /// Environment variable renames applied at startup, in order: `(old name, new name)`.
@@ -142,6 +155,9 @@ fn main() -> Result<()> {
         eprintln!("grokbot-tui: {n}");
     }
     let store = Store::open(dir, cli.account.as_deref())?;
+    if let Some(Cmd::Mcp { cmd }) = cli.cmd {
+        return mcp::run(store, cli.mock, cmd);
+    }
     let themes_dir = themes::user_dir(&store.dir);
     if cli.list_themes || (cli.theme.is_some() && !cli.mock) {
         // First run (no themes yet): fetch the default before listing or checking, waiting

@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.31.0] - 2026-10-31
+
+### Added
+- MCP server: `grokbot-tui mcp serve [--stdio | --http [ADDR]] [--read-only]`, built on
+  the official `rmcp` SDK. Tools `list_bots`, `get_bot`, `send_message`, `read_messages`,
+  `wait_for_reply`, `list_pending_cards`, `answer_card` (all card kinds: questions,
+  approvals, local tool permissions, secrets, forms, drafts), `list_attachments`,
+  `download_attachment`; resources `grokbot://bots` and `grokbot://bots/{id}/transcript`.
+- Streamable HTTP transport on loopback only, behind a bearer token kept in
+  `<data dir>/mcp-http-token` (0600). `grokbot-tui mcp token [--rotate]` prints it;
+  `grokbot-tui mcp config` shows the settings in use.
+- `<data dir>/mcp.toml` `[mcp.server]`: `allowed_bots`, `read_only`, `http_addr`,
+  `audit`, `download_dir`. Audit log at `~/.cache/grokbot-tui/mcp-audit.log` (no message
+  bodies, answers, secrets, tokens or URLs).
+- Example client configs for Claude Code and Cursor in `docs/mcp/`.
+
 ## [1.30.1] - 2026-10-30
 
 ### Changed

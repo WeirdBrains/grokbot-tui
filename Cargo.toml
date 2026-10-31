@@ -1,6 +1,6 @@
 [package]
 name = "grokbot-tui"
-version = "1.30.1"
+version = "1.31.0"
 edition = "2024"
 rust-version = "1.89"
 license = "GPL-3.0-or-later"
@@ -55,7 +55,7 @@ path = "src/main.rs"
 grokbot_api = { version = "1.2", features = ["desktop-session"] }
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 ratatui-lipgloss = "1.1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "process", "fs", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "process", "fs", "io-util", "net", "signal"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
@@ -71,6 +71,9 @@ toml = "0.9"
 # shipped default theme when no theme files are installed.
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 emojis = "0.9.1"
+# MCP server (`grokbot-tui mcp serve`, 1.31.0): stdio + streamable HTTP on localhost.
+rmcp = { version = "3.8", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 unicode-segmentation = "1.13.3"
 pulldown-cmark = { version = "0.13.5", default-features = false }
 ratatui-image = { version = "11.1", default-features = false, features = ["crossterm"] }
@@ -91,6 +94,7 @@ libc = "0.2"
 [dev-dependencies]
 tempfile = "3"
 wiremock = "0.6"
+rmcp = { version = "3.8", default-features = false, features = ["client", "server", "transport-async-rw"] }
 
 # The profile that 'dist' will build with
 [profile.dist]
