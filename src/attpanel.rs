@@ -488,15 +488,9 @@ impl App {
                 if it.kind == gw::AttachmentKind::Image && self.view_image(Some(url)) {
                     return;
                 }
-                if url.starts_with("http://") || url.starts_with("https://") {
-                    if textual(&it.name) || !url.contains('?') {
-                        self.open_browser(Some(url));
-                    } else {
-                        self.open_system(url);
-                    }
-                } else {
-                    self.open_system(url);
-                }
+                let text = textual(&it.name) || !url.contains('?');
+                let url = url.clone();
+                self.open_resource(&url, text);
             }
         }
     }

@@ -464,11 +464,7 @@ impl App {
             return;
         }
         if then == Then::View {
-            if crate::attpanel::textual(&name) {
-                self.open_browser(Some(&r.url));
-            } else {
-                self.open_system(&r.url);
-            }
+            self.open_resource(&r.url, crate::attpanel::textual(&name));
             return;
         }
         self.open_download_named(&r.url, &name);

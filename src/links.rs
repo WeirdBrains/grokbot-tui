@@ -48,6 +48,23 @@ impl App {
         }
     }
 
+    /// Open a file/attachment URL (1.33.0): follows `links.open_with` like any link, but
+    /// non-text files (`textual` false) go to the system opener even with the built-in
+    /// browser selected, since it can only show text.
+    pub fn open_resource(&mut self, url: &str, textual: bool) {
+        let how = choose(
+            self.config.open_with,
+            false,
+            self.ssh,
+            self.config.ssh_builtin,
+        );
+        if how == OpenWith::Builtin && textual && is_web(url) {
+            self.open_browser(Some(url));
+        } else {
+            self.open_system(url);
+        }
+    }
+
     /// Launch the system opener. In SSH it asks first: repeat within 5 s to confirm.
     pub fn open_system(&mut self, url: &str) {
         let label = shown(url);

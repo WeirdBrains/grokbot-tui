@@ -250,6 +250,9 @@ style_slots! {
     COPY_BUTTON = "copy_button", "Chat", false, "The [⧉] copy button on bubbles and code blocks";
     DOWNLOAD_PATH = "download_path", "Modals", false, "Download modal: the save-path field";
     DOWNLOAD_DIR = "download_dir", "Modals", false, "Download modal: directories in the folder browser";
+    SETTINGS_FRAME = "settings_frame", "Modals", true, "Settings page frame and text";
+    SETTINGS_TAB = "settings_tab", "Modals", false, "Settings page: the selected tab and row";
+    SETTINGS_BUTTON = "settings_button", "Screen and header", false, "Header: the [⚙ Settings] button";
     MENU_BAR = "menu_bar", "Screen and header", false, "Menu bar labels";
     MENU_ACTIVE = "menu_active", "Screen and header", false, "Open / focused menu label";
     TOOLTIP = "tooltip", "Modals", true, "Hover tooltip frame and text";
@@ -405,6 +408,19 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
             ..fg(c::TEXT)
         },
         s::DOWNLOAD_DIR => bold(fg(c::ACCENT)),
+        s::SETTINGS_FRAME => StyleSpec {
+            fg: Some(r(c::MODAL_TEXT)),
+            bg: Some(r(c::MODAL_BACKGROUND)),
+            border: Some(r(c::ACCENT)),
+            ..StyleSpec::default()
+        },
+        s::SETTINGS_TAB => StyleSpec {
+            fg: Some(r(c::ON_ACCENT)),
+            bg: Some(r(c::ACCENT)),
+            bold: true,
+            ..StyleSpec::default()
+        },
+        s::SETTINGS_BUTTON => bold(fg(c::ACCENT)),
         s::REACTION_PILL => StyleSpec {
             bg: Some(r(c::HEADER)),
             fg: Some(r(c::TEXT)),
@@ -859,6 +875,15 @@ pub fn card_done() -> Style {
 pub fn copy_button() -> Style {
     st(slot::COPY_BUTTON)
 }
+pub fn settings_frame() -> Style {
+    st(slot::SETTINGS_FRAME)
+}
+pub fn settings_tab() -> Style {
+    st(slot::SETTINGS_TAB)
+}
+pub fn settings_button() -> Style {
+    st(slot::SETTINGS_BUTTON)
+}
 pub fn card_button() -> Style {
     st(slot::CARD_BUTTON)
 }
@@ -1141,6 +1166,7 @@ mod tests {
                     || s.key == "tooltip"
                     || s.key == "loading"
                     || s.key == "spinner"
+                    || s.key.starts_with("settings_")
                     || s.key.starts_with("toast")
                     || s.key.starts_with("mode_n")
                     || s.key.starts_with("mode_i")

@@ -158,6 +158,14 @@ pub fn registry() -> Registry {
                 run: browse,
             },
             Command {
+                name: "settings",
+                aliases: &[],
+                usage: "/settings [general|computer|vault|usage|updates|bot|local]",
+                help: "Open the Settings page for this account and bot (also the header [⚙ Settings] button, Alt-,)",
+                complete: settings_complete,
+                run: settings,
+            },
+            Command {
                 name: "links",
                 aliases: &[],
                 usage: "/links [builtin|system|toggle]",
@@ -1581,6 +1589,29 @@ fn switch_account(app: &mut App, args: &str) -> Result<()> {
         }
     ));
     app.open_account_picker();
+    Ok(())
+}
+
+fn settings_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names([
+            "general", "computer", "vault", "usage", "updates", "bot", "local",
+        ])
+    } else {
+        vec![]
+    }
+}
+
+/// `/settings [tab]`.
+fn settings(app: &mut App, arg: &str) -> Result<()> {
+    let tab = crate::settings::tab_index(arg);
+    if tab.is_none() && !arg.trim().is_empty() {
+        anyhow::bail!(
+            "unknown settings tab '{}': try general, computer, vault, usage, updates, bot or local",
+            arg.trim()
+        );
+    }
+    app.open_settings(tab);
     Ok(())
 }
 

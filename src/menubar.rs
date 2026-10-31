@@ -30,7 +30,7 @@ pub const MENUS: &[Menu] = &[
     Menu {
         label: "Account",
         hint: 'a',
-        items: &["login", "logout", "whoami", "account", "switch"],
+        items: &["login", "logout", "whoami", "account", "switch", "settings"],
     },
     Menu {
         label: "View",

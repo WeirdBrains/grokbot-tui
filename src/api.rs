@@ -154,6 +154,18 @@ pub trait ApiClient: Send + Sync {
     fn take_list_notice(&self) -> Option<String> {
         None
     }
+    /// This bot's settings (Settings page, 1.33.0). Read-only `listAgents`.
+    async fn agent_settings(&self, _bot_id: &str) -> gw::Result<AgentSettings> {
+        Err(gw::Error::Validation(
+            "bot settings are not supported by this client".into(),
+        ))
+    }
+    /// Write one bot setting the gateway supports (Settings page, 1.33.0).
+    async fn update_agent_setting(&self, _bot_id: &str, _change: AgentChange) -> gw::Result<()> {
+        Err(gw::Error::Validation(
+            "bot settings are not supported by this client".into(),
+        ))
+    }
     /// Interactive cards seen by the last transcript call for `bot_id` (1.29.0).
     fn take_cards(&self, _bot_id: &str) -> Vec<crate::cards::Card> {
         vec![]
@@ -241,6 +253,104 @@ impl GatewayApi {
             .collect();
         self.cards.lock().unwrap().insert(bot_id.into(), c);
     }
+}
+
+/// A bot's own settings, read from its `listAgents` record (1.33.0 Settings page).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AgentSettings {
+    pub id: String,
+    pub name: String,
+    pub title: String,
+    pub description: String,
+    pub avatar_shape: String,
+    pub avatar_color: String,
+    /// `notifyOnUpdatesEnabled` (writable: `setAgentNotifyOnUpdates`).
+    pub notify_on_updates: Option<bool>,
+    /// `notificationsEnabled` (read-only: no setter in the gateway API).
+    pub notifications: Option<bool>,
+    /// `isHiddenFromSidebar` (writable: `setAgentHiddenFromSidebar`).
+    pub hidden: Option<bool>,
+    /// `voiceId` / `voiceLanguage` / `voiceSpeed` (read-only).
+    pub voice: Option<String>,
+    /// `harness` (read-only).
+    pub harness: Option<String>,
+}
+
+impl AgentSettings {
+    /// Parse one raw `listAgents` record (keys surveyed live in 1.33.0).
+    pub fn from_raw(v: &serde_json::Value) -> Option<Self> {
+        let s = |k: &str| {
+            v.get(k)
+                .and_then(|x| x.as_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+        let b = |k: &str| v.get(k).and_then(|x| x.as_bool());
+        let id = v
+            .get("id")
+            .or_else(|| v.get("agentId"))
+            .and_then(|x| x.as_str())
+            .filter(|x| !x.is_empty())?
+            .to_string();
+        let voice = {
+            let parts: Vec<String> = ["voiceId", "voiceLanguage", "voiceSpeed"]
+                .iter()
+                .filter_map(|k| match v.get(*k)? {
+                    serde_json::Value::String(x) if !x.is_empty() => Some(x.clone()),
+                    serde_json::Value::Number(n) => Some(format!("{n}×")),
+                    _ => None,
+                })
+                .collect();
+            (!parts.is_empty()).then(|| parts.join(" · "))
+        };
+        let harness = match v.get("harness") {
+            Some(serde_json::Value::String(x)) if !x.is_empty() => Some(x.clone()),
+            _ => None,
+        };
+        Some(Self {
+            id,
+            name: gw::sanitize_text(&s("name")),
+            title: gw::sanitize_text(&s("title")),
+            description: gw::sanitize_text(&s("description")),
+            avatar_shape: s("avatarShape"),
+            avatar_color: s("avatarColor"),
+            notify_on_updates: b("notifyOnUpdatesEnabled").or_else(|| b("notifyOnAgentUpdates")),
+            notifications: b("notificationsEnabled"),
+            hidden: b("isHiddenFromSidebar").or_else(|| b("hiddenFromSidebar")),
+            voice,
+            harness,
+        })
+    }
+
+    /// The profile `updateAgent` needs (it always sends name + description).
+    pub fn profile(&self) -> gw::AgentProfile {
+        gw::AgentProfile {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            title: Some(self.title.clone()),
+            avatar_shape: (!self.avatar_shape.is_empty()).then(|| self.avatar_shape.clone()),
+            avatar_color: (!self.avatar_color.is_empty()).then(|| self.avatar_color.clone()),
+        }
+    }
+}
+
+/// One change to a bot's settings (only what the gateway API can write).
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentChange {
+    /// `updateAgent` (name, title, description, avatar shape/color).
+    Profile(gw::AgentProfile),
+    /// `setAgentNotifyOnUpdates`.
+    NotifyOnUpdates(bool),
+    /// `setAgentHiddenFromSidebar`.
+    Hidden(bool),
+}
+
+/// The agent array from a raw `listAgents` answer (an array, or `{agents: [...]}`).
+pub fn raw_agents(raw: &serde_json::Value) -> Vec<serde_json::Value> {
+    raw.as_array()
+        .or_else(|| raw.get("agents").and_then(|a| a.as_array()))
+        .cloned()
+        .unwrap_or_default()
 }
 
 pub fn bot_from_agent(a: &gw::Agent) -> Bot {
@@ -417,6 +527,36 @@ pub fn messages_from_entries(entries: &[gw::Entry]) -> Vec<Message> {
 
 #[async_trait]
 impl ApiClient for GatewayApi {
+    async fn agent_settings(&self, bot_id: &str) -> gw::Result<AgentSettings> {
+        let raw = self
+            .client
+            .call_raw("listAgents", serde_json::json!({}))
+            .await?;
+        raw_agents(&raw)
+            .iter()
+            .filter_map(AgentSettings::from_raw)
+            .find(|a| a.id == bot_id)
+            .ok_or_else(|| {
+                gw::Error::Validation(
+                    "this bot isn't on your box (a team bot's settings belong to its owner)".into(),
+                )
+            })
+    }
+    async fn update_agent_setting(&self, bot_id: &str, change: AgentChange) -> gw::Result<()> {
+        match change {
+            AgentChange::Profile(p) => self.client.update_agent(bot_id, &p).await.map(|_| ()),
+            AgentChange::NotifyOnUpdates(on) => self
+                .client
+                .set_agent_notify_on_updates(bot_id, on)
+                .await
+                .map(|_| ()),
+            AgentChange::Hidden(h) => self
+                .client
+                .set_agent_hidden_from_sidebar(bot_id, h)
+                .await
+                .map(|_| ()),
+        }
+    }
     async fn acceptance(&self, bot_id: &str, nonce: &str) -> gw::Result<gw::AcceptanceStatus> {
         self.client.prompt_acceptance_status(bot_id, nonce).await
     }
@@ -602,6 +742,9 @@ pub struct MockClient {
     /// Raw card entries per bot (mock prompts `card <kind>`), and card calls made.
     cards: Mutex<HashMap<String, Vec<serde_json::Value>>>,
     pub card_calls: Mutex<Vec<(String, serde_json::Value)>>,
+    /// Per-bot settings edited through the Settings page, and the writes made.
+    settings: Mutex<HashMap<String, AgentSettings>>,
+    pub setting_calls: Mutex<Vec<(String, AgentChange)>>,
 }
 
 impl MockClient {
@@ -617,6 +760,8 @@ impl MockClient {
             reply_delay: Duration::from_millis(300),
             cards: Mutex::new(HashMap::new()),
             card_calls: Mutex::new(Vec::new()),
+            settings: Mutex::new(HashMap::new()),
+            setting_calls: Mutex::new(Vec::new()),
         }
     }
 
@@ -713,6 +858,66 @@ pub fn mock_ensure_sandbox(cursor_token: &str) -> gw::Result<Session> {
 
 #[async_trait]
 impl ApiClient for MockClient {
+    async fn agent_settings(&self, bot_id: &str) -> gw::Result<AgentSettings> {
+        self.check("listAgents")?;
+        if let Some(s) = self.settings.lock().unwrap().get(bot_id) {
+            return Ok(s.clone());
+        }
+        let Some(b) = self.current_bots().into_iter().find(|b| b.id == bot_id) else {
+            return Err(gw::Error::Http {
+                method: "listAgents".into(),
+                status: 404,
+                message: "unknown agent (mock)".into(),
+            });
+        };
+        if b.team {
+            return Err(gw::Error::Validation(
+                "this bot isn't on your box (a team bot's settings belong to its owner)".into(),
+            ));
+        }
+        Ok(AgentSettings {
+            id: b.id,
+            name: b.name,
+            title: "Mock title".into(),
+            description: b.description,
+            avatar_shape: "circle".into(),
+            avatar_color: "blue".into(),
+            notify_on_updates: Some(true),
+            notifications: Some(true),
+            hidden: Some(b.hidden),
+            voice: None,
+            harness: Some("mock".into()),
+        })
+    }
+    async fn update_agent_setting(&self, bot_id: &str, change: AgentChange) -> gw::Result<()> {
+        let mut cur = self.agent_settings(bot_id).await?;
+        match &change {
+            AgentChange::Profile(p) => {
+                if p.name.trim().is_empty() {
+                    return Err(gw::Error::Validation("Name cannot be blank.".into()));
+                }
+                cur.name = p.name.trim().into();
+                cur.description = p.description.clone();
+                if let Some(t) = &p.title {
+                    cur.title = t.clone();
+                }
+                if let Some(x) = &p.avatar_shape {
+                    cur.avatar_shape = x.clone();
+                }
+                if let Some(x) = &p.avatar_color {
+                    cur.avatar_color = x.clone();
+                }
+            }
+            AgentChange::NotifyOnUpdates(on) => cur.notify_on_updates = Some(*on),
+            AgentChange::Hidden(h) => cur.hidden = Some(*h),
+        }
+        self.settings.lock().unwrap().insert(bot_id.into(), cur);
+        self.setting_calls
+            .lock()
+            .unwrap()
+            .push((bot_id.into(), change));
+        Ok(())
+    }
     fn take_cards(&self, bot_id: &str) -> Vec<crate::cards::Card> {
         self.cards
             .lock()

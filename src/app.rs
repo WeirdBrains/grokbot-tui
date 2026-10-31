@@ -400,6 +400,17 @@ pub enum Event {
     },
     /// `/bot new` finished.
     BotCreated { epoch: u64, result: gw::Result<Bot> },
+    /// Settings page: a bot's settings were read (1.33.0).
+    SettingsLoaded {
+        bot: String,
+        result: gw::Result<crate::api::AgentSettings>,
+    },
+    /// Settings page: a bot setting write finished.
+    SettingSaved {
+        bot: String,
+        label: String,
+        result: gw::Result<()>,
+    },
     /// `/bot delete` finished.
     BotDeleted {
         epoch: u64,
@@ -694,6 +705,10 @@ pub struct App {
     /// Bumped when a card's state changes (part of the feed cache key).
     pub cards_gen: u64,
     pub card_modal: Option<crate::cardmodal::CardModal>,
+    /// The Settings page (1.33.0).
+    pub settings: Option<crate::settings::Settings>,
+    /// Header: the [⚙ Settings] button.
+    pub settings_button_area: Rect,
     shell_seq: u64,
     /// Open selection modal (bots, accounts, …).
     pub picker: Option<crate::picker::Picker>,
@@ -924,6 +939,8 @@ impl App {
             cards: HashMap::new(),
             cards_gen: 0,
             card_modal: None,
+            settings: None,
+            settings_button_area: Rect::default(),
             shell_seq: 0,
             picker: None,
             client_version_source,
@@ -1265,6 +1282,8 @@ impl App {
                     Err(e) => self.error(format!("Could not create bot: {e}")),
                 }
             }
+            Event::SettingsLoaded { bot, result } => self.settings_loaded(bot, result),
+            Event::SettingSaved { bot, label, result } => self.setting_saved(bot, label, result),
             Event::BotDeleted {
                 epoch,
                 id,
@@ -2775,6 +2794,7 @@ impl App {
             || self.react_picker.is_some()
             || self.download.is_some()
             || self.card_modal.is_some()
+            || self.settings.is_some()
     }
 
     /// Load prompt history for the active account from `context.db`. A failure is shown
@@ -3243,6 +3263,10 @@ impl App {
                 if let Err(e) = self.copy_last_message() {
                     self.info(e.to_string());
                 }
+                true
+            }
+            "settings.open" => {
+                self.open_settings(None);
                 true
             }
             "agents.refresh" => {
@@ -3867,6 +3891,10 @@ impl App {
             return;
         }
         if self.media_click(col, row) {
+            return;
+        }
+        if self.settings_button_area.contains(at) {
+            self.open_settings(None);
             return;
         }
         if self.header_toggle_area.contains(at) {

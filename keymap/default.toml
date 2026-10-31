@@ -15,6 +15,7 @@
 "f9" = "view.toggle_attachments"
 "f11" = "card.open"
 "f12" = "agents.refresh"
+"alt-," = "settings.open"
 
 [mode.normal]
 "i" = "mode.insert"
@@ -27,6 +28,7 @@
 "shift-o" = "image.view"
 "x" = "message.open_other"
 "b" = "browser.open"
+"s" = "settings.open"
 "a" = "mode.insert_end"
 "v" = "mode.visual"
 ":" = "mode.command"

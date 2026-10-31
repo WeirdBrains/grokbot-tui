@@ -3392,6 +3392,8 @@ mod tests {
                 "copy_button",
                 "download_path",
                 "download_dir",
+                "settings_frame",
+                "settings_tab",
                 "menu_active",
                 "tooltip",
                 "loading",

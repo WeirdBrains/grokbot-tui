@@ -33,6 +33,8 @@ mod live_bots_test;
 mod live_cards_survey;
 #[cfg(test)]
 mod live_presence_test;
+#[cfg(test)]
+mod live_settings_survey;
 mod loading;
 mod markdown;
 mod mcp;
@@ -43,6 +45,7 @@ mod notify_rules;
 mod picker;
 mod presence;
 mod select;
+mod settings;
 mod ssh;
 mod storage;
 mod theme;
@@ -610,6 +613,7 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 && app.shell.is_none()
                 && app.history_search.is_none()
                 && app.card_modal.is_none()
+                && app.settings.is_none()
             {
                 use crate::keymap::{self, Mode};
                 if app.vim_mode == Mode::Command {
@@ -778,6 +782,18 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
             if app.card_modal.is_some() {
                 app.card_modal_key(k);
+                return true;
+            }
+            if app.settings.is_some() {
+                app.settings_key(k);
+                return true;
+            }
+            // Alt-, (any terminal) or Ctrl-, (kitty protocol): Settings.
+            if k.code == KeyCode::Char(',')
+                && k.modifiers
+                    .intersects(KeyModifiers::ALT | KeyModifiers::CONTROL)
+            {
+                app.open_settings(None);
                 return true;
             }
             if k.code == KeyCode::F(11) && app.keys_scheme_default() {
@@ -1031,6 +1047,11 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             }
         }
         Event::Mouse(m) if app.browser.is_some() && app.download.is_none() => app.browser_mouse(m),
+        Event::Mouse(m) if app.settings.is_some() && app.card_modal.is_none() => {
+            if let MouseEventKind::Down(MouseButton::Left) = m.kind {
+                app.settings_click(m.column, m.row);
+            }
+        }
         Event::Mouse(m) if app.card_modal.is_some() => {
             if let MouseEventKind::Down(MouseButton::Left) = m.kind {
                 app.card_modal_click(m.column, m.row);

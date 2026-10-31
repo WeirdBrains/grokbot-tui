@@ -81,6 +81,9 @@ card_button = { fg = "@accent", bold = true, underline = true }
 copy_button = { fg = "@muted" }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
+settings_frame = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
+settings_tab = { fg = "@on_accent", bg = "@accent", bold = true }
+settings_button = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
 tooltip = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
@@ -188,6 +191,9 @@ card_button = { fg = "@accent", bold = true, underline = true }
 copy_button = { fg = "@muted" }
 download_path = { fg = "@text", bg = "@header" }
 download_dir = { fg = "@accent", bold = true }
+settings_frame = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
+settings_tab = { fg = "@on_accent", bg = "@accent", bold = true }
+settings_button = { fg = "@accent", bold = true }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
 tooltip = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }

@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.33.0] - 2026-10-31
+
+### Added
+- Settings page for the selected account and bot: header **[⚙ Settings]** button (`[⚙]` in
+  the compact header), **Alt-,** (Ctrl-, with the kitty protocol), `/settings [tab]`, vim
+  `s` / keymap action `settings.open`. Tabs follow the Grok Bot app (General, Computer,
+  Vault, Usage & Billing, Updates) plus **Bot** and **Local (grokbot-tui)**. Esc goes back.
+- Bot tab reads the bot's `listAgents` record live. Editable: name, title, description,
+  avatar shape and color (`updateAgent`), notify on updates (`setAgentNotifyOnUpdates`),
+  hidden from sidebar (`setAgentHiddenFromSidebar`). Read-only: notifications, voice,
+  harness. Team bots are read-only (their settings belong to the owner).
+- Account/app settings have no gateway API, so their rows show *Open in Grok Bot →* and
+  open the app's `grokbot://app/v1/settings?id=<row>` deep link. Reset computer, cancel
+  trial and sign out ask y/n first; reset/cancel still happen in the app, never from the TUI.
+- Local tab: links.open_with, appearance, compact header, collapsed sidebar, files panel,
+  mouse capture, spinner (editable); theme opens the picker; key scheme, SSH link rule and
+  refresh interval shown.
+- Theme parts `settings_frame`, `settings_tab`, `settings_button`.
+
+### Changed
+- Attachment and file links now follow `links.open_with` too (system browser selected →
+  system opener), like chat links and Settings links. Non-text files still use the system
+  opener because the built-in browser shows text only.
+
 ## [1.32.0] - 2026-10-31
 
 ### Added

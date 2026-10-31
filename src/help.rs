@@ -313,6 +313,12 @@ Input focused (multi-line)
                             ui.attachments_panel; keymap view.toggle_attachments).
                             In the panel: j/k move, Enter jump, v view, d download,
                             / filter, t type (All/Img/Vid/Aud/Doc), Esc back to input
+  Alt-, / /settings [tab]   Settings page (also the header [⚙ Settings] button; keymap
+                            settings.open, vim s): Grok Bot's tabs (General, Computer,
+                            Vault, Usage & Billing, Updates), the selected bot, and
+                            local prefs. ←/→ or 1-7 tab, ↑/↓ row, Enter change/open,
+                            r reload, Esc back. App-only rows open in Grok Bot through
+                            links.open_with; destructive ones ask y/n first
   F11 / /card               Open a Grok Bot card (question, approval, secret, form or
                             draft); also click its button in the chat (keymap card.open,
                             vim c). Widgets: 1-9/↑↓ Enter, Space toggles, Tab your own,

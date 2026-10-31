@@ -48,6 +48,7 @@ pub const ACTIONS: &[&str] = &[
     "agents.refresh",
     "card.open",
     "message.copy",
+    "settings.open",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
