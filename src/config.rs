@@ -151,8 +151,8 @@ impl KeysProtocol {
             Self::Legacy => "legacy",
         }
     }
-    /// The kitty step of the chain (Fuzzball keyboard can't be decoded by the input
-    /// reader, so auto and fuzzball continue to kitty).
+    /// The kitty step of the chain, used when Fuzzball keyboard isn't available (auto and
+    /// fuzzball fall back to kitty when the terminal answers its query).
     pub fn kitty(self) -> KittyProtocol {
         match self {
             Self::Auto | Self::Fuzzball => KittyProtocol::Auto,

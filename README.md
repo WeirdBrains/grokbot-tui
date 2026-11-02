@@ -138,9 +138,11 @@ passthrough wrapping is applied when `TMUX`/`STY` is set. The order is
 set `fuzzball`, `kitty` or `native` to force a step (unavailable choices fall through with a
 notice). `/graphics` shows what answered; `/graphics native` etc. sets the pref.
 `GROKBOT_TUI_FUZZBALL=off` skips the Fuzzball query. Keyboard: `keys.protocol = auto |
-fuzzball | kitty | legacy` (`keys.kitty_protocol` still works). Fuzzball keyboard events
-are detected but not used yet, because the input reader can't decode DCS key events, so
-`auto`/`fuzzball` use the kitty keyboard protocol, then legacy.
+fuzzball | kitty | legacy` (`keys.kitty_protocol` still works). With `auto`/`fuzzball`,
+Fuzzball keyboard events are used when the terminal offers them (not through tmux/screen),
+then the kitty keyboard protocol, then legacy keys. Every startup query is bounded
+(`graphics.detect_timeout_ms`, clamped to 1–5 s), so a terminal that never answers still
+gets the UI, with halfblocks images and legacy keys.
 
 `GROKBOT_TUI_IMAGES=halfblocks` skips the terminal query. Viewer keys: `Esc`/`q` or a click
 outside close, `o`/`Enter` open in the system viewer, `←`/`→` (`n`/`p`, `h`/`l`) step through

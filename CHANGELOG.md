@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.37.0] - 2026-11-02
+
+### Added
+- **Fuzzball keyboard**: when the terminal advertises Fuzzball's keyboard subsystem
+  (`k=1`) and `keys.protocol` is `auto` or `fuzzball`, structured key events are switched
+  on (`ESC P = F z k s ; on=1`), so press/repeat/release, Alt, a plain Esc and every
+  modifier arrive unambiguously. Order is Fuzzball → kitty → legacy. It is switched off
+  on exit, on panic, on suspend and when `/kitty` changes the setting. Not used through
+  tmux/screen (they don't forward Fuzzball key events). `/graphics` shows the active
+  keyboard protocol.
+- Decoding comes from the WeirdBrains/crossterm fork (`0.29.0-fuzzball.1`, opt-in
+  `fuzzball` feature), wired in with `[patch.crates-io]` so ratatui uses the same
+  crossterm. An upstream pull request is being prepared.
+
+### Fixed
+- Startup can no longer hang when the terminal never answers its queries (seen on
+  Windows with no real console attached: it sent the kitty graphics, XTVERSION,
+  cell-size and cursor-position queries and waited forever). Every startup query
+  (background color, Fuzzball, graphics/font size, kitty keyboard) is now bounded by
+  `graphics.detect_timeout_ms` clamped to 1–5 s; on timeout grokbot-tui uses
+  halfblocks images, the default font size and legacy keys, and draws the UI.
+- `--list-themes` / `--theme` on a first run said it "downloaded the default theme into
+  …rose-pine.toml". It now says the shipped themes were downloaded and names the folder.
+
 ## [1.36.1] - 2026-11-02
 
 ### Fixed

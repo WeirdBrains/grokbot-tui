@@ -1,6 +1,6 @@
 [package]
 name = "grokbot-tui"
-version = "1.36.1"
+version = "1.37.0"
 edition = "2024"
 rust-version = "1.89"
 license = "GPL-3.0-or-later"
@@ -54,6 +54,9 @@ path = "src/main.rs"
 [dependencies]
 grokbot_api = { version = "1.2", features = ["desktop-session"] }
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
+# Only here to turn on the fork's opt-in `fuzzball` feature (Fuzzball keyboard events) for
+# the crossterm ratatui uses; the code goes through `ratatui::crossterm`.
+crossterm = { version = "0.29", features = ["fuzzball"] }
 ratatui-lipgloss = "1.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "process", "fs", "io-util", "net", "signal"] }
 serde = { version = "1", features = ["derive"] }
@@ -97,6 +100,13 @@ wiremock = "0.6"
 rmcp = { version = "3.8", default-features = false, features = ["client", "server", "transport-async-rw"] }
 
 # The profile that 'dist' will build with
+# crossterm 0.29.0 plus the opt-in Fuzzball keyboard protocol (`fuzzball` feature), until
+# it is upstream. One crossterm for ratatui, ratatui-image and this crate. Note: crates.io
+# ignores [patch], so `cargo publish` would build against stock crossterm, which has no
+# `fuzzball` feature; publishing needs this upstreamed (or the feature made optional) first.
+[patch.crates-io]
+crossterm = { git = "https://github.com/WeirdBrains/crossterm", tag = "0.29.0-fuzzball.1" }
+
 [profile.dist]
 inherits = "release"
 lto = "thin"

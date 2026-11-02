@@ -6,9 +6,9 @@
 //! at a cell with `cols`/`rows`, `move=0`. Placements are cell-anchored and removed by
 //! erases, so after a full clear everything is placed again.
 //!
-//! Keyboard: the capability reply's `k=1` is detected and shown, but structured key
-//! events are DCS strings on stdin, which the input reader (crossterm) cannot decode, so
-//! the mode is never switched on; the kitty keyboard protocol is used instead.
+//! Keyboard: when the capability reply has `k=1` (and no multiplexer is in between), the
+//! structured key event mode is switched on; the WeirdBrains crossterm fork (`fuzzball`
+//! feature) decodes its DCS key events into ordinary key events.
 
 use ratatui::layout::Rect;
 use std::collections::HashMap;

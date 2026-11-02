@@ -617,8 +617,10 @@ pub struct App {
     pub menu: crate::menubar::MenuBar,
     /// Hover tooltips.
     pub tooltip: crate::tooltip::TooltipState,
-    /// Kitty-style keyboard enhancement is active.
+    /// Kitty-style keyboard enhancement is active (kitty or Fuzzball keyboard).
     pub keyboard_enhancement: bool,
+    /// The Fuzzball keyboard protocol is active (structured key events).
+    pub fuzzball_keys: bool,
     /// `/kitty` changed `keys.kitty_protocol`: re-apply it in the event loop.
     pub kitty_reapply: bool,
     /// One-time Apple Terminal newline hint already shown this process.
@@ -918,6 +920,7 @@ impl App {
             menu: crate::menubar::MenuBar::default(),
             tooltip: crate::tooltip::TooltipState::default(),
             keyboard_enhancement: false,
+            fuzzball_keys: false,
             kitty_reapply: false,
             apple_newline_hinted: false,
             sidebar_area: Rect::default(),

@@ -4,6 +4,7 @@ mod app;
 mod appearance;
 mod attach;
 mod attpanel;
+mod bounded;
 mod browser;
 mod cardmodal;
 mod cards;
@@ -183,8 +184,9 @@ fn main() -> Result<()> {
             ),
             themes::FirstRun::Downloaded(p) => {
                 eprintln!(
-                    "grokbot-tui: downloaded the default theme into {}",
-                    p.display()
+                    "grokbot-tui: no themes were installed, so the shipped themes were \
+                     downloaded into {}",
+                    p.parent().unwrap_or(&p).display()
                 )
             }
             themes::FirstRun::Failed(e) => eprintln!(
@@ -220,19 +222,22 @@ fn main() -> Result<()> {
     let mut term = ratatui::init();
     // Raw mode is on and nothing reads input yet: ask the terminal for its background
     // (for the "system" theme mode) before mouse capture and the event loop start.
-    app.detected_variant = appearance::detect();
+    // Every startup query is bounded (graphics.detect_timeout_ms, at least 1 s) so a
+    // terminal that never answers (no console attached, ConPTY dropping replies) can't
+    // stop the UI from drawing; each falls back to a safe default.
+    let query_wait = bounded::startup_wait(app.config.graphics_detect_timeout_ms);
+    app.detected_variant = bounded::run(query_wait, appearance::detect).flatten();
     // Fuzzball first (one query + DA1), then ratatui-image's kitty/sixel/iTerm2 query.
-    app.fuzz_caps = fuzzball::detect(std::time::Duration::from_millis(
-        app.config.graphics_detect_timeout_ms,
-    ));
-    app.image_picker = imageview::detect_picker();
+    let fz_wait = std::time::Duration::from_millis(app.config.graphics_detect_timeout_ms);
+    app.fuzz_caps = bounded::run(query_wait + fz_wait, move || fuzzball::detect(fz_wait)).flatten();
+    app.image_picker = bounded::run(query_wait, imageview::detect_picker)
+        .unwrap_or_else(ratatui_image::picker::Picker::halfblocks);
     imageview::apply_images_protocol(&mut app);
     execute!(std::io::stdout(), EnableMouseCapture)?;
     let _ = execute!(std::io::stdout(), EnableBracketedPaste);
     // Focus reports drive the presence claim (released on blur).
     let _ = execute!(std::io::stdout(), event::EnableFocusChange);
-    let enhancement = enable_shift_enter(app.config.kitty_protocol);
-    app.keyboard_enhancement = enhancement;
+    enable_keys(&mut app, query_wait);
     suspend::install();
     app.maybe_apple_terminal_hint();
     // Pop enhancement / paste even on panic.
@@ -306,15 +311,11 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         }
         if std::mem::take(&mut app.kitty_reapply) {
             disable_shift_enter();
-            app.keyboard_enhancement = enable_shift_enter(app.config.kitty_protocol);
-            app.info(format!(
-                "kitty keyboard protocol {}.",
-                if app.keyboard_enhancement {
-                    "on"
-                } else {
-                    "off"
-                }
-            ));
+            enable_keys(
+                app,
+                bounded::startup_wait(app.config.graphics_detect_timeout_ms),
+            );
+            app.info(format!("Keyboard: {}.", keys_mode_name(app)));
             dirty = true;
         }
         // The kitty protocol reports Alt itself (and a plain Esc at once): no ESC-prefix
@@ -1327,16 +1328,17 @@ fn kitty_flags() -> ratatui::crossterm::event::KeyboardEnhancementFlags {
 /// answers the query; on: always; off: never), and always send modifyOtherKeys level 1
 /// (harmless when ignored). Returns whether the kitty protocol is active. Without it the
 /// ESC-prefix Alt handling (`keys.esc_alt_timeout_ms`) stays in use.
-fn enable_shift_enter(mode: crate::config::KittyProtocol) -> bool {
+fn enable_shift_enter(mode: crate::config::KittyProtocol, wait: std::time::Duration) -> bool {
     use crate::config::KittyProtocol;
     use ratatui::crossterm::event::PushKeyboardEnhancementFlags;
     use std::io::Write;
     let push = match mode {
         KittyProtocol::Off => false,
         KittyProtocol::On => true,
-        KittyProtocol::Auto => {
+        KittyProtocol::Auto => bounded::run(wait, || {
             ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
-        }
+        })
+        .unwrap_or(false),
     };
     let mut out = std::io::stdout();
     if push {
@@ -1349,11 +1351,66 @@ fn enable_shift_enter(mode: crate::config::KittyProtocol) -> bool {
 }
 
 static KITTY_PUSHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The Fuzzball keyboard mode was switched on.
+static FUZZBALL_KEYS_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Undo [`enable_shift_enter`]; pops the kitty flags only if we pushed them.
+/// Whether to use Fuzzball keyboard events: `keys.protocol` is auto or fuzzball, the
+/// terminal advertised the keyboard subsystem, and no multiplexer sits in between (tmux
+/// and screen read terminal input themselves and don't forward Fuzzball key events).
+pub fn want_fuzzball_keys(
+    pref: crate::config::KeysProtocol,
+    caps: Option<&fuzzball::Caps>,
+) -> bool {
+    use crate::config::KeysProtocol as K;
+    cfg!(unix)
+        && matches!(pref, K::Auto | K::Fuzzball)
+        && caps.is_some_and(|c| c.keyboard() && c.mux == fuzzball::Mux::None)
+}
+
+/// Turn on the keyboard protocol chain: Fuzzball (when [`want_fuzzball_keys`]), else
+/// kitty per `keys.kitty_protocol`, else legacy keys. Sets `app.fuzzball_keys` and
+/// `app.keyboard_enhancement` (true for Fuzzball and kitty: both report Alt and a plain
+/// Esc unambiguously).
+fn enable_keys(app: &mut App, wait: std::time::Duration) {
+    if want_fuzzball_keys(app.config.keys_protocol, app.fuzz_caps.as_ref()) {
+        use std::io::Write;
+        let mut out = std::io::stdout();
+        let _ = execute!(
+            out,
+            ratatui::crossterm::event::fuzzball::EnableFuzzballKeyboard
+        );
+        FUZZBALL_KEYS_ON.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = out.flush();
+        app.fuzzball_keys = true;
+        app.keyboard_enhancement = true;
+        return;
+    }
+    app.fuzzball_keys = false;
+    app.keyboard_enhancement = enable_shift_enter(app.config.kitty_protocol, wait);
+}
+
+/// "fuzzball", "kitty" or "legacy": the keyboard protocol in use.
+pub fn keys_mode_name(app: &App) -> &'static str {
+    if app.fuzzball_keys {
+        "fuzzball"
+    } else if app.keyboard_enhancement {
+        "kitty"
+    } else {
+        "legacy"
+    }
+}
+
+/// Undo [`enable_keys`]: Fuzzball keyboard off (if on), kitty flags popped (if pushed),
+/// modifyOtherKeys reset. Safe to call from the panic hook and more than once.
 fn disable_shift_enter() {
     use std::io::Write;
     let mut out = std::io::stdout();
+    if FUZZBALL_KEYS_ON.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        let _ = execute!(
+            out,
+            ratatui::crossterm::event::fuzzball::DisableFuzzballKeyboard
+        );
+    }
     let _ = out.write_all(MODIFY_OTHER_KEYS_OFF.as_bytes());
     if KITTY_PUSHED.swap(false, std::sync::atomic::Ordering::SeqCst) {
         let _ = execute!(out, ratatui::crossterm::event::PopKeyboardEnhancementFlags);
@@ -1410,7 +1467,10 @@ fn suspend_and_resume(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Res
     }
     let _ = execute!(std::io::stdout(), EnableBracketedPaste);
     let _ = execute!(std::io::stdout(), event::EnableFocusChange);
-    app.keyboard_enhancement = enable_shift_enter(app.config.kitty_protocol);
+    enable_keys(
+        app,
+        bounded::startup_wait(app.config.graphics_detect_timeout_ms),
+    );
     app.needs_clear = true;
     app.force_clear = true;
     Ok(())
@@ -2295,5 +2355,33 @@ mod completion_cycle_tests {
             let c = format!("/{}", a.vim_command.clone().unwrap());
             assert!(all.contains(&c), "{c}");
         }
+    }
+}
+
+#[cfg(test)]
+mod fuzzball_keys_tests {
+    use super::want_fuzzball_keys;
+    use crate::config::KeysProtocol as K;
+    use crate::fuzzball::{Caps, Mux};
+
+    fn caps(k: bool, mux: Mux) -> Caps {
+        Caps {
+            sub: if k { "gk".into() } else { "g".into() },
+            keyboard: k,
+            mux,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn fuzzball_keys_only_when_offered_allowed_and_direct() {
+        let yes = caps(true, Mux::None);
+        assert_eq!(want_fuzzball_keys(K::Auto, Some(&yes)), cfg!(unix));
+        assert_eq!(want_fuzzball_keys(K::Fuzzball, Some(&yes)), cfg!(unix));
+        assert!(!want_fuzzball_keys(K::Kitty, Some(&yes)));
+        assert!(!want_fuzzball_keys(K::Legacy, Some(&yes)));
+        assert!(!want_fuzzball_keys(K::Auto, None));
+        assert!(!want_fuzzball_keys(K::Auto, Some(&caps(false, Mux::None))));
+        assert!(!want_fuzzball_keys(K::Auto, Some(&caps(true, Mux::Tmux))));
     }
 }

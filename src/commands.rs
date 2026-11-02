@@ -938,17 +938,14 @@ pub fn graphics_report(app: &App) -> String {
     let fz_keys = app.fuzz_caps.as_ref().is_some_and(|c| c.keyboard());
     format!(
         "Images: {} (images.protocol = {}; order Fuzzball → kitty → native). Fuzzball: {fz}. \
-         Other graphics detected: {detected}. Keyboard: {} (keys.protocol = {}){}.",
+         Other graphics detected: {detected}. Keyboard: {} active (keys.protocol = {}; order \
+         Fuzzball → kitty → legacy){}.",
         crate::imageview::active_name(app),
         app.config.images_protocol.as_str(),
-        if app.keyboard_enhancement {
-            "kitty"
-        } else {
-            "legacy"
-        },
+        crate::keys_mode_name(app),
         app.config.keys_protocol.as_str(),
-        if fz_keys {
-            "; the terminal offers Fuzzball keyboard events, but grokbot-tui can't decode them yet, so kitty is used"
+        if fz_keys && !app.fuzzball_keys {
+            "; the terminal offers Fuzzball keyboard events, but they're off here (keys.protocol, or a multiplexer in between)"
         } else {
             ""
         }

@@ -45,7 +45,11 @@ fn list_themes_downloads_the_default_on_a_first_run() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr),
     );
-    assert!(stderr.contains("downloaded the default theme"), "{stderr}");
+    assert!(
+        stderr.contains("the shipped themes were downloaded into")
+            && !stderr.contains("default theme"),
+        "{stderr}"
+    );
     assert!(stdout.contains("● default"), "{stdout}");
     let file = d.path().join("themes/default.toml");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), shipped());
@@ -76,7 +80,11 @@ fn theme_flag_downloads_first_then_checks() {
         .unwrap();
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("downloaded the default theme"), "{stderr}");
+    assert!(
+        stderr.contains("the shipped themes were downloaded into")
+            && !stderr.contains("default theme"),
+        "{stderr}"
+    );
     assert!(stderr.contains("themes: default"), "{stderr}");
 }
 
