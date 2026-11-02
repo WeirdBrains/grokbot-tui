@@ -83,6 +83,89 @@ pub const PREF_ESC_ALT_MS: &str = "keys.esc_alt_timeout_ms";
 /// kitty keyboard protocol: auto (when the terminal answers the query) | on | off.
 pub const PREF_KITTY_PROTOCOL: &str = "keys.kitty_protocol";
 
+/// Keyboard protocol chain (1.36.0): auto | fuzzball | kitty | legacy. When set it wins
+/// over `keys.kitty_protocol` (kept as the older spelling: on = kitty, off = legacy).
+pub const PREF_KEYS_PROTOCOL: &str = "keys.protocol";
+/// Image protocol chain (1.36.0): auto (Fuzzball, then kitty, then native) | fuzzball |
+/// kitty | native (sixel / iTerm2 / halfblocks).
+pub const PREF_IMAGES_PROTOCOL: &str = "images.protocol";
+
+/// `images.protocol`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImagesProtocol {
+    #[default]
+    Auto,
+    Fuzzball,
+    Kitty,
+    Native,
+}
+
+impl ImagesProtocol {
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s.trim() {
+            "auto" => Self::Auto,
+            "fuzzball" => Self::Fuzzball,
+            "kitty" => Self::Kitty,
+            "native" => Self::Native,
+            _ => return None,
+        })
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Fuzzball => "fuzzball",
+            Self::Kitty => "kitty",
+            Self::Native => "native",
+        }
+    }
+}
+
+/// `keys.protocol`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KeysProtocol {
+    #[default]
+    Auto,
+    Fuzzball,
+    Kitty,
+    Legacy,
+}
+
+impl KeysProtocol {
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s.trim() {
+            "auto" => Self::Auto,
+            "fuzzball" => Self::Fuzzball,
+            "kitty" => Self::Kitty,
+            "legacy" => Self::Legacy,
+            _ => return None,
+        })
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Fuzzball => "fuzzball",
+            Self::Kitty => "kitty",
+            Self::Legacy => "legacy",
+        }
+    }
+    /// The kitty step of the chain (Fuzzball keyboard can't be decoded by the input
+    /// reader, so auto and fuzzball continue to kitty).
+    pub fn kitty(self) -> KittyProtocol {
+        match self {
+            Self::Auto | Self::Fuzzball => KittyProtocol::Auto,
+            Self::Kitty => KittyProtocol::On,
+            Self::Legacy => KittyProtocol::Off,
+        }
+    }
+    pub fn from_kitty(k: KittyProtocol) -> Self {
+        match k {
+            KittyProtocol::Auto => Self::Auto,
+            KittyProtocol::On => Self::Kitty,
+            KittyProtocol::Off => Self::Legacy,
+        }
+    }
+}
+
 /// `keys.kitty_protocol`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum KittyProtocol {
@@ -190,6 +273,8 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_LINKS_SSH_BEHAVIOR,
     PREF_ESC_ALT_MS,
     PREF_KITTY_PROTOCOL,
+    PREF_KEYS_PROTOCOL,
+    PREF_IMAGES_PROTOCOL,
     PREF_HEADER,
     PREF_SIDEBAR_COLLAPSED,
     PREF_ATTACHMENTS_PANEL,
@@ -334,6 +419,10 @@ pub struct Config {
     pub esc_alt_ms: u64,
     /// `keys.kitty_protocol`.
     pub kitty_protocol: KittyProtocol,
+    /// `keys.protocol` (or derived from `keys.kitty_protocol`).
+    pub keys_protocol: KeysProtocol,
+    /// `images.protocol`.
+    pub images_protocol: ImagesProtocol,
     /// `ui.header = compact`.
     pub header_compact: bool,
     /// `ui.sidebar_collapsed`.
@@ -382,6 +471,8 @@ impl Default for Config {
             status_prompt: DEFAULT_STATUS_PROMPT.to_string(),
             esc_alt_ms: 50,
             kitty_protocol: KittyProtocol::Auto,
+            keys_protocol: KeysProtocol::Auto,
+            images_protocol: ImagesProtocol::Auto,
             header_compact: false,
             sidebar_collapsed: false,
             attachments_panel: true,
@@ -425,6 +516,8 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_STATUS_PROMPT, c.status_prompt.clone()),
         (PREF_ESC_ALT_MS, c.esc_alt_ms.to_string()),
         (PREF_KITTY_PROTOCOL, c.kitty_protocol.as_str().to_string()),
+        (PREF_KEYS_PROTOCOL, c.keys_protocol.as_str().to_string()),
+        (PREF_IMAGES_PROTOCOL, c.images_protocol.as_str().to_string()),
         (PREF_HEADER, "full".to_string()),
         (PREF_SIDEBAR_COLLAPSED, c.sidebar_collapsed.to_string()),
         (
@@ -437,6 +530,22 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
 
 impl Config {
     pub fn from_prefs(p: &BTreeMap<String, String>) -> Self {
+        let mut c = Self::from_prefs_base(p);
+        // keys.protocol wins over the older keys.kitty_protocol.
+        match p
+            .get(PREF_KEYS_PROTOCOL)
+            .and_then(|v| KeysProtocol::parse(v))
+        {
+            Some(k) => {
+                c.keys_protocol = k;
+                c.kitty_protocol = k.kitty();
+            }
+            None => c.keys_protocol = KeysProtocol::from_kitty(c.kitty_protocol),
+        }
+        c
+    }
+
+    fn from_prefs_base(p: &BTreeMap<String, String>) -> Self {
         let d = Config::default();
         let o = |k: &str| p.get(k).filter(|v| !v.is_empty()).cloned();
         Config {
@@ -527,6 +636,10 @@ impl Config {
             kitty_protocol: o(PREF_KITTY_PROTOCOL)
                 .and_then(|v| KittyProtocol::parse(&v))
                 .unwrap_or(d.kitty_protocol),
+            keys_protocol: d.keys_protocol,
+            images_protocol: o(PREF_IMAGES_PROTOCOL)
+                .and_then(|v| ImagesProtocol::parse(&v))
+                .unwrap_or(d.images_protocol),
             esc_alt_ms: o(PREF_ESC_ALT_MS)
                 .and_then(|v| v.trim().parse().ok())
                 .filter(|n| *n <= 1000)
@@ -681,6 +794,33 @@ mod max_response_tests {
         );
         assert_eq!(parse_max_response_bytes(Some(" 1048576 ")), 1_048_576);
         const { assert!(DEFAULT_MAX_RESPONSE_BYTES > grokbot_api::MAX_RESPONSE_BYTES) };
+    }
+
+    #[test]
+    fn keys_and_images_protocol_prefs() {
+        let d = Config::default();
+        assert_eq!(d.keys_protocol, KeysProtocol::Auto);
+        assert_eq!(d.images_protocol, ImagesProtocol::Auto);
+        let mut m = BTreeMap::new();
+        // Old spelling still works.
+        m.insert(PREF_KITTY_PROTOCOL.to_string(), "off".to_string());
+        assert_eq!(Config::from_prefs(&m).keys_protocol, KeysProtocol::Legacy);
+        // keys.protocol wins.
+        m.insert(PREF_KEYS_PROTOCOL.to_string(), "kitty".to_string());
+        let c = Config::from_prefs(&m);
+        assert_eq!(
+            (c.keys_protocol, c.kitty_protocol),
+            (KeysProtocol::Kitty, KittyProtocol::On)
+        );
+        m.insert(PREF_KEYS_PROTOCOL.to_string(), "fuzzball".to_string());
+        assert_eq!(Config::from_prefs(&m).kitty_protocol, KittyProtocol::Auto);
+        m.insert(PREF_IMAGES_PROTOCOL.to_string(), "native".to_string());
+        assert_eq!(
+            Config::from_prefs(&m).images_protocol,
+            ImagesProtocol::Native
+        );
+        m.insert(PREF_IMAGES_PROTOCOL.to_string(), "bogus".to_string());
+        assert_eq!(Config::from_prefs(&m).images_protocol, ImagesProtocol::Auto);
     }
 
     #[test]

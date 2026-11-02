@@ -129,6 +129,19 @@ placeholder** (or `/view`, vim `O`) to open the image viewer: the image as large
 terminal allows, aspect ratio kept, with its name, pixel size, file size and position
 (`2/5`) in the title. The graphics protocol is detected at start-up with ratatui-image (kitty,
 sixel, iTerm2; halfblocks everywhere else, e.g. the Windows console or Alacritty);
+**Fuzzball (1.36.0).** In [Mouser](https://github.com/WeirdBrains/mouser), images use the
+Fuzzball graphics protocol (`docs/protocol/graphics.md`): grokbot-tui sends one capability
+query plus DA1 at startup (no delay on other terminals; tmux gets a short extra wait), uploads
+each picture as base64 RGBA in `max_chunk` pieces and places it at its cells. tmux/screen
+passthrough wrapping is applied when `TMUX`/`STY` is set. The order is
+`images.protocol = auto` → Fuzzball, then kitty, then native (sixel / iTerm2 / halfblocks);
+set `fuzzball`, `kitty` or `native` to force a step (unavailable choices fall through with a
+notice). `/graphics` shows what answered; `/graphics native` etc. sets the pref.
+`GROKBOT_TUI_FUZZBALL=off` skips the Fuzzball query. Keyboard: `keys.protocol = auto |
+fuzzball | kitty | legacy` (`keys.kitty_protocol` still works). Fuzzball keyboard events
+are detected but not used yet, because the input reader can't decode DCS key events, so
+`auto`/`fuzzball` use the kitty keyboard protocol, then legacy.
+
 `GROKBOT_TUI_IMAGES=halfblocks` skips the terminal query. Viewer keys: `Esc`/`q` or a click
 outside close, `o`/`Enter` open in the system viewer, `←`/`→` (`n`/`p`, `h`/`l`) step through
 the chat's images. Closing or resizing clears the screen (and deletes kitty images) so no image

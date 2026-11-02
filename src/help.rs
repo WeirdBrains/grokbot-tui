@@ -280,6 +280,10 @@ Input focused (multi-line)
                             (kitty, Ghostty, foot, WezTerm, recent Alacritty/iTerm2) Alt,
                             Ctrl-Enter and Shift-Enter are reliable and Esc has no delay;
                             elsewhere the ESC-prefix Alt handling is used. /kitty shows or sets it
+  keys.protocol             auto | fuzzball | kitty | legacy (wins over keys.kitty_protocol).
+                            Fuzzball keyboard events can't be decoded yet: auto/fuzzball use kitty
+  images.protocol           auto (Fuzzball → kitty → native) | fuzzball | kitty | native
+                            (sixel / iTerm2 / halfblocks). /graphics shows what was detected
   Ctrl-J                    New line (works everywhere, including macOS Terminal.app)
   \\ then Enter             New line (strip the backslash) when modifiers are unavailable
   Alt-Enter                 New line (Option-as-Meta / ESC+CR). macOS Terminal.app:

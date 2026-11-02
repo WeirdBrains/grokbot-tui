@@ -19,6 +19,8 @@ pub enum ViewState {
     Loading,
     Ready {
         proto: Box<StatefulProtocol>,
+        /// The pixels, for Fuzzball placement.
+        img: std::sync::Arc<image::DynamicImage>,
         w: u32,
         h: u32,
         bytes: u64,
@@ -48,6 +50,70 @@ pub fn detect_picker() -> Picker {
         return Picker::halfblocks();
     }
     Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks())
+}
+
+/// Pick the graphics path per `images.protocol`: Fuzzball (if it answered), then kitty,
+/// then native (sixel / iTerm2 / halfblocks). Returns a note when a forced choice wasn't
+/// available.
+pub fn choose(
+    pref: crate::config::ImagesProtocol,
+    fuzz: Option<&crate::fuzzball::Caps>,
+    detected: ProtocolType,
+) -> (bool, ProtocolType, Option<String>) {
+    use crate::config::ImagesProtocol as P;
+    let fz = fuzz.is_some_and(|c| c.graphics());
+    let native = |t| {
+        if t == ProtocolType::Kitty {
+            ProtocolType::Halfblocks
+        } else {
+            t
+        }
+    };
+    match pref {
+        P::Auto => (fz, detected, None),
+        P::Fuzzball if fz => (true, detected, None),
+        P::Fuzzball => (
+            false,
+            detected,
+            Some("images.protocol = fuzzball, but the terminal didn't answer the Fuzzball query; using the next protocol.".into()),
+        ),
+        P::Kitty if detected == ProtocolType::Kitty => (false, detected, None),
+        P::Kitty => (
+            false,
+            detected,
+            Some("images.protocol = kitty, but the terminal doesn't speak kitty graphics; using native.".into()),
+        ),
+        P::Native => (false, native(detected), None),
+    }
+}
+
+/// Apply [`choose`] to the app (after detection, or when the pref changes).
+pub fn apply_images_protocol(app: &mut crate::app::App) {
+    let detected = app
+        .image_detected
+        .get_or_insert(app.image_picker.protocol_type())
+        .to_owned();
+    let (fz, t, note) = choose(app.config.images_protocol, app.fuzz_caps.as_ref(), detected);
+    app.image_picker.set_protocol_type(t);
+    app.fuzz = if fz {
+        app.fuzz_caps.clone().map(crate::fuzzball::Gfx::new)
+    } else {
+        None
+    };
+    app.inline.protos.clear();
+    app.needs_clear = true;
+    if let Some(n) = note {
+        app.info(n);
+    }
+}
+
+/// The active image path, for the viewer title and /graphics.
+pub fn active_name(app: &crate::app::App) -> &'static str {
+    if app.fuzz.is_some() {
+        "fuzzball"
+    } else {
+        protocol_name(&app.image_picker)
+    }
 }
 
 pub fn protocol_name(p: &Picker) -> &'static str {
@@ -210,6 +276,7 @@ impl App {
                 w: img.width(),
                 h: img.height(),
                 bytes,
+                img: std::sync::Arc::new(img.clone()),
                 proto: Box::new(self.image_picker.new_resize_protocol(img)),
             },
             Err(e) => ViewState::Failed(e),
@@ -257,10 +324,20 @@ impl App {
     }
 }
 
+/// Cells for a `w × h` px image scaled (up or down, aspect kept) into `cols × rows`.
+pub fn scale_fit(w: u32, h: u32, cols: u16, rows: u16, cell: (u16, u16)) -> (u16, u16) {
+    let (cw, ch) = (cell.0.max(1) as f64, cell.1.max(1) as f64);
+    let (pw, ph) = (cols as f64 * cw, rows as f64 * ch);
+    let s = (pw / w.max(1) as f64).min(ph / h.max(1) as f64);
+    let c = ((w as f64 * s / cw).round() as u16).clamp(1, cols.max(1));
+    let r = ((h as f64 * s / ch).round() as u16).clamp(1, rows.max(1));
+    (c, r)
+}
+
 /// Draw the viewer over everything.
 pub fn draw(f: &mut Frame, app: &mut App) {
     let screen = f.area();
-    let proto = protocol_name(&app.image_picker);
+    let proto = active_name(app);
     let Some(v) = app.image_view.as_mut() else {
         return;
     };
@@ -297,6 +374,27 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
     match &mut v.state {
+        ViewState::Ready { img, w, h, .. } if app.fuzz.is_some() => {
+            let cell = app
+                .fuzz
+                .as_ref()
+                .map(|g| g.cell(crate::inline::font(&app.image_picker)))
+                .unwrap_or((10, 20));
+            let (cols, rows) = scale_fit(*w, *h, inner.width, inner.height, cell);
+            let r = Rect::new(
+                inner.x + inner.width.saturating_sub(cols) / 2,
+                inner.y + inner.height.saturating_sub(rows) / 2,
+                cols,
+                rows,
+            );
+            crate::fuzzball::reserve(f.buffer_mut(), r);
+            let key = format!("viewer:{}", item.url);
+            let ident = std::sync::Arc::as_ptr(img) as usize;
+            let img = img.clone();
+            if let Some(g) = app.fuzz.as_mut() {
+                g.show(&key, ident, &img, r, cell);
+            }
+        }
         ViewState::Ready { proto, .. } => {
             let img = StatefulImage::default()
                 .resize(Resize::Scale(Some(ratatui_image::FilterType::Triangle)));
@@ -334,6 +432,103 @@ pub fn kitty_delete_all(p: &Picker) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use crate::app::{Entry, EntryKind};
+
+    #[test]
+    fn protocol_chain_fuzzball_then_kitty_then_native() {
+        use super::{ProtocolType as T, choose, scale_fit};
+        use crate::config::ImagesProtocol as P;
+        let fz = crate::fuzzball::parse_caps(
+            b"\x1bP=Fzcr;id=1,v=0,sub=gk\x1b\\",
+            crate::fuzzball::Mux::None,
+        )
+        .unwrap();
+        let nog = crate::fuzzball::parse_caps(
+            b"\x1bP=Fzcr;id=1,v=0,sub=k\x1b\\",
+            crate::fuzzball::Mux::None,
+        )
+        .unwrap();
+        assert!(choose(P::Auto, Some(&fz), T::Kitty).0);
+        assert_eq!(choose(P::Auto, None, T::Kitty), (false, T::Kitty, None));
+        assert_eq!(
+            choose(P::Auto, Some(&nog), T::Sixel),
+            (false, T::Sixel, None)
+        );
+        assert_eq!(
+            choose(P::Auto, None, T::Halfblocks),
+            (false, T::Halfblocks, None)
+        );
+        let (f, t, n) = choose(P::Fuzzball, None, T::Kitty);
+        assert!(!f && t == T::Kitty && n.is_some());
+        assert_eq!(
+            choose(P::Kitty, Some(&fz), T::Kitty),
+            (false, T::Kitty, None)
+        );
+        assert!(choose(P::Kitty, None, T::Sixel).2.is_some());
+        assert_eq!(
+            choose(P::Native, Some(&fz), T::Kitty),
+            (false, T::Halfblocks, None)
+        );
+        assert_eq!(choose(P::Native, None, T::Sixel), (false, T::Sixel, None));
+        // Viewer fit scales up and keeps the aspect.
+        assert_eq!(scale_fit(100, 50, 40, 40, (10, 20)), (40, 10));
+        assert_eq!(scale_fit(100, 400, 40, 10, (10, 20)), (5, 10));
+    }
+
+    #[test]
+    fn fuzzball_images_are_placed_not_drawn_and_hidden_under_overlays() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        app.fuzz_caps = crate::fuzzball::parse_caps(
+            b"\x1bP=Fzcr;id=1,v=0,sub=g,max_chunk=4096\x1b\\\x1bP=Fzgr;id=2,ok=1,cell_w=10,cell_h=20\x1b\\",
+            crate::fuzzball::Mux::None,
+        );
+        super::apply_images_protocol(&mut app);
+        assert_eq!(super::active_name(&app), "fuzzball");
+        assert!(crate::commands::graphics_report(&app).contains("Images: fuzzball"));
+        let img = image::DynamicImage::new_rgba8(40, 20);
+        app.image_view = Some(super::ImageView {
+            items: vec![crate::markdown::Openable {
+                url: "/tmp/x.png".into(),
+                label: "x".into(),
+                image: true,
+            }],
+            idx: 0,
+            state: super::ViewState::Ready {
+                proto: Box::new(app.image_picker.new_resize_protocol(img.clone())),
+                img: std::sync::Arc::new(img),
+                w: 40,
+                h: 20,
+                bytes: 10,
+            },
+            area: Default::default(),
+            load_id: 0,
+        });
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 30)).unwrap();
+        let frame = term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let buf = frame.buffer.clone();
+        let g = app.fuzz.as_mut().unwrap();
+        assert_eq!(g.frame.len(), 1);
+        g.retain_visible(|r| crate::fuzzball::reserved(&buf, r));
+        let out = g.flush();
+        assert!(out.contains("\x1bP=Fzgu;id=1,fmt=rgba"), "{out:?}");
+        assert!(out.contains("\x1bP=Fzgp;id=1,pid=1"), "{out:?}");
+        // Something drawn over the picture: not placed (and removed).
+        let g = app.fuzz.as_mut().unwrap();
+        g.show(
+            "k",
+            1,
+            &image::DynamicImage::new_rgba8(4, 4),
+            ratatui::layout::Rect::new(1, 1, 2, 1),
+            (10, 20),
+        );
+        let blank = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 80, 30));
+        g.retain_visible(|r| crate::fuzzball::reserved(&blank, r));
+        let out = g.flush();
+        assert!(
+            !out.contains("Fzgp;") && out.contains("Fzgd;what=image,id=1,pid=1"),
+            "{out:?}"
+        );
+    }
 
     #[test]
     fn viewer_loads_steps_and_closes_with_a_clear() {

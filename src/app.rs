@@ -599,6 +599,12 @@ pub struct App {
     pub image_load_seq: u64,
     /// Graphics protocol for images (halfblocks until the terminal is queried).
     pub image_picker: ratatui_image::picker::Picker,
+    /// Fuzzball graphics, when the terminal answered and `images.protocol` allows (1.36.0).
+    pub fuzz: Option<crate::fuzzball::Gfx>,
+    /// The Fuzzball capability reply, if any (shown by /graphics).
+    pub fuzz_caps: Option<crate::fuzzball::Caps>,
+    /// What ratatui-image detected (before `images.protocol` overrides it).
+    pub image_detected: Option<ratatui_image::picker::ProtocolType>,
     /// Clear the terminal before the next draw (image ghosts after the viewer closes).
     pub needs_clear: bool,
     /// Local notification toasts + settings (1.10.0).
@@ -900,6 +906,9 @@ impl App {
             image_view: None,
             image_load_seq: 0,
             image_picker: ratatui_image::picker::Picker::halfblocks(),
+            fuzz: None,
+            fuzz_caps: None,
+            image_detected: None,
             needs_clear: false,
             notices_board: crate::notify::NoticeBoard::new(),
             notify_rules: crate::notify_rules::Ruleset::default(),

@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.36.0] - 2026-11-02
+
+### Added
+- **Fuzzball graphics** (Mouser's terminal protocol, v0 wire format): inline images, the
+  image viewer and the video/music modal's frames and posters are uploaded (base64 RGBA,
+  chunked to the advertised `max_chunk`) and placed at their cells with
+  `ESC P = F z g …`. Detection is one capability + graphics query followed by DA1, so
+  other terminals answer at once; inside tmux the reply gets a short extra wait, and
+  output is wrapped for tmux/screen passthrough. Placements under an overlay are removed
+  and everything is re-placed after a full clear.
+- `images.protocol = auto|fuzzball|kitty|native` (default `auto`: Fuzzball, then kitty,
+  then native sixel/iTerm2/halfblocks).
+- `keys.protocol = auto|fuzzball|kitty|legacy`; `keys.kitty_protocol` keeps working and
+  `/kitty` updates both.
+- `/graphics [auto|fuzzball|kitty|native]` (alias `/protocols`) shows the detected
+  protocols or sets `images.protocol`. `GROKBOT_TUI_FUZZBALL=off` skips the query.
+
+### Known gaps
+- Fuzzball keyboard (`k=1`) is detected and reported, but not switched on: its key events
+  are DCS strings on stdin, which the input reader (crossterm) can't decode. `auto` and
+  `fuzzball` use the kitty keyboard protocol, then legacy.
+
 ## [1.35.1] - 2026-11-02
 
 ### Fixed

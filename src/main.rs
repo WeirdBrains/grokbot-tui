@@ -15,6 +15,7 @@ mod datadir;
 mod download;
 mod emoji;
 mod emojipicker;
+mod fuzzball;
 mod fuzzy;
 mod help;
 mod history;
@@ -220,7 +221,10 @@ fn main() -> Result<()> {
     // Raw mode is on and nothing reads input yet: ask the terminal for its background
     // (for the "system" theme mode) before mouse capture and the event loop start.
     app.detected_variant = appearance::detect();
+    // Fuzzball first (one query + DA1), then ratatui-image's kitty/sixel/iTerm2 query.
+    app.fuzz_caps = fuzzball::detect();
     app.image_picker = imageview::detect_picker();
+    imageview::apply_images_protocol(&mut app);
     execute!(std::io::stdout(), EnableMouseCapture)?;
     let _ = execute!(std::io::stdout(), EnableBracketedPaste);
     // Focus reports drive the presence claim (released on blur).
@@ -238,6 +242,11 @@ fn main() -> Result<()> {
     }));
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&mut term, &mut app)));
     app.media_stop_all();
+    if let Some(g) = &app.fuzz {
+        use std::io::Write;
+        let _ = std::io::stdout()
+            .write_all(fuzzball::wrap(&fuzzball::delete_all(), g.caps.mux).as_bytes());
+    }
     app.presence_release_blocking();
     let _ = execute!(std::io::stdout(), event::DisableFocusChange);
     disable_shift_enter();
@@ -343,6 +352,12 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
                 use std::io::Write;
                 let _ = std::io::stdout().write_all(seq.as_bytes());
             }
+            if let Some(g) = app.fuzz.as_mut() {
+                use std::io::Write;
+                let _ = std::io::stdout()
+                    .write_all(fuzzball::wrap(&fuzzball::delete_all(), g.caps.mux).as_bytes());
+                g.cleared();
+            }
             term.clear()?;
             dirty = true;
         }
@@ -350,6 +365,16 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             let frame = term.draw(|f| ui::draw(f, app))?;
             if hyperlinks_on() && !app.link_hits.is_empty() {
                 let _ = write_hyperlinks(frame.buffer, &app.link_hits);
+            }
+            if let Some(g) = app.fuzz.as_mut() {
+                g.retain_visible(|r| fuzzball::reserved(frame.buffer, r));
+                let out = g.flush();
+                if !out.is_empty() {
+                    use std::io::Write;
+                    let mut o = std::io::stdout();
+                    let _ = o.write_all(out.as_bytes());
+                    let _ = o.flush();
+                }
             }
             dirty = false;
             last_draw = std::time::Instant::now();

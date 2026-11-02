@@ -54,7 +54,7 @@ impl Inline {
     }
 }
 
-fn font(p: &Picker) -> (u16, u16) {
+pub fn font(p: &Picker) -> (u16, u16) {
     let f = p.font_size();
     let (w, h) = (f.width, f.height);
     if w == 0 || h == 0 { (10, 20) } else { (w, h) }
@@ -216,7 +216,22 @@ impl App {
             };
             let r = Rect::new(x, inner.y + y as u16, s.cols.min(inner.width), s.rows);
             let k = (s.key.clone(), r.width, r.height);
-            if !self.inline.protos.contains_key(&k)
+            let fz_img = match (&self.fuzz, self.inline.states.get(&s.key)) {
+                (Some(_), Some(State::Ready(img))) => Some(img.clone()),
+                _ => None,
+            };
+            let fuzz_drawn = if let Some(img) = fz_img {
+                let cell = self.fuzz.as_ref().map(|g| g.cell(font(&self.image_picker)));
+                crate::fuzzball::reserve(buf, r);
+                if let (Some(g), Some(cell)) = (self.fuzz.as_mut(), cell) {
+                    g.show(&s.key, Arc::as_ptr(&img) as usize, &img, r, cell);
+                }
+                true
+            } else {
+                false
+            };
+            if !fuzz_drawn
+                && !self.inline.protos.contains_key(&k)
                 && let Some(State::Ready(img)) = self.inline.states.get(&s.key)
                 && let Ok(p) = self.image_picker.new_protocol(
                     (**img).clone(),
@@ -226,16 +241,23 @@ impl App {
             {
                 self.inline.protos.insert(k.clone(), p);
             }
-            if let Some(p) = self.inline.protos.get(&k) {
-                // Blank the placeholder text under the picture first.
-                for yy in r.y..r.y + r.height {
-                    for xx in r.x..r.x + r.width {
-                        if let Some(c) = buf.cell_mut((xx, yy)) {
-                            c.set_symbol(" ");
+            let proto = if fuzz_drawn {
+                None
+            } else {
+                self.inline.protos.get(&k)
+            };
+            if fuzz_drawn || proto.is_some() {
+                if let Some(p) = proto {
+                    // Blank the placeholder text under the picture first.
+                    for yy in r.y..r.y + r.height {
+                        for xx in r.x..r.x + r.width {
+                            if let Some(c) = buf.cell_mut((xx, yy)) {
+                                c.set_symbol(" ");
+                            }
                         }
                     }
+                    ratatui_image::Image::new(p).render(r, buf);
                 }
-                ratatui_image::Image::new(p).render(r, buf);
                 sig = sig
                     .wrapping_mul(31)
                     .wrapping_add((r.x as u64) << 32 | (r.y as u64) << 16 | s.line as u64);
@@ -258,7 +280,9 @@ impl App {
         self.media_after_draw();
         if sig != self.inline.shown_sig {
             self.inline.shown_sig = sig;
-            if self.image_picker.protocol_type() != ratatui_image::picker::ProtocolType::Halfblocks
+            if self.fuzz.is_none()
+                && self.image_picker.protocol_type()
+                    != ratatui_image::picker::ProtocolType::Halfblocks
             {
                 self.needs_clear = true;
             }

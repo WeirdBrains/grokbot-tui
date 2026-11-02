@@ -125,17 +125,33 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let m = app.media.modal.as_mut().expect("checked");
     m.area = area;
     if let Some(img) = img {
-        let (cols, rows) = crate::inline::fit(img.width(), img.height(), pic.width, pic.height, {
-            let fs = picker.font_size();
-            (fs.width.max(1), fs.height.max(1))
-        });
+        let (fs_w, fs_h) = crate::inline::font(&picker);
+        let fcell = app
+            .fuzz
+            .as_ref()
+            .map_or((fs_w, fs_h), |g| g.cell((fs_w, fs_h)));
+        let (cols, rows) =
+            crate::inline::fit(img.width(), img.height(), pic.width, pic.height, fcell);
         let r = Rect::new(
             pic.x + (pic.width - cols) / 2,
             pic.y + (pic.height - rows) / 2,
             cols,
             rows,
         );
-        if m.proto
+        if app.fuzz.is_some() {
+            crate::fuzzball::reserve(f.buffer_mut(), r);
+            let cell = (fs_w, fs_h);
+            if let Some(g) = app.fuzz.as_mut() {
+                g.show(
+                    &format!("modal:{key}"),
+                    std::sync::Arc::as_ptr(&img) as usize,
+                    &img,
+                    r,
+                    g.cell(cell),
+                );
+            }
+        } else if m
+            .proto
             .as_ref()
             .is_none_or(|(_, c, rr)| (*c, *rr) != (cols, rows))
         {
@@ -148,7 +164,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 .ok()
                 .map(|p| (p, cols, rows));
         }
-        if let Some((p, _, _)) = &m.proto {
+        if let Some((p, _, _)) = &m.proto
+            && app.fuzz.is_none()
+        {
             f.render_widget(ratatui_image::Image::new(p), r);
         }
     } else {

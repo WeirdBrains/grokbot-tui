@@ -206,6 +206,14 @@ pub fn registry() -> Registry {
                 run: sidebar,
             },
             Command {
+                name: "graphics",
+                aliases: &["protocols"],
+                usage: "/graphics [auto|fuzzball|kitty|native]",
+                help: "Show the detected terminal protocols (Fuzzball, kitty, sixel/iTerm2, keyboard), or set images.protocol",
+                complete: graphics_complete,
+                run: graphics,
+            },
+            Command {
                 name: "kitty",
                 aliases: &["keyboard"],
                 usage: "/kitty [auto|on|off]",
@@ -856,7 +864,74 @@ fn kitty(app: &mut App, args: &str) -> Result<()> {
     };
     app.store.set_pref(PREF_KITTY_PROTOCOL, mode.as_str())?;
     app.config.kitty_protocol = mode;
+    // Keep keys.protocol (which wins when set) in step.
+    let kp = crate::config::KeysProtocol::from_kitty(mode);
+    app.store
+        .set_pref(crate::config::PREF_KEYS_PROTOCOL, kp.as_str())?;
+    app.config.keys_protocol = kp;
     app.kitty_reapply = true;
+    Ok(())
+}
+
+fn graphics_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(["auto", "fuzzball", "kitty", "native"])
+    } else {
+        vec![]
+    }
+}
+
+/// The `/graphics` report.
+pub fn graphics_report(app: &App) -> String {
+    let fz = match &app.fuzz_caps {
+        Some(c) => format!("answered ({})", c.summary()),
+        None => "no answer".into(),
+    };
+    let detected = app
+        .image_detected
+        .map(|t| match t {
+            ratatui_image::picker::ProtocolType::Kitty => "kitty",
+            ratatui_image::picker::ProtocolType::Sixel => "sixel",
+            ratatui_image::picker::ProtocolType::Iterm2 => "iTerm2",
+            ratatui_image::picker::ProtocolType::Halfblocks => "halfblocks",
+        })
+        .unwrap_or("not queried");
+    let fz_keys = app.fuzz_caps.as_ref().is_some_and(|c| c.keyboard());
+    format!(
+        "Images: {} (images.protocol = {}; order Fuzzball → kitty → native). Fuzzball: {fz}. \
+         Other graphics detected: {detected}. Keyboard: {} (keys.protocol = {}){}.",
+        crate::imageview::active_name(app),
+        app.config.images_protocol.as_str(),
+        if app.keyboard_enhancement {
+            "kitty"
+        } else {
+            "legacy"
+        },
+        app.config.keys_protocol.as_str(),
+        if fz_keys {
+            "; the terminal offers Fuzzball keyboard events, but grokbot-tui can't decode them yet, so kitty is used"
+        } else {
+            ""
+        }
+    )
+}
+
+fn graphics(app: &mut App, args: &str) -> Result<()> {
+    use crate::config::{ImagesProtocol, PREF_IMAGES_PROTOCOL};
+    let a = args.trim();
+    if a.is_empty() {
+        let r = graphics_report(app);
+        app.info(r);
+        return Ok(());
+    }
+    let Some(mode) = ImagesProtocol::parse(a) else {
+        bail!("Usage: /graphics [auto|fuzzball|kitty|native]");
+    };
+    app.store.set_pref(PREF_IMAGES_PROTOCOL, mode.as_str())?;
+    app.config.images_protocol = mode;
+    crate::imageview::apply_images_protocol(app);
+    let r = graphics_report(app);
+    app.info(r);
     Ok(())
 }
 
