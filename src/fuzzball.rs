@@ -122,32 +122,25 @@ fn dcs(sub: char, verb: char, params: &str) -> String {
 
 /// Capability query + graphics query (cell size), then DA1 so any terminal answers.
 pub fn detect_query(mux: Mux) -> String {
-    let mut s = wrap(&dcs('c', 'q', &format!("id={CAPS_ID}")), mux);
+    let cq = String::from_utf8(::fuzzball::common::capability_query(CAPS_ID)).unwrap_or_default();
+    let mut s = wrap(&cq, mux);
     s.push_str(&wrap(&dcs('g', 'q', &format!("id={GQ_ID}")), mux));
     s.push_str("\x1b[c");
     s
 }
 
-/// Params of every `ESC P = F z <sub> r ; … ESC \` reply in `buf`, by subsystem.
-fn replies(buf: &[u8]) -> Vec<(char, HashMap<String, String>)> {
-    let s = String::from_utf8_lossy(buf);
+/// Every Fuzzball reply message (`ESC P = F z <sub> r ; … ESC \`) in `buf`, decoded with
+/// the `fuzzball` crate (other bytes, such as the DA1 answer, are skipped).
+fn replies(buf: &[u8]) -> Vec<::fuzzball::Message> {
+    let mut d = ::fuzzball::Decoder::new();
+    d.push(buf);
     let mut out = vec![];
-    let mut rest: &str = &s;
-    while let Some(i) = rest.find("\x1bP=Fz") {
-        let r = &rest[i + 5..];
-        let Some(end) = r.find("\x1b\\") else { break };
-        let body = &r[..end];
-        let mut ch = body.chars();
-        if let (Some(sub), Some('r')) = (ch.next(), ch.next()) {
-            let params = ch.as_str().strip_prefix(';').unwrap_or(ch.as_str());
-            let map = params
-                .split(',')
-                .filter_map(|kv| kv.split_once('='))
-                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
-                .collect();
-            out.push((sub, map));
+    while let Some(item) = d.next() {
+        if let ::fuzzball::Item::Message(m) = item
+            && m.verb == b'r'
+        {
+            out.push(m);
         }
-        rest = &r[end + 2..];
     }
     out
 }
@@ -155,32 +148,35 @@ fn replies(buf: &[u8]) -> Vec<(char, HashMap<String, String>)> {
 /// Parse the detection answers. `None` when no Fuzzball capability reply is present
 /// (DA1 alone means Fuzzball is unavailable).
 pub fn parse_caps(buf: &[u8], mux: Mux) -> Option<Caps> {
+    use ::fuzzball::common::Capabilities;
     let all = replies(buf);
-    let (_, c) = all
+    let c = all
         .iter()
-        .find(|(sub, m)| *sub == 'c' && m.get("id").is_some_and(|i| i == "1"))?;
-    let num = |k: &str| c.get(k).and_then(|v| v.parse::<u64>().ok());
+        .filter_map(Capabilities::from_message)
+        .find(|c| c.id == CAPS_ID)?;
+    let num = |k: &str| c.params.get(k).and_then(|v| v.parse::<u64>().ok());
     let mut caps = Caps {
-        v: num("v").unwrap_or(0) as u32,
-        sub: c.get("sub").cloned().unwrap_or_default(),
-        raw: num("raw") == Some(1),
-        max_chunk: num("max_chunk").unwrap_or(4096).clamp(256, 1 << 20) as usize,
+        v: c.version,
+        sub: c.subsystems.clone(),
+        raw: c.raw,
+        max_chunk: (c.max_chunk.unwrap_or(4096) as usize).clamp(256, 1 << 20),
         g_max_dim: num("g_max_dim").unwrap_or(10_000) as u32,
         g_fmt: c
+            .params
             .get("g_fmt")
             .map(|v| v.split(':').map(str::to_string).collect())
             .unwrap_or_default(),
-        keyboard: num("k") == Some(1),
+        keyboard: c.params.get("k") == Some("1"),
         k_release: num("k_release") == Some(1),
         cell: None,
         mux,
     };
-    if let Some((_, g)) = all
+    if let Some(g) = all
         .iter()
-        .find(|(sub, m)| *sub == 'g' && m.get("id").is_some_and(|i| i == "2"))
+        .find(|m| m.is(b'g', b'r') && m.params.num("id") == Some(GQ_ID))
     {
-        let w = g.get("cell_w").and_then(|v| v.parse::<u16>().ok());
-        let h = g.get("cell_h").and_then(|v| v.parse::<u16>().ok());
+        let w = g.params.get("cell_w").and_then(|v| v.parse::<u16>().ok());
+        let h = g.params.get("cell_h").and_then(|v| v.parse::<u16>().ok());
         if let (Some(w), Some(h)) = (w, h)
             && w > 0
             && h > 0

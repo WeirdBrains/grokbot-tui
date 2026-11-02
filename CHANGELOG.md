@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.37.1] - 2026-11-02
+
+### Changed
+- Fuzzball keyboard decoding now comes from the published
+  [`fuzzball`](https://crates.io/crates/fuzzball) 1.0 crate: the WeirdBrains/crossterm fork
+  is at `0.29.0-fuzzball.2` (its `fuzzball` feature is built on the crate), and
+  grokbot-tui's own capability / graphics reply parsing and capability query use it too.
+
+### Fixed
+- With Fuzzball keyboard on, Alt+Shift+P followed at once by another key no longer drops
+  that key (fixed in the crossterm fork).
+
 ## [1.37.0] - 2026-11-02
 
 ### Added
