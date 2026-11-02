@@ -205,6 +205,22 @@ fn theme_segs(app: &App, compact: bool) -> Vec<Seg> {
     v
 }
 
+/// Cut `s` to `max` display columns, ending in … when shortened.
+pub fn fit_width(s: &str, max: usize) -> String {
+    if s.width() <= max {
+        return s.to_string();
+    }
+    let mut out = String::new();
+    for c in s.chars() {
+        if out.width() + c.to_string().width() + 1 > max {
+            break;
+        }
+        out.push(c);
+    }
+    out.push('…');
+    out
+}
+
 fn login_and_bot(app: &App) -> (String, String) {
     let user = match (&app.user_label, app.connecting) {
         (Some(l), _) => l.clone(),
@@ -262,7 +278,7 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
             segs.push(seg("  ", theme::top_bar()));
             segs.extend(theme_segs(app, true));
             segs.push(seg(
-                format!("  login: {user}  bot: {bot}  "),
+                format!("  bot: {bot}  login: {}  ", fit_width(&user, 28)),
                 theme::top_bar(),
             ));
             segs.push(mouse_seg(app));
@@ -312,6 +328,15 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
             render_segs(f, app, rows[0], segs);
             let segs = theme_segs(app, false);
             render_segs(f, app, rows[1], segs);
+            // The bot name wins: the login detail is cut with … to fit the row.
+            let fixed = "login ".width()
+                + "   bot ".width()
+                + bot.width()
+                + "   ".width()
+                + "[⚙ Settings]".width()
+                + 1
+                + bell_seg(app, false).text.width();
+            let user = fit_width(&user, (rows[2].width as usize).saturating_sub(fixed).max(6));
             let segs = vec![
                 seg("login ", theme::header_label()),
                 seg(user, theme::top_bar()),
@@ -1958,6 +1983,35 @@ pub(crate) mod tests {
     /// Bot bubbles mirror yours: name header row, body directly under it at the same
     /// edge (left for the bot, right for you), the same bubble width.
     #[test]
+    fn pod_hosts_are_shortened_and_the_bot_name_wins_at_narrow_widths() {
+        use crate::app::short_host;
+        let pod = "73a7afdea40635c4d46c-pod-njiev7ikzjfqlbnrwujyyjuh4a-1340.us14.cursorvm.com";
+        assert_eq!(short_host(pod), "box us14");
+        assert_eq!(short_host("box.cursorvm.com"), "box.cursorvm.com");
+        assert_eq!(short_host("gw.example.com"), "gw.example.com");
+        let long = format!("{}.example.com", "a".repeat(40));
+        assert!(short_host(&long).starts_with('…') && short_host(&long).chars().count() == 32);
+        assert_eq!(fit_width("abcdef", 6), "abcdef");
+        assert_eq!(fit_width("abcdefgh", 6), "abcde…");
+        for w in [100u16, 120, 160] {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let (mut app, _d) = crate::app::tests::test_app(&rt);
+            crate::app::tests::mock_login(&mut app, "t");
+            app.user_label = Some(format!("desktop · {}", "x".repeat(120)));
+            let mut term = Terminal::new(TestBackend::new(w, 30)).unwrap();
+            term.draw(|f| draw(f, &mut app)).unwrap();
+            let rows = screen_rows(&term);
+            let row = rows
+                .iter()
+                .find(|r| r.contains("login desktop"))
+                .expect("login row");
+            let bot = app.active_bot().unwrap().name.clone();
+            assert!(row.contains(&format!("bot {bot}")), "w={w}: {row}");
+            assert!(row.contains('…'), "w={w}: {row}");
+        }
+    }
+
+    #[test]
     fn bot_bubble_mirrors_user_bubble_layout() {
         let max = 20;
         let text = "alpha beta gamma delta epsilon zeta";
@@ -2471,7 +2525,8 @@ pub(crate) mod tests {
             "{header}"
         );
         assert!(
-            r[2].contains("login gateway · box.cursorvm.com   bot Helper"),
+            r[2].contains("login gateway · box.cursorvm")
+                && r[2].contains("   bot Helper   [⚙ Settings]"),
             "{header}"
         );
         assert!(r[3].contains("mouse: on (F6)"), "{header}");

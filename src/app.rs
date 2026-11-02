@@ -742,6 +742,28 @@ pub fn host_of(url: &str) -> &str {
     rest.split(['/', '?', '#']).next().unwrap_or(rest)
 }
 
+/// A header-sized gateway host: Grok Bot box pods
+/// (`<hash>-pod-<id>-1340.us14.cursorvm.com`) become `box us14`; others are kept.
+pub fn short_host(host: &str) -> String {
+    let labels: Vec<&str> = host.split('.').collect();
+    let n = labels.len();
+    if n >= 3 && labels[n - 2] == "cursorvm" && labels[0].contains("-pod-") {
+        return format!("box {}", labels[n - 3]);
+    }
+    if host.chars().count() > 32 {
+        let tail: String = host
+            .chars()
+            .rev()
+            .take(31)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        return format!("…{tail}");
+    }
+    host.to_string()
+}
+
 /// Whether a login error string means the credential itself was rejected.
 fn is_auth_error(e: &str) -> bool {
     let e = e.to_lowercase();
@@ -1112,9 +1134,16 @@ impl App {
                         self.login_retry = None;
                         let label = match source {
                             LoginSource::Env => {
-                                format!("{TOKEN_ENV} · {}", host_of(&session.gateway_url))
+                                format!(
+                                    "{TOKEN_ENV} · {}",
+                                    short_host(host_of(&session.gateway_url))
+                                )
                             }
-                            _ => format!("{} · {}", method.as_str(), host_of(&session.gateway_url)),
+                            _ => format!(
+                                "{} · {}",
+                                method.as_str(),
+                                short_host(host_of(&session.gateway_url))
+                            ),
                         };
                         self.api = Some(client);
                         self.user_label = Some(label.clone());

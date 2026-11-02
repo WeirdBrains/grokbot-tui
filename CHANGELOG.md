@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.35.1] - 2026-11-02
+
+### Fixed
+- The header no longer shows the raw Grok Bot box pod hostname
+  (`<hash>-pod-<id>-1340.us14.cursorvm.com`) after a desktop-session login: it reads
+  `login desktop · box us14`. Other long hosts are shortened with a leading `…`.
+- The bot name wins in the header: the login detail is cut with `…` to fit the row
+  (tall header), and the compact header now shows `bot:` before `login:`.
+
 ## [1.35.0] - 2026-11-02
 
 ### Added
