@@ -237,6 +237,8 @@ in between quits.
                                viewer, links per links.open_with (system: xdg-open / open /
                                Windows handler); vim NORMAL: o (x: the other opener).
                                Images show as [🖼 alt · file] placeholders
+  /emoji [glyph|text]          Emoji as glyphs, or :shortcode: text (emoji.render). Blocks
+                               instead of emoji mean the terminal font has no emoji
   /react <emoji|:code:> [n]    Toggle a reaction pill on the newest bot message (n=2 the one
                                before; vim NORMAL: r). Tab completes the emoji (on the
                                message first, then recent, then common; :code or code) and n.
@@ -284,6 +286,7 @@ Input focused (multi-line)
                             Fuzzball keyboard events can't be decoded yet: auto/fuzzball use kitty
   images.protocol           auto (Fuzzball → kitty → native) | fuzzball | kitty | native
                             (sixel / iTerm2 / halfblocks). /graphics shows what was detected
+  graphics.detect_timeout_ms  Longest Fuzzball reply wait at startup (1500; ends on DA1)
   Ctrl-J                    New line (works everywhere, including macOS Terminal.app)
   \\ then Enter             New line (strip the backslash) when modifiers are unavailable
   Alt-Enter                 New line (Option-as-Meta / ESC+CR). macOS Terminal.app:

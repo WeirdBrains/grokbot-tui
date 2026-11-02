@@ -107,6 +107,17 @@ pub fn apply_images_protocol(app: &mut crate::app::App) {
     }
 }
 
+/// Whether the image path leaves pixels a full clear must remove (sixel, iTerm2).
+/// kitty uses Unicode placeholders (gone when their cells are redrawn), Fuzzball is
+/// diffed per placement, halfblocks are text.
+pub fn leaves_ghosts(app: &crate::app::App) -> bool {
+    app.fuzz.is_none()
+        && matches!(
+            app.image_picker.protocol_type(),
+            ProtocolType::Sixel | ProtocolType::Iterm2
+        )
+}
+
 /// The active image path, for the viewer title and /graphics.
 pub fn active_name(app: &crate::app::App) -> &'static str {
     if app.fuzz.is_some() {
@@ -432,6 +443,25 @@ pub fn kitty_delete_all(p: &Picker) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use crate::app::{Entry, EntryKind};
+
+    #[test]
+    fn only_sixel_and_iterm2_need_a_full_clear() {
+        use super::ProtocolType as T;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = crate::app::tests::test_app(&rt);
+        for (t, ghosts) in [
+            (T::Kitty, false),
+            (T::Halfblocks, false),
+            (T::Sixel, true),
+            (T::Iterm2, true),
+        ] {
+            app.image_picker.set_protocol_type(t);
+            assert_eq!(super::leaves_ghosts(&app), ghosts, "{t:?}");
+        }
+        app.image_picker.set_protocol_type(T::Sixel);
+        app.fuzz = Some(crate::fuzzball::Gfx::new(Default::default()));
+        assert!(!super::leaves_ghosts(&app), "Fuzzball is diffed");
+    }
 
     #[test]
     fn protocol_chain_fuzzball_then_kitty_then_native() {

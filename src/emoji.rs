@@ -30,6 +30,39 @@ pub fn shortcode_at(input: &str, cur: usize) -> Option<(usize, &str)> {
     ok_start.then_some((colon, name))
 }
 
+/// `emoji.render = text`: show reactions and the picker as `:shortcode:` (for terminals
+/// whose font has no emoji, which draw them as blocks). Set from the pref and `/emoji`.
+static TEXT_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_text_mode(on: bool) {
+    TEXT_MODE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn text_mode() -> bool {
+    TEXT_MODE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// How to show emoji `e` now (see [`display_with`]).
+pub fn display(e: &str) -> String {
+    display_with(e, text_mode())
+}
+
+/// `e` itself, or `:shortcode:` in text mode (the emoji when it has no shortcode).
+pub fn display_with(e: &str, text: bool) -> String {
+    if !text {
+        return e.to_string();
+    }
+    let base: String = e
+        .chars()
+        .filter(|c| !('\u{1f3fb}'..='\u{1f3ff}').contains(c))
+        .collect();
+    [e, e.trim_end_matches('\u{fe0f}'), base.as_str()]
+        .into_iter()
+        .find_map(|v| emojis::get(v).and_then(|x| x.shortcode()))
+        .map(|c| format!(":{c}:"))
+        .unwrap_or_else(|| e.to_string())
+}
+
 /// The emoji for a shortcode name (without colons).
 pub fn lookup(name: &str) -> Option<&'static str> {
     emojis::get_by_shortcode(name).map(|e| e.as_str())
@@ -224,6 +257,22 @@ pub fn message_key(kind: u8, text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_mode_shows_shortcodes() {
+        assert_eq!(display_with("👍", false), "👍");
+        for (e, c) in [
+            ("👍", ":+1:"),
+            ("🎉", ":tada:"),
+            ("🔥", ":fire:"),
+            ("❤️", ":heart:"),
+            ("❤", ":heart:"),
+        ] {
+            assert_eq!(display_with(e, true), c, "{e}");
+        }
+        assert!(display_with("👍🏽", true).starts_with(':'));
+        assert_eq!(display_with("x", true), "x");
+    }
 
     #[test]
     fn shortcodes() {

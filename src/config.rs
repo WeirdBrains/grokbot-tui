@@ -89,6 +89,9 @@ pub const PREF_KEYS_PROTOCOL: &str = "keys.protocol";
 /// Image protocol chain (1.36.0): auto (Fuzzball, then kitty, then native) | fuzzball |
 /// kitty | native (sixel / iTerm2 / halfblocks).
 pub const PREF_IMAGES_PROTOCOL: &str = "images.protocol";
+/// Longest wait for the Fuzzball reply at startup, ms (100..=10000; 1.36.1). The wait ends
+/// as soon as the terminal answers DA1.
+pub const PREF_GRAPHICS_DETECT_TIMEOUT: &str = "graphics.detect_timeout_ms";
 
 /// `images.protocol`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -220,6 +223,18 @@ pub const PREF_MEDIA_DECODER: &str = "media.decoder";
 /// Frames per second drawn for video (1..=30).
 pub const PREF_MEDIA_FPS: &str = "media.fps";
 /// Animated GIFs loop on their own (on|off).
+/// Emoji: auto (= glyph) | glyph | text (`:shortcode:` for fonts without emoji; 1.36.1).
+pub const PREF_EMOJI_RENDER: &str = "emoji.render";
+
+/// Whether `emoji.render` asks for text.
+pub fn emoji_render_text(v: &str) -> Option<bool> {
+    match v.trim() {
+        "auto" | "glyph" => Some(false),
+        "text" => Some(true),
+        _ => None,
+    }
+}
+
 pub const PREF_GIF_AUTOPLAY: &str = "media.gif_autoplay";
 /// Re-fetch the bot list every N seconds (0 = off).
 pub const PREF_AGENTS_REFRESH: &str = "agents.refresh_interval_secs";
@@ -275,6 +290,8 @@ pub const GLOBAL_KEYS: &[&str] = &[
     PREF_KITTY_PROTOCOL,
     PREF_KEYS_PROTOCOL,
     PREF_IMAGES_PROTOCOL,
+    PREF_GRAPHICS_DETECT_TIMEOUT,
+    PREF_EMOJI_RENDER,
     PREF_HEADER,
     PREF_SIDEBAR_COLLAPSED,
     PREF_ATTACHMENTS_PANEL,
@@ -423,6 +440,10 @@ pub struct Config {
     pub keys_protocol: KeysProtocol,
     /// `images.protocol`.
     pub images_protocol: ImagesProtocol,
+    /// `graphics.detect_timeout_ms`.
+    pub graphics_detect_timeout_ms: u64,
+    /// `emoji.render = text`.
+    pub emoji_text: bool,
     /// `ui.header = compact`.
     pub header_compact: bool,
     /// `ui.sidebar_collapsed`.
@@ -473,6 +494,8 @@ impl Default for Config {
             kitty_protocol: KittyProtocol::Auto,
             keys_protocol: KeysProtocol::Auto,
             images_protocol: ImagesProtocol::Auto,
+            graphics_detect_timeout_ms: crate::fuzzball::DEFAULT_DETECT_TIMEOUT_MS,
+            emoji_text: false,
             header_compact: false,
             sidebar_collapsed: false,
             attachments_panel: true,
@@ -518,6 +541,14 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_KITTY_PROTOCOL, c.kitty_protocol.as_str().to_string()),
         (PREF_KEYS_PROTOCOL, c.keys_protocol.as_str().to_string()),
         (PREF_IMAGES_PROTOCOL, c.images_protocol.as_str().to_string()),
+        (
+            PREF_EMOJI_RENDER,
+            if c.emoji_text { "text" } else { "auto" }.to_string(),
+        ),
+        (
+            PREF_GRAPHICS_DETECT_TIMEOUT,
+            c.graphics_detect_timeout_ms.to_string(),
+        ),
         (PREF_HEADER, "full".to_string()),
         (PREF_SIDEBAR_COLLAPSED, c.sidebar_collapsed.to_string()),
         (
@@ -640,6 +671,13 @@ impl Config {
             images_protocol: o(PREF_IMAGES_PROTOCOL)
                 .and_then(|v| ImagesProtocol::parse(&v))
                 .unwrap_or(d.images_protocol),
+            graphics_detect_timeout_ms: o(PREF_GRAPHICS_DETECT_TIMEOUT)
+                .and_then(|v| v.trim().parse().ok())
+                .filter(|n| (100..=10_000).contains(n))
+                .unwrap_or(d.graphics_detect_timeout_ms),
+            emoji_text: o(PREF_EMOJI_RENDER)
+                .and_then(|v| emoji_render_text(&v))
+                .unwrap_or(d.emoji_text),
             esc_alt_ms: o(PREF_ESC_ALT_MS)
                 .and_then(|v| v.trim().parse().ok())
                 .filter(|n| *n <= 1000)
@@ -819,6 +857,16 @@ mod max_response_tests {
             Config::from_prefs(&m).images_protocol,
             ImagesProtocol::Native
         );
+        assert_eq!(Config::default().graphics_detect_timeout_ms, 1500);
+        m.insert(PREF_GRAPHICS_DETECT_TIMEOUT.to_string(), "3000".to_string());
+        assert_eq!(Config::from_prefs(&m).graphics_detect_timeout_ms, 3000);
+        m.insert(PREF_GRAPHICS_DETECT_TIMEOUT.to_string(), "50".to_string());
+        assert_eq!(Config::from_prefs(&m).graphics_detect_timeout_ms, 1500);
+        assert!(!Config::default().emoji_text);
+        m.insert(PREF_EMOJI_RENDER.to_string(), "text".to_string());
+        assert!(Config::from_prefs(&m).emoji_text);
+        m.insert(PREF_EMOJI_RENDER.to_string(), "glyph".to_string());
+        assert!(!Config::from_prefs(&m).emoji_text);
         m.insert(PREF_IMAGES_PROTOCOL.to_string(), "bogus".to_string());
         assert_eq!(Config::from_prefs(&m).images_protocol, ImagesProtocol::Auto);
     }

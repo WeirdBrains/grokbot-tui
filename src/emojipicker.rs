@@ -13,6 +13,16 @@ use ratatui::widgets::{Clear, Paragraph};
 
 /// Columns per grid cell (glyph padded to 2 + gap).
 const CELL: u16 = 4;
+/// Cell width in `emoji.render = text` (`:shortcode:` cut to 10).
+const TEXT_CELL: u16 = 12;
+
+fn cell_w() -> u16 {
+    if crate::emoji::text_mode() {
+        TEXT_CELL
+    } else {
+        CELL
+    }
+}
 
 pub struct EmojiPicker {
     /// The message the reaction goes on ([`crate::emoji::message_key`]) and its bot.
@@ -141,7 +151,7 @@ pub fn mouse(p: &mut EmojiPicker, m: MouseEvent) -> Outcome {
                 return Outcome::Copy;
             }
             if p.grid.contains(at) {
-                let c = ((m.column - p.grid.x) / CELL) as usize;
+                let c = ((m.column - p.grid.x) / cell_w()) as usize;
                 let r = (m.row - p.grid.y) as usize + p.top;
                 let i = r * p.cols + c;
                 if c < p.cols && i < p.shown.len() {
@@ -168,7 +178,7 @@ pub fn draw(f: &mut Frame, p: &mut EmojiPicker) {
         .title_bottom(format!(" {hint} "));
     let inner = block.inner(area);
     f.render_widget(block, area);
-    if inner.height < 3 || inner.width < CELL {
+    if inner.height < 3 || inner.width < cell_w() {
         return;
     }
     // Row 0: search field; last row: the selection's name; grid between.
@@ -192,7 +202,7 @@ pub fn draw(f: &mut Frame, p: &mut EmojiPicker) {
         height: inner.height - 2,
     };
     p.grid = grid;
-    p.cols = (grid.width / CELL).max(1) as usize;
+    p.cols = (grid.width / cell_w()).max(1) as usize;
     let rows = grid.height as usize;
     let cur_row = p.cursor / p.cols;
     if cur_row < p.top {
@@ -206,8 +216,13 @@ pub fn draw(f: &mut Frame, p: &mut EmojiPicker) {
         for c in 0..p.cols {
             let i = r * p.cols + c;
             let Some(ch) = p.shown.get(i) else { break };
-            let w = crate::input::str_width(&ch.glyph);
-            let cell = format!(" {}{} ", ch.glyph, " ".repeat(2usize.saturating_sub(w)));
+            let cell = if crate::emoji::text_mode() {
+                let t: String = format!(":{}:", ch.code).chars().take(10).collect();
+                format!(" {t:<10} ")
+            } else {
+                let w = crate::input::str_width(&ch.glyph);
+                format!(" {}{} ", ch.glyph, " ".repeat(2usize.saturating_sub(w)))
+            };
             let st = if i == p.cursor {
                 theme::selected()
             } else if ch.origin == Origin::OnMessage {

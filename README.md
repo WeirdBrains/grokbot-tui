@@ -166,6 +166,11 @@ searchable emoji grid (by shortcode and name; recent and on-message first, then 
 has no reaction endpoint and transcripts carry no reaction data, so they're kept in
 `context.db` (per account and bot) and never sent. Theme part: `reaction_pill`.
 
+**Blocks instead of emoji** mean the terminal's font has no emoji glyphs (common over SSH
+into a terminal with a text-only font). `/emoji text` (pref `emoji.render = auto|glyph|text`,
+default `auto` = glyph) shows reactions, the react button and the picker as `:shortcode:`
+text instead; `/emoji glyph` switches back. No emoji images are bundled.
+
 ### Downloads
 
 Bot replies with images or file links (`.pdf`, `.zip`, `.csv`…; not web pages) get a row of

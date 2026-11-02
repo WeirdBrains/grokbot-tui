@@ -1206,7 +1206,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                 _ => 0,
             };
             if let Some(k) = btn {
-                let bw = crate::input::str_width(REACT_BUTTON);
+                let bw = crate::input::str_width(react_button_label());
                 app.react_hits.push(LinkHit {
                     x: (inner.x as usize + dx + lw - bw) as u16,
                     y: inner.y + y as u16,
@@ -1540,6 +1540,7 @@ fn reactions_key(r: &[(String, String)]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     r.hash(&mut h);
     format!("{:?}", theme::reaction_pill()).hash(&mut h);
+    crate::emoji::text_mode().hash(&mut h);
     h.finish()
 }
 
@@ -1554,7 +1555,7 @@ pub fn reaction_line(emojis: &[&str], mine: bool) -> Option<Line<'static>> {
         if i > 0 {
             spans.push(Span::raw(" "));
         }
-        spans.push(theme::reaction_pill().span(format!(" {e} ")));
+        spans.push(theme::reaction_pill().span(format!(" {} ", crate::emoji::display(e))));
     }
     let l = Line::from(spans);
     Some(if mine {
@@ -1604,6 +1605,16 @@ fn download_lines(text: &str, width: usize) -> Vec<(Line<'static>, Vec<ColHit>)>
 
 /// The react button drawn after a message (or after its reaction pills).
 pub const REACT_BUTTON: &str = "[☺+]";
+/// The react button in `emoji.render = text`.
+pub const REACT_BUTTON_TEXT: &str = "[:)+]";
+
+pub fn react_button_label() -> &'static str {
+    if crate::emoji::text_mode() {
+        REACT_BUTTON_TEXT
+    } else {
+        REACT_BUTTON
+    }
+}
 /// Message text under a selection, mapped back to each message's source
 /// ([`crate::select::extract`]).
 pub fn selection_text(app: &App, sel: &crate::select::Selection) -> String {
@@ -1634,7 +1645,7 @@ fn react_button_line(mut spans: Vec<Span<'static>>, mine: bool) -> Line<'static>
     }
     spans.push(theme::copy_button().span(COPY_BUTTON));
     spans.push(Span::raw(" "));
-    spans.push(theme::react_button().span(REACT_BUTTON));
+    spans.push(theme::react_button().span(react_button_label()));
     let l = Line::from(spans);
     if mine {
         l.alignment(Alignment::Right)

@@ -206,6 +206,14 @@ pub fn registry() -> Registry {
                 run: sidebar,
             },
             Command {
+                name: "emoji",
+                aliases: &[],
+                usage: "/emoji [glyph|text|auto]",
+                help: "How emoji show: glyph, or :shortcode: text when your terminal font has no emoji (they show as blocks). Sets emoji.render",
+                complete: emoji_complete,
+                run: emoji_cmd,
+            },
+            Command {
                 name: "graphics",
                 aliases: &["protocols"],
                 usage: "/graphics [auto|fuzzball|kitty|native]",
@@ -870,6 +878,37 @@ fn kitty(app: &mut App, args: &str) -> Result<()> {
         .set_pref(crate::config::PREF_KEYS_PROTOCOL, kp.as_str())?;
     app.config.keys_protocol = kp;
     app.kitty_reapply = true;
+    Ok(())
+}
+
+fn emoji_complete(_: &App, idx: usize, _: &str) -> Vec<crate::complete::Candidate> {
+    if idx == 0 {
+        crate::complete::names(["glyph", "text", "auto"])
+    } else {
+        vec![]
+    }
+}
+
+fn emoji_cmd(app: &mut App, args: &str) -> Result<()> {
+    let a = args.trim();
+    if a.is_empty() {
+        app.info(format!(
+            "Emoji show as {} (emoji.render). Blocks instead of emoji mean the terminal font has no emoji: /emoji text shows :shortcode: instead.",
+            if app.config.emoji_text { "text" } else { "glyphs" }
+        ));
+        return Ok(());
+    }
+    let Some(text) = crate::config::emoji_render_text(a) else {
+        bail!("Usage: /emoji [glyph|text|auto]");
+    };
+    app.store.set_pref(crate::config::PREF_EMOJI_RENDER, a)?;
+    app.config.emoji_text = text;
+    crate::emoji::set_text_mode(text);
+    app.needs_clear = true;
+    app.info(format!(
+        "Emoji now show as {}.",
+        if text { ":shortcode: text" } else { "glyphs" }
+    ));
     Ok(())
 }
 

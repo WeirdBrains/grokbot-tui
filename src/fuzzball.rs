@@ -18,9 +18,9 @@ use std::fmt::Write as _;
 const CAPS_ID: u32 = 1;
 /// Graphics-query reply id (for the cell size).
 const GQ_ID: u32 = 2;
-/// Bound on the detection wait (DA1 normally ends it much sooner).
-#[cfg(unix)]
-const QUERY_TIMEOUT_MS: u64 = 250;
+/// Default bound on the detection wait (`graphics.detect_timeout_ms`). The terminal's DA1
+/// answer ends the wait at once, so this only matters on slow links (SSH).
+pub const DEFAULT_DETECT_TIMEOUT_MS: u64 = 1500;
 /// Extra wait after DA1 inside tmux (tmux answers DA1 itself, then forwards passthrough).
 #[cfg(unix)]
 const TMUX_EXTRA_MS: u64 = 80;
@@ -202,7 +202,7 @@ fn has_da1(buf: &[u8]) -> bool {
 /// Ask the controlling terminal. Call in raw mode before anything else reads stdin.
 /// `GROKBOT_TUI_FUZZBALL=off` skips the query.
 #[cfg(unix)]
-pub fn detect() -> Option<Caps> {
+pub fn detect(timeout: std::time::Duration) -> Option<Caps> {
     use std::io::{Read, Write};
     use std::os::fd::AsRawFd;
     use std::time::{Duration, Instant};
@@ -217,7 +217,7 @@ pub fn detect() -> Option<Caps> {
         .ok()?;
     tty.write_all(detect_query(mux).as_bytes()).ok()?;
     tty.flush().ok()?;
-    let mut deadline = Instant::now() + Duration::from_millis(QUERY_TIMEOUT_MS);
+    let mut deadline = Instant::now() + timeout;
     let mut extended = false;
     let mut buf = Vec::new();
     let mut chunk = [0u8; 512];
@@ -255,7 +255,7 @@ pub fn detect() -> Option<Caps> {
 }
 
 #[cfg(not(unix))]
-pub fn detect() -> Option<Caps> {
+pub fn detect(_timeout: std::time::Duration) -> Option<Caps> {
     None
 }
 
@@ -453,8 +453,14 @@ impl Gfx {
         self.shown.clear();
     }
 
-    /// Bytes to write after the frame: uploads, removed placements, new placements.
-    /// Cursor saved and restored around placing. Resets the frame list.
+    /// Image uploads queued by this frame. Sent outside the synchronized update (the
+    /// terminal caps a DEC 2026 frame, Mouser at 150 ms), before [`flush`](Self::flush).
+    pub fn take_uploads(&mut self) -> String {
+        std::mem::take(&mut self.pending)
+    }
+
+    /// Bytes to write after the frame: any uploads not taken yet, removed placements, new
+    /// placements. Cursor saved and restored around placing. Resets the frame list.
     pub fn flush(&mut self) -> String {
         let mut out = std::mem::take(&mut self.pending);
         let frame = std::mem::take(&mut self.frame);
@@ -556,6 +562,17 @@ mod tests {
         );
         assert_eq!(delete_all(), "\x1bP=Fzgd;what=all,free=1,quiet=2\x1b\\");
         assert_eq!(keyboard_mode(true), "\x1bP=Fzks;on=1,v=0\x1b\\");
+    }
+
+    #[test]
+    fn uploads_can_go_out_before_the_placements() {
+        let mut g = Gfx::new(parse_caps(REPLY, Mux::None).unwrap());
+        let img = image::DynamicImage::new_rgba8(20, 20);
+        g.show("a", 1, &img, Rect::new(0, 0, 2, 1), (9, 18));
+        let up = g.take_uploads();
+        assert!(up.contains("Fzgu;") && !up.contains("Fzgp;"));
+        let rest = g.flush();
+        assert!(rest.contains("Fzgp;") && !rest.contains("Fzgu;"));
     }
 
     #[test]

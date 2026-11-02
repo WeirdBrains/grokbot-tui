@@ -607,6 +607,8 @@ pub struct App {
     pub image_detected: Option<ratatui_image::picker::ProtocolType>,
     /// Clear the terminal before the next draw (image ghosts after the viewer closes).
     pub needs_clear: bool,
+    /// Clear even when the graphics protocol doesn't leave ghosts (resize, resume).
+    pub force_clear: bool,
     /// Local notification toasts + settings (1.10.0).
     pub notices_board: crate::notify::NoticeBoard,
     /// Rules deciding toast / mute / drop.
@@ -910,6 +912,7 @@ impl App {
             fuzz_caps: None,
             image_detected: None,
             needs_clear: false,
+            force_clear: false,
             notices_board: crate::notify::NoticeBoard::new(),
             notify_rules: crate::notify_rules::Ruleset::default(),
             menu: crate::menubar::MenuBar::default(),
@@ -1814,6 +1817,7 @@ impl App {
     }
 
     pub fn init(&mut self) {
+        crate::emoji::set_text_mode(self.config.emoji_text);
         self.reload_history();
         self.info(format!(
             "Welcome to grokbot-tui{}. Type /help for commands.",

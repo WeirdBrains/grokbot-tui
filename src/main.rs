@@ -222,7 +222,9 @@ fn main() -> Result<()> {
     // (for the "system" theme mode) before mouse capture and the event loop start.
     app.detected_variant = appearance::detect();
     // Fuzzball first (one query + DA1), then ratatui-image's kitty/sixel/iTerm2 query.
-    app.fuzz_caps = fuzzball::detect();
+    app.fuzz_caps = fuzzball::detect(std::time::Duration::from_millis(
+        app.config.graphics_detect_timeout_ms,
+    ));
     app.image_picker = imageview::detect_picker();
     imageview::apply_images_protocol(&mut app);
     execute!(std::io::stdout(), EnableMouseCapture)?;
@@ -346,19 +348,28 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         }
         // Draw after input changed something, else at the UI tick (spinners, replies
         // arriving from background tasks).
+        // One synchronized update (DEC 2026) per frame, clear and image sequences
+        // included, so a slow link never shows a half-drawn screen. Ended on every path.
+        let wants_draw = dirty || app.needs_clear || last_draw.elapsed() >= app::UI_TICK;
+        let mut sync = wants_draw.then(|| SyncUpdate::begin(std::io::stdout()));
         if app.needs_clear {
             app.needs_clear = false;
-            if let Some(seq) = imageview::kitty_delete_all(&app.image_picker) {
-                use std::io::Write;
-                let _ = std::io::stdout().write_all(seq.as_bytes());
+            let force = std::mem::take(&mut app.force_clear);
+            // Only sixel / iTerm2 leave pixels behind. kitty images are Unicode
+            // placeholders and Fuzzball placements are diffed, so they need no clear.
+            if force || imageview::leaves_ghosts(app) {
+                if let Some(seq) = imageview::kitty_delete_all(&app.image_picker) {
+                    use std::io::Write;
+                    let _ = std::io::stdout().write_all(seq.as_bytes());
+                }
+                if let Some(g) = app.fuzz.as_mut() {
+                    use std::io::Write;
+                    let _ = std::io::stdout()
+                        .write_all(fuzzball::wrap(&fuzzball::delete_all(), g.caps.mux).as_bytes());
+                    g.cleared();
+                }
+                term.clear()?;
             }
-            if let Some(g) = app.fuzz.as_mut() {
-                use std::io::Write;
-                let _ = std::io::stdout()
-                    .write_all(fuzzball::wrap(&fuzzball::delete_all(), g.caps.mux).as_bytes());
-                g.cleared();
-            }
-            term.clear()?;
             dirty = true;
         }
         if dirty || last_draw.elapsed() >= app::UI_TICK {
@@ -368,6 +379,17 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             }
             if let Some(g) = app.fuzz.as_mut() {
                 g.retain_visible(|r| fuzzball::reserved(frame.buffer, r));
+                // Big image data goes between two synchronized updates (terminals cap
+                // how long they hold one); only placements go in the second.
+                let up = g.take_uploads();
+                if !up.is_empty() {
+                    use std::io::Write;
+                    drop(sync.take());
+                    let mut o = std::io::stdout();
+                    let _ = o.write_all(up.as_bytes());
+                    let _ = o.flush();
+                    sync = Some(SyncUpdate::begin(std::io::stdout()));
+                }
                 let out = g.flush();
                 if !out.is_empty() {
                     use std::io::Write;
@@ -379,6 +401,8 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             dirty = false;
             last_draw = std::time::Instant::now();
         }
+        // End the synchronized update before waiting for input.
+        drop(sync);
         if !event::poll(app::UI_TICK.saturating_sub(last_draw.elapsed()))? {
             continue;
         }
@@ -1152,10 +1176,38 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             _ => {}
         },
         // Graphics don't reflow: repaint from scratch so no image ghost survives a resize.
-        Event::Resize(..) => app.needs_clear = true,
+        Event::Resize(..) => {
+            app.needs_clear = true;
+            app.force_clear = true;
+        }
         _ => return false,
     }
     true
+}
+
+/// DEC private mode 2026 (synchronized output): `begin` writes `CSI ? 2026 h`, drop writes
+/// `CSI ? 2026 l`, so the end is sent on every path (errors included). Terminals without
+/// it ignore both.
+pub struct SyncUpdate<W: std::io::Write> {
+    out: W,
+}
+
+pub const SYNC_BEGIN: &str = "\x1b[?2026h";
+pub const SYNC_END: &str = "\x1b[?2026l";
+
+impl<W: std::io::Write> SyncUpdate<W> {
+    pub fn begin(mut out: W) -> Self {
+        let _ = out.write_all(SYNC_BEGIN.as_bytes());
+        let _ = out.flush();
+        Self { out }
+    }
+}
+
+impl<W: std::io::Write> Drop for SyncUpdate<W> {
+    fn drop(&mut self) {
+        let _ = self.out.write_all(SYNC_END.as_bytes());
+        let _ = self.out.flush();
+    }
 }
 
 /// OSC 52 "set clipboard" sequence for `text` (base64). Terminals without support ignore it.
@@ -1360,6 +1412,7 @@ fn suspend_and_resume(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Res
     let _ = execute!(std::io::stdout(), event::EnableFocusChange);
     app.keyboard_enhancement = enable_shift_enter(app.config.kitty_protocol);
     app.needs_clear = true;
+    app.force_clear = true;
     Ok(())
 }
 
@@ -1384,6 +1437,22 @@ fn is_newline_key(k: &event::KeyEvent) -> bool {
 mod key_tests {
     use super::*;
     use ratatui::crossterm::event::KeyEvent;
+    #[test]
+    fn sync_update_wraps_and_always_ends() {
+        let mut buf: Vec<u8> = vec![];
+        {
+            let _s = SyncUpdate::begin(&mut buf);
+        }
+        assert_eq!(buf, b"\x1b[?2026h\x1b[?2026l");
+        fn failing(buf: &mut Vec<u8>) -> Result<(), &'static str> {
+            let _s = SyncUpdate::begin(buf);
+            Err("draw failed")
+        }
+        let mut buf: Vec<u8> = vec![];
+        assert!(failing(&mut buf).is_err());
+        assert!(buf.ends_with(SYNC_END.as_bytes()));
+    }
+
     #[test]
     fn osc52_base64() {
         assert_eq!(osc52("hi"), "\x1b]52;c;aGk=\x07");

@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.36.1] - 2026-11-02
+
+### Fixed
+- Flicker over SSH (seen in Mouser):
+  - The Fuzzball query now waits up to 1.5 s (`graphics.detect_timeout_ms`, 100–10000)
+    instead of 250 ms, so a slow link no longer falls back to kitty. The wait still ends
+    as soon as the terminal answers DA1, so local startup isn't slower.
+  - Every frame is sent as one synchronized update (DEC mode 2026), including image
+    deletes and clears; the end is always sent. Terminals without 2026 ignore it. Fuzzball
+    image uploads are sent between synchronized updates (terminals cap how long they hold
+    one; Mouser at 150 ms), so each held frame carries only text and placements.
+  - kitty images (Unicode placeholders) and Fuzzball placements (diffed per image) no
+    longer delete every image and clear the whole screen when you scroll or open/close
+    the viewer. Only sixel/iTerm2, resizes and resume still do a full clear.
+
+### Added
+- `emoji.render = auto|glyph|text` and `/emoji [glyph|text]`: in text mode reactions,
+  the react button (`[:)+]`) and the emoji picker show `:shortcode:` text, for terminal
+  fonts without emoji (which draw blocks). Switches live; help and README explain blocks.
+- `graphics.detect_timeout_ms` (see above).
+
 ## [1.36.0] - 2026-11-02
 
 ### Added
