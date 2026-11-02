@@ -705,6 +705,24 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 app.tooltip.dismiss();
                 return true;
             }
+            // Toast keys (default scheme; vim uses the keymap): Alt-x closes the newest
+            // toast (stays unread, like its [x]), Alt-Shift-x closes all, Alt-o opens it.
+            if app.keys_scheme_default()
+                && !app.inbox.toasts.is_empty()
+                && k.modifiers.contains(KeyModifiers::ALT)
+                && !k.modifiers.contains(KeyModifiers::CONTROL)
+                && let KeyCode::Char(c) = k.code
+            {
+                let done = match c {
+                    'x' if !k.modifiers.contains(KeyModifiers::SHIFT) => app.toast_dismiss_newest(),
+                    'X' | 'x' => app.toast_dismiss_all(),
+                    'o' => app.toast_open_newest(),
+                    _ => false,
+                };
+                if done {
+                    return true;
+                }
+            }
             // Alt+<underlined letter> opens that menu (Alt-C Chat, Alt-W Web, …).
             if let KeyCode::Char(c) = k.code
                 && k.modifiers.contains(KeyModifiers::ALT)
@@ -1694,6 +1712,113 @@ mod event_batch_tests {
         assert!(app.is_typing());
         press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert!(!app.is_typing() && !app.should_quit && app.quit_armed.is_none());
+    }
+
+    fn post_toast(app: &mut App, id: &str) {
+        use crate::inbox::{Kind, Notification};
+        app.inbox.post(
+            Notification {
+                id: id.into(),
+                kind: Kind::Notice,
+                title: id.into(),
+                body: "body".into(),
+                context: None,
+                at_ms: crate::inbox::now_ms(),
+                read: false,
+            },
+            std::time::Duration::from_secs(20),
+            std::time::Instant::now(),
+        );
+    }
+
+    #[test]
+    fn alt_x_closes_newest_toast_unread_alt_shift_x_all_alt_o_opens() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "t");
+        post_toast(&mut app, "a");
+        post_toast(&mut app, "b");
+        post_toast(&mut app, "c");
+        assert_eq!(app.inbox.toasts.len(), 3);
+        // Alt-x: newest only, stays unread (same as the [x]).
+        press(&mut app, KeyCode::Char('x'), KeyModifiers::ALT);
+        let ids: Vec<_> = app.inbox.toasts.iter().map(|t| t.id.clone()).collect();
+        assert_eq!(ids, vec!["a", "b"]);
+        assert!(!app.inbox.get("c").unwrap().read);
+        assert_eq!(app.inbox.unread(), 3);
+        assert!(app.menu.open.is_none());
+        // Alt-o: opens + marks the newest read, removing its toast.
+        press(&mut app, KeyCode::Char('o'), KeyModifiers::ALT);
+        assert!(app.inbox.get("b").unwrap().read);
+        assert_eq!(app.inbox.toasts.len(), 1);
+        app.close_overlay();
+        app.inbox.page = None;
+        post_toast(&mut app, "d");
+        // Alt-Shift-x (sent as Alt + 'X'): all, all unread.
+        press(
+            &mut app,
+            KeyCode::Char('X'),
+            KeyModifiers::ALT | KeyModifiers::SHIFT,
+        );
+        assert!(app.inbox.toasts.is_empty());
+        assert!(!app.inbox.get("a").unwrap().read && !app.inbox.get("d").unwrap().read);
+        // With no toasts Alt-x is a no-op, not a menu.
+        press(&mut app, KeyCode::Char('x'), KeyModifiers::ALT);
+        assert!(app.menu.open.is_none());
+    }
+
+    #[test]
+    fn attach_button_hit_test_starts_attach_and_keeps_drafts() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "t");
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        term.draw(|f| ui::draw(f, &mut app)).unwrap();
+        let r = app.attach_button_area;
+        assert!(
+            r.width > 0
+                && app
+                    .input_area
+                    .contains(ratatui::layout::Position::new(r.x, r.y))
+        );
+        let row: String = (r.x..r.right())
+            .map(|x| term.backend().buffer()[(x, r.y)].symbol().to_string())
+            .collect();
+        assert!(row.contains("📎"), "{row}");
+        // Just outside: nothing.
+        app.click(r.x.saturating_sub(2), r.y);
+        assert!(app.input.is_empty());
+        // Clicking it starts /attach.
+        app.click(r.x + 1, r.y);
+        assert!(app.input.starts_with("/attach "), "{}", app.input);
+        // A draft is kept.
+        app.completion = None;
+        app.input = "hello".into();
+        app.input_cursor = 5;
+        app.click(r.right() - 1, r.y);
+        assert_eq!(app.input, "hello");
+    }
+
+    #[test]
+    fn toast_actions_are_in_the_keymap() {
+        let km = crate::keymap::parse(crate::keymap::shipped_default()).unwrap();
+        let g = |k: &str| {
+            km.lookup(crate::keymap::Mode::Normal, k)
+                .map(str::to_string)
+        };
+        assert_eq!(g("alt-x").as_deref(), Some("notifications.dismiss_toast"));
+        assert_eq!(
+            g("alt-X").as_deref(),
+            Some("notifications.dismiss_all_toasts")
+        );
+        assert_eq!(g("alt-o").as_deref(), Some("notifications.open_toast"));
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        mock_login(&mut app, "t");
+        assert!(!app.vim_action("notifications.dismiss_toast"));
+        post_toast(&mut app, "a");
+        assert!(app.vim_action("notifications.dismiss_toast"));
+        assert!(app.inbox.toasts.is_empty() && !app.inbox.get("a").unwrap().read);
     }
 
     fn notices_text(app: &App) -> String {

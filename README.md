@@ -412,6 +412,12 @@ browser for web pages, or the system browser. Non-web links such as `grokbot://`
 the system opener (in SSH it asks first). Destructive account actions are never run from
 the TUI.
 
+## Attach button (1.35.0)
+
+The **[📎 Attach]** button on the input box's top border starts `/attach ` and lists files
+to pick (Tab completes paths). If you're mid-draft it keeps your text; paste a file path
+or use `/attach <path>` instead. Theme part `attach_button`.
+
 ## Grok Bot notifications (1.34.0)
 
 The header **🔔** shows how many Grok Bot notifications are unread. Click it, press
@@ -425,6 +431,11 @@ The header **🔔** shows how many Grok Bot notifications are unread. Click it, 
 - **Toasts** appear as small boxes in the top-right corner. Click one to open its context
   (the chat, the card, or Settings) and mark it read. **[x]** or the timeout
   (`notifications.toast_timeout_secs`, default 20) only hides the toast: it stays unread.
+- **Toast keys (1.35.0):** **Alt-x** closes the newest toast and **Alt-Shift-x** closes all
+  of them; like the `[x]`, they stay unread. **Alt-o** opens the newest one and marks it
+  read, like clicking it. These are plain Alt keys, so they work over SSH and tmux without
+  the kitty protocol. Rebind them with the keymap actions `notifications.dismiss_toast`,
+  `notifications.dismiss_all_toasts` and `notifications.open_toast`.
 - **Page:** newest first. Enter opens, `m` toggles read, `a` marks all read, `c` or
   **[Clear all]** clears (asks first). `/notifications read` and `/notifications clear` do
   the same from the prompt. Read state and clearing are stored on this computer (per

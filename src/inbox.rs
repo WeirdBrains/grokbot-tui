@@ -35,6 +35,8 @@ const MAX_SEEN: usize = 2000;
 /// Toast box size.
 pub const TOAST_W: u16 = 44;
 pub const TOAST_H: u16 = 4;
+/// Keyboard hint drawn on the newest toast.
+pub const TOAST_HINT: &str = " Alt-x close · Alt-o open ";
 /// Toasts shown at once.
 const MAX_TOASTS: usize = 4;
 
@@ -492,6 +494,31 @@ impl App {
         true
     }
 
+    /// Close the newest toast (Alt-x): same as its [x], it stays unread.
+    pub fn toast_dismiss_newest(&mut self) -> bool {
+        let Some(id) = self.inbox.toasts.last().map(|t| t.id.clone()) else {
+            return false;
+        };
+        self.inbox.dismiss_toast(&id);
+        true
+    }
+
+    /// Close every toast (Alt-Shift-x); all stay unread.
+    pub fn toast_dismiss_all(&mut self) -> bool {
+        let any = !self.inbox.toasts.is_empty();
+        self.inbox.toasts.clear();
+        any
+    }
+
+    /// Open the newest toast's context and mark it read (Alt-o), like clicking it.
+    pub fn toast_open_newest(&mut self) -> bool {
+        let Some(id) = self.inbox.toasts.last().map(|t| t.id.clone()) else {
+            return false;
+        };
+        self.inbox_open(&id);
+        true
+    }
+
     pub fn notifications_key(&mut self, k: KeyEvent) {
         let n = self.inbox.items.len();
         let Some(p) = self.inbox.page.as_mut() else {
@@ -616,6 +643,17 @@ pub fn draw_toasts(f: &mut Frame, app: &mut App) {
             n.body.split_whitespace().collect::<Vec<_>>().join(" ")
         };
         f.render_widget(Paragraph::new(body).wrap(Wrap { trim: true }), inner);
+        if app.inbox.toast_areas.is_empty() {
+            // Newest toast: keyboard hint on the bottom border.
+            let hint = TOAST_HINT;
+            let w = hint.chars().count() as u16;
+            if w + 2 < r.width {
+                f.render_widget(
+                    Paragraph::new(Span::styled(hint, theme::notification_unread())),
+                    Rect::new(r.right() - w - 2, r.bottom() - 1, w, 1),
+                );
+            }
+        }
         app.inbox.toast_areas.push((r, close, id));
         y += TOAST_H;
     }

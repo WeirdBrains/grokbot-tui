@@ -17,6 +17,9 @@
 "f12" = "agents.refresh"
 "alt-," = "settings.open"
 "alt-b" = "notifications.open"
+"alt-x" = "notifications.dismiss_toast"
+"alt-X" = "notifications.dismiss_all_toasts"
+"alt-o" = "notifications.open_toast"
 
 [mode.normal]
 "i" = "mode.insert"

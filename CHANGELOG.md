@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.35.0] - 2026-11-02
+
+### Added
+- Keyboard shortcuts for Grok Bot notification toasts: **Alt-x** closes the newest toast,
+  **Alt-Shift-x** closes all visible toasts (both leave the notification unread, exactly
+  like the `[x]`), and **Alt-o** opens the newest toast's context and marks it read (like
+  clicking it). Plain Alt keys, so they work over SSH/tmux without the kitty protocol.
+- Keymap actions `notifications.dismiss_toast`, `notifications.dismiss_all_toasts` and
+  `notifications.open_toast` (bound to `alt-x`, `alt-X`, `alt-o` in the vim keymap).
+- The newest toast shows an `Alt-x close · Alt-o open` hint on its bottom border.
+- A **[📎 Attach]** button on the input box's top border. Clicking it starts `/attach `
+  in an empty input and lists files (Tab completion); a draft in progress is kept. Theme
+  part `attach_button`.
+
 ## [1.34.1] - 2026-10-31
 
 ### Fixed

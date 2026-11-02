@@ -1332,6 +1332,13 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         ),
         bottom,
     );
+    app.attach_button_area = Rect::default();
+    if matches!(app.mode, InputMode::Normal) && bottom.width > 30 && bottom.height >= 2 {
+        let w = ATTACH_LABEL.chars().count() as u16 + 1; // 📎 is two cells
+        let r = Rect::new(bottom.right() - w - 2, bottom.y, w, 1);
+        f.render_widget(Paragraph::new(theme::attach_button().span(ATTACH_LABEL)), r);
+        app.attach_button_area = r;
+    }
     (app.focus == Focus::Input).then(|| {
         let (row, col) = il.cursor;
         let x = bottom.x + 3 + col as u16;
@@ -1339,6 +1346,9 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         Position::new(x.min(bottom.right().saturating_sub(2)), y)
     })
 }
+
+/// The input box's attach button (top border, right).
+pub const ATTACH_LABEL: &str = "[📎 Attach]";
 
 /// The chat feed's laid-out lines and the wrapped height of each, for one key.
 pub struct FeedCache {

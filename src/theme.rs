@@ -254,6 +254,7 @@ style_slots! {
     SETTINGS_TAB = "settings_tab", "Modals", false, "Settings page: the selected tab and row";
     SETTINGS_BUTTON = "settings_button", "Screen and header", false, "Header: the [⚙ Settings] button";
     BELL = "bell", "Screen and header", false, "Header: the notifications bell and unread count";
+    ATTACH_BUTTON = "attach_button", "Screen and header", false, "Input: the [📎 Attach] button";
     NOTIFICATION_TOAST = "notification_toast", "Modals", true, "Grok Bot notification toast (top right)";
     NOTIFICATION_UNREAD = "notification_unread", "Modals", false, "Notifications: unread items and the toast [x]";
     NOTIFICATION_READ = "notification_read", "Modals", false, "Notifications: read items";
@@ -426,6 +427,7 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
         },
         s::SETTINGS_BUTTON => bold(fg(c::ACCENT)),
         s::BELL => bold(fg(c::WARN)),
+        s::ATTACH_BUTTON => bold(fg(c::ACCENT)),
         s::NOTIFICATION_TOAST => StyleSpec {
             fg: Some(r(c::MODAL_TEXT)),
             bg: Some(r(c::MODAL_BACKGROUND)),
@@ -899,6 +901,9 @@ pub fn settings_button() -> Style {
 }
 pub fn bell() -> Style {
     st(slot::BELL)
+}
+pub fn attach_button() -> Style {
+    st(slot::ATTACH_BUTTON)
 }
 pub fn notification_toast() -> Style {
     st(slot::NOTIFICATION_TOAST)

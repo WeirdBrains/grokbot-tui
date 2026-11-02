@@ -3394,6 +3394,7 @@ mod tests {
                 "download_dir",
                 "settings_frame",
                 "settings_tab",
+                "attach_button",
                 "notification_toast",
                 "notification_unread",
                 "notification_read",

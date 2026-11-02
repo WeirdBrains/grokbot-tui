@@ -50,6 +50,9 @@ pub const ACTIONS: &[&str] = &[
     "message.copy",
     "settings.open",
     "notifications.open",
+    "notifications.dismiss_toast",
+    "notifications.dismiss_all_toasts",
+    "notifications.open_toast",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

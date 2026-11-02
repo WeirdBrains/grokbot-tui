@@ -713,6 +713,8 @@ pub struct App {
     pub inbox: crate::inbox::Inbox,
     /// Header: the 🔔 bell.
     pub bell_area: Rect,
+    /// The input box's [📎 Attach] button (1.35.0).
+    pub attach_button_area: Rect,
     shell_seq: u64,
     /// Open selection modal (bots, accounts, …).
     pub picker: Option<crate::picker::Picker>,
@@ -947,6 +949,7 @@ impl App {
             settings_button_area: Rect::default(),
             inbox: crate::inbox::Inbox::default(),
             bell_area: Rect::default(),
+            attach_button_area: Rect::default(),
             shell_seq: 0,
             picker: None,
             client_version_source,
@@ -2680,6 +2683,19 @@ impl App {
 
     // ------------------------------------------------------------ input
 
+    /// The [📎 Attach] button: starts `/attach ` in an empty input and lists paths
+    /// (Tab completion); a draft is kept (paste a path or type /attach after sending).
+    pub fn attach_button(&mut self) {
+        self.focus = Focus::Input;
+        if self.input.trim().is_empty() {
+            self.input = "/attach ".into();
+            self.input_cursor = self.input.len();
+            crate::complete::tab(self, false);
+        } else if !self.input.starts_with("/attach") {
+            self.info("To attach, paste a file path into your message, or send/clear it and click 📎 (/attach <path>).".into());
+        }
+    }
+
     pub fn input_insert(&mut self, t: &str) {
         self.input_delete_selection();
         crate::input::insert(&mut self.input, &mut self.input_cursor, t);
@@ -3286,6 +3302,9 @@ impl App {
                 self.open_notifications();
                 true
             }
+            "notifications.dismiss_toast" => self.toast_dismiss_newest(),
+            "notifications.dismiss_all_toasts" => self.toast_dismiss_all(),
+            "notifications.open_toast" => self.toast_open_newest(),
             "settings.open" => {
                 self.open_settings(None);
                 true
@@ -3916,6 +3935,10 @@ impl App {
         }
         if self.bell_area.contains(at) {
             self.open_notifications();
+            return;
+        }
+        if self.attach_button_area.contains(at) {
+            self.attach_button();
             return;
         }
         if self.settings_button_area.contains(at) {
