@@ -2,6 +2,7 @@
 # One key, one action, in each table. Reload with /keymap reload.
 
 [global]
+"ctrl-d" = "app.quit"
 "ctrl-q" = "app.quit"
 "ctrl-c" = "app.ctrl_c"
 "ctrl-shift-c" = "app.ctrl_c_copy"

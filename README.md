@@ -95,9 +95,8 @@ In mock mode any token logs in except `bad`. Sending `reject` simulates a 4xx an
 - **Bottom bar:** `/`-prefixed input runs a command; plain text is sent to the active bot.
 
 Keys: `Enter` submit · `Tab` toggle focus input/sidebar · `↑/↓` (or `j/k`) + `Enter` in sidebar to pick a bot ·
-`↑/↓`, `PgUp/PgDn`, mouse wheel scroll body · `Esc` cancel a prompt · `Ctrl-C` / `Ctrl-Shift-C` are context-aware (copy a selection, cancel a reply, clear or copy
-the input, close an overlay, or ask before quitting; `Ctrl-Shift-C` never quits) ·
-`Ctrl-Q` or `/quit` quit at once ·
+`↑/↓`, `PgUp/PgDn`, mouse wheel scroll body · `Esc` cancel a prompt · `Ctrl-C` / `Ctrl-Shift-C` copy (the selection, else the input; never quit) ·
+`Ctrl-D` (also `Ctrl-Q`, `/quit`) quits at once (in a card it dismisses the card) ·
 `F1` help · `F2` pick a bot · `F3` pick an account · `F4` cycle dark/light/system · `F5` pick a theme ·
 `Shift-F5` theme editor · `F6` mouse capture on/off.
 
@@ -468,7 +467,7 @@ While grokbot-tui signs in, loads the bot list and opens the first chat (at star
 braille spinner and the current stage: *Signing in to <account>…*, *Checking gateway <host>…*,
 *Exchanging Cursor token…* (the EnsureSandBox exchange), *Reading the desktop app session…*,
 *Loading bots…*, *Loading chat with <bot>…*. The work runs in the background, so input keeps
-working (Ctrl-C / Ctrl-Q still quit). If a step fails, the error replaces the spinner with a
+working (Ctrl-D / Ctrl-Q still quit). If a step fails, the error replaces the spinner with a
 retry hint; **Esc** dismisses it. Pref `ui.spinner = off` shows a static glyph instead of the
 animation (reduced motion). Theme parts: `loading` (frame and message) and `spinner` (glyph).
 

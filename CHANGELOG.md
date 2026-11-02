@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.37.2] - 2026-11-02
+
+### Changed
+- Ctrl-C is always copy (the selection, else the input) and never quits, in Fuzzball,
+  kitty and legacy keyboard modes. Esc cancels a pending reply or closes overlays.
+- Ctrl-D is the default quit (also in `keymap/default.toml`); Ctrl-Q and `/quit` still
+  quit. Ctrl-D still dismisses a card / form and duplicates in the theme editor; it no
+  longer deletes forward in the input (Delete does). Keymap overrides apply.
+
+### Fixed
+- Startup terminal queries share one deadline, with a DA1 probe that skips the rest when the
+  terminal doesn't answer, so a silent terminal draws in about 1.5 s. Late replies are discarded.
+- Running without a TTY prints a short error and exits with status 2 instead of panicking.
+
 ## [1.37.1] - 2026-11-02
 
 ### Changed

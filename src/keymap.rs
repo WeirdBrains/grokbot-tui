@@ -351,6 +351,9 @@ mod tests {
         assert!(km.lookup(Mode::Normal, "i") == Some("mode.insert"));
         assert!(km.lookup(Mode::Insert, "esc") == Some("mode.normal"));
         assert!(km.lookup(Mode::Normal, "ctrl-q") == Some("app.quit"));
+        assert!(km.lookup(Mode::Normal, "ctrl-d") == Some("app.quit"));
+        assert!(km.lookup(Mode::Insert, "ctrl-d") == Some("app.quit"));
+        assert!(km.lookup(Mode::Normal, "ctrl-c") == Some("app.ctrl_c"));
     }
 
     #[test]

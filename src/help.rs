@@ -176,19 +176,17 @@ Anywhere
   F5                           Pick a theme (same as /theme use)
   Shift-F5                     Theme editor (same as /theme edit; some terminals send F17)
   F6                           Mouse capture on/off (same as /mouse)
-  Ctrl-C / Ctrl-Shift-C        Context-aware (see below). Ctrl-Shift-C never quits.
+  Ctrl-C / Ctrl-Shift-C        Copy (see below). Never quits.
   Ctrl-A                       Select all of the input (or the chat, when it has focus)
   Ctrl-Z                       Restore the input a Ctrl-C cleared
-  Ctrl-D                       Delete forward; on an empty input like Ctrl-C
-  Ctrl-Q                       Quit at once (also /quit)
+  Ctrl-D                       Quit at once (also Ctrl-Q, /quit). In a card it
+                               dismisses the card; in the theme editor it duplicates
   Shift+←/→/Home/End           Select text in the input
 
-Ctrl-C / Ctrl-Shift-C, in order: (1) a selection in the input or the chat is
-copied; (2) a pending reply is cancelled when the input or chat has focus; (3) text in
-the focused input: Ctrl-C clears it (Ctrl-Z brings it back), Ctrl-Shift-C copies it;
-(4) an open overlay closes like Esc; (5) over the chat with nothing selected: a hint;
-(6) otherwise 'press again to quit' — a second Ctrl-C within 1.5 s with nothing done
-in between quits.
+Ctrl-C / Ctrl-Shift-C copy, in order: (1) a selection in the input or the chat; (2) the
+text in the focused input; otherwise a hint (nothing to copy). Ctrl-C never quits,
+cancels or clears: Ctrl-D / Ctrl-Q quit, Esc cancels. With ui.keys = vim, global
+ctrl-c / ctrl-d / ctrl-q in your keymap.toml override these.
   Tab                          After `/`: fuzzy-complete a command or argument (Shift-Tab cycles).
                                Otherwise switch focus between input and sidebar
   Ctrl-R                       Fuzzy search prompt history (Ctrl-S reverse; Esc keeps the draft)

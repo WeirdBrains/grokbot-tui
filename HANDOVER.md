@@ -2,7 +2,7 @@
 
 ## Where things stand
 - Repo: github.com/WeirdBrains/grokbot-tui, checkout at `~/Projects/WeirdBrains/grokbot-tui` on alien-blue (machineId 5803cd4d…; the old fb57ab15 entry is stale).
-- Latest release: **v1.37.1** (crossterm fork `0.29.0-fuzzball.2` on the `fuzzball` 1 crate; grokbot-tui uses `fuzzball = "1"` for caps parsing); 1.37.0 = Fuzzball keyboard via `[patch.crates-io]`, bounded startup queries; 1.36.x = Fuzzball graphics / SSH flicker; 1.35.x = toast keys, attach button, header; 1.34.0 = notifications; 1.33.0 = settings page; 1.32.0 = loading spinner; 1.31.0 = MCP server. See git log for main.
+- Latest release: **v1.37.2** (Ctrl-C always copies, Ctrl-D quits, shared startup query deadline, no-TTY error); 1.37.1 = (crossterm fork `0.29.0-fuzzball.2` on the `fuzzball` 1 crate; grokbot-tui uses `fuzzball = "1"` for caps parsing); 1.37.0 = Fuzzball keyboard via `[patch.crates-io]`, bounded startup queries; 1.36.x = Fuzzball graphics / SSH flicker; 1.35.x = toast keys, attach button, header; 1.34.0 = notifications; 1.33.0 = settings page; 1.32.0 = loading spinner; 1.31.0 = MCP server. See git log for main.
   - 1.30.0: copy buttons on bubbles (raw markdown source) and code blocks (code only), selection that skips borders/chrome, OSC 52 + system clipboard.
   - 1.30.1: macOS builds moved to `macos-15` / `macos-15-intel` (GitHub retires macos-14 on Nov 2).
 - Leftover worktree: `~/Projects/WeirdBrains/grokbot-tui-1301` (branch `v1301`), now merged into main, so it's safe to remove with `git worktree remove`.

@@ -202,6 +202,19 @@ fn main() -> Result<()> {
     if let Some(t) = &cli.theme {
         check_theme_flag(&themes_dir, t)?;
     }
+    {
+        use std::io::IsTerminal;
+        if let Some(why) = bounded::no_tty_reason(
+            std::io::stdin().is_terminal(),
+            std::io::stdout().is_terminal(),
+        ) {
+            eprintln!(
+                "grokbot-tui: {why}. Run it in a terminal (it needs one for its interface); \
+                 --help, --version and --list-themes work without one."
+            );
+            std::process::exit(2);
+        }
+    }
     let rt = tokio::runtime::Runtime::new()?;
     let mut app = App::new(store, rt.handle().clone(), cli.mock)?;
     app.init();
@@ -220,24 +233,33 @@ fn main() -> Result<()> {
     }
 
     let mut term = ratatui::init();
-    // Raw mode is on and nothing reads input yet: ask the terminal for its background
-    // (for the "system" theme mode) before mouse capture and the event loop start.
-    // Every startup query is bounded (graphics.detect_timeout_ms, at least 1 s) so a
-    // terminal that never answers (no console attached, ConPTY dropping replies) can't
-    // stop the UI from drawing; each falls back to a safe default.
+    // Raw mode is on and nothing reads input yet. All startup queries share one deadline
+    // (graphics.detect_timeout_ms, clamped to 1–5 s). A DA1 probe goes first: a terminal
+    // that doesn't answer it gets safe defaults at once (dark/unknown background, no
+    // Fuzzball, halfblocks images, legacy keys) instead of every query timing out in turn.
     let query_wait = bounded::startup_wait(app.config.graphics_detect_timeout_ms);
-    app.detected_variant = bounded::run(query_wait, appearance::detect).flatten();
-    // Fuzzball first (one query + DA1), then ratatui-image's kitty/sixel/iTerm2 query.
-    let fz_wait = std::time::Duration::from_millis(app.config.graphics_detect_timeout_ms);
-    app.fuzz_caps = bounded::run(query_wait + fz_wait, move || fuzzball::detect(fz_wait)).flatten();
-    app.image_picker = bounded::run(query_wait, imageview::detect_picker)
-        .unwrap_or_else(ratatui_image::picker::Picker::halfblocks);
+    let budget = bounded::Budget::new(query_wait);
+    let answers = bounded::terminal_answers(budget.left());
+    app.terminal_answers = answers;
+    if answers {
+        app.detected_variant = budget.run(appearance::detect).flatten();
+        // Fuzzball first (one query + DA1), then ratatui-image's kitty/sixel/iTerm2 query.
+        let fz_wait = budget.left();
+        app.fuzz_caps = budget.run(move || fuzzball::detect(fz_wait)).flatten();
+        app.image_picker = budget
+            .run(imageview::detect_picker)
+            .unwrap_or_else(ratatui_image::picker::Picker::halfblocks);
+    } else {
+        app.image_picker = ratatui_image::picker::Picker::halfblocks();
+    }
     imageview::apply_images_protocol(&mut app);
     execute!(std::io::stdout(), EnableMouseCapture)?;
     let _ = execute!(std::io::stdout(), EnableBracketedPaste);
     // Focus reports drive the presence claim (released on blur).
     let _ = execute!(std::io::stdout(), event::EnableFocusChange);
-    enable_keys(&mut app, query_wait);
+    enable_keys(&mut app, budget.left());
+    // Late answers to a query that timed out must not be read as keys.
+    bounded::discard_pending_input();
     suspend::install();
     app.maybe_apple_terminal_hint();
     // Pop enhancement / paste even on panic.
@@ -477,9 +499,9 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
 }
 
 /// What a Ctrl key that could end the program does.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum QuitKey {
-    /// Ctrl-Q: quit right away.
+    /// Ctrl-Q: quit right away (alias of Ctrl-D).
     Quit,
     /// Ctrl-Shift-C (terminals' copy shortcut): copy, never quit.
     Copy,
@@ -636,26 +658,28 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
         Event::Key(k) if k.kind != KeyEventKind::Release => {
             if let Some(q) = quit_key(&k) {
                 let now = std::time::Instant::now();
+                app.quit_armed = None;
+                // ui.keys = vim: a user keymap may rebind these chords (defaults:
+                // ctrl-d / ctrl-q = app.quit, ctrl-c = app.ctrl_c).
+                if app.keys_are_vim()
+                    && let Some(action) = crate::keymap::encode_key(k.code, k.modifiers)
+                        .and_then(|key| app.keymap.lookup(app.vim_mode, &key).map(str::to_string))
+                    && !(q == QuitKey::CtrlD && (app.card_modal.is_some() || app.editor.is_some()))
+                {
+                    app.vim_action(&action);
+                    return true;
+                }
                 match q {
                     QuitKey::Quit => app.should_quit = true,
-                    QuitKey::Copy => app.ctrl_c(true, now),
-                    QuitKey::CtrlC => app.ctrl_c(false, now),
-                    // Ctrl-D: the theme editor's duplicate; delete forward while there's
-                    // text; else like Ctrl-C.
-                    // Ctrl-D in a card modal dismisses the card.
-                    QuitKey::CtrlD if app.card_modal.is_some() => {
-                        app.quit_armed = None;
-                        app.card_modal_key(k)
-                    }
+                    // Ctrl-C is always copy (Ctrl-Shift-C too); it never quits.
+                    QuitKey::Copy | QuitKey::CtrlC => app.ctrl_c(true, now),
+                    // Ctrl-D quits, except where it already has a meaning: a card modal
+                    // (dismiss) and the theme editor (duplicate).
+                    QuitKey::CtrlD if app.card_modal.is_some() => app.card_modal_key(k),
                     QuitKey::CtrlD if app.editor.is_some() && app.picker.is_none() => {
-                        app.quit_armed = None;
                         app.editor_key(k)
                     }
-                    QuitKey::CtrlD if !app.input.is_empty() && !app.overlay_open() => {
-                        app.quit_armed = None;
-                        app.input_delete()
-                    }
-                    QuitKey::CtrlD => app.ctrl_c(false, now),
+                    QuitKey::CtrlD => app.should_quit = true,
                 }
                 return true;
             }
@@ -1386,7 +1410,13 @@ fn enable_keys(app: &mut App, wait: std::time::Duration) {
         return;
     }
     app.fuzzball_keys = false;
-    app.keyboard_enhancement = enable_shift_enter(app.config.kitty_protocol, wait);
+    let mode =
+        if app.terminal_answers || app.config.kitty_protocol == crate::config::KittyProtocol::On {
+            app.config.kitty_protocol
+        } else {
+            crate::config::KittyProtocol::Off
+        };
+    app.keyboard_enhancement = enable_shift_enter(mode, wait);
 }
 
 /// "fuzzball", "kitty" or "legacy": the keyboard protocol in use.
@@ -1794,45 +1824,21 @@ mod event_batch_tests {
     }
 
     #[test]
-    fn ctrl_c_twice_quits_and_ctrl_q_quits_at_once() {
+    fn ctrl_c_never_quits_and_ctrl_d_or_ctrl_q_quit_at_once() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = test_app(&rt);
-        // Text in the input: the first Ctrl-C clears it.
+        // Ctrl-C copies the input and keeps it; pressing it again never quits.
         app.input = "draft".into();
-        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert!(app.input.is_empty() && !app.should_quit);
-        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert!(!app.should_quit, "one press only asks");
-        let n: Vec<String> = app.notices().iter().map(|e| e.text.clone()).collect();
-        assert!(
-            n.iter().any(|t| t.contains("Press Ctrl-C again to quit")),
-            "{n:?}"
-        );
-        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert!(app.should_quit, "the second press quits");
-        // Too slow: the second press asks again.
-        let (mut app, _d) = test_app(&rt);
-        let t0 = std::time::Instant::now();
-        app.ctrl_c(false, t0);
-        app.ctrl_c(
-            false,
-            t0 + app::QUIT_CONFIRM + std::time::Duration::from_millis(1),
-        );
-        assert!(!app.should_quit);
-        app.ctrl_c(
-            false,
-            t0 + app::QUIT_CONFIRM + std::time::Duration::from_millis(500),
-        );
+        for _ in 0..4 {
+            press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        }
+        assert_eq!(app.input, "draft");
+        assert_eq!(app.pending_clipboard.as_deref(), Some("draft"));
+        assert!(!app.should_quit && app.quit_armed.is_none());
+        // Ctrl-D quits at once, even with text in the input.
+        press(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
         assert!(app.should_quit);
-        // Ctrl-D deletes while there's text, else counts like Ctrl-C.
         let (mut app, _d) = test_app(&rt);
-        app.input = "ab".into();
-        app.input_cursor = 0;
-        press(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
-        assert_eq!(app.input, "b");
-        app.input.clear();
-        press(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
-        assert!(!app.should_quit);
         press(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
         assert!(app.should_quit);
         // In the theme editor Ctrl-D still duplicates (asks for a name).
@@ -1857,15 +1863,15 @@ mod event_batch_tests {
     }
 
     #[test]
-    fn ctrl_c_stops_waiting_for_a_reply_first() {
+    fn ctrl_c_copies_while_waiting_for_a_reply() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = test_app(&rt);
         mock_login(&mut app, "t");
         let bot = app.active_bot().unwrap().id.clone();
         app.awaiting.insert(bot, std::time::Instant::now());
-        assert!(app.is_typing());
         press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert!(!app.is_typing() && !app.should_quit && app.quit_armed.is_none());
+        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(!app.should_quit && app.quit_armed.is_none());
     }
 
     fn post_toast(app: &mut App, id: &str) {
@@ -2012,31 +2018,29 @@ mod event_batch_tests {
         app.input_select_all();
         press(&mut app, KeyCode::Left, KeyModifiers::NONE);
         assert!(app.input_selection().is_none());
-        // Ctrl-Shift-C without a selection copies the whole input; Ctrl-C clears it and
-        // Ctrl-Z brings it back.
+        // Ctrl-Shift-C / Ctrl-C without a selection copy the whole input and keep it.
         press(
             &mut app,
             KeyCode::Char('c'),
             KeyModifiers::CONTROL | KeyModifiers::SHIFT,
         );
         assert_eq!(app.pending_clipboard.as_deref(), Some("x"));
+        app.pending_clipboard = None;
         press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert!(app.input.is_empty());
-        press(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
         assert_eq!(app.input, "x");
+        assert_eq!(app.pending_clipboard.as_deref(), Some("x"));
         assert!(!app.should_quit);
     }
 
     #[test]
-    fn ctrl_c_closes_overlays_and_hints_over_the_chat() {
+    fn ctrl_c_never_quits_over_overlays_or_the_chat() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let (mut app, _d) = test_app(&rt);
         app.open_theme_picker();
         press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert!(app.picker.is_none() && !app.should_quit && app.quit_armed.is_none());
-        app.open_help("keys");
-        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert!(app.help.is_none());
+        assert!(!app.should_quit && app.quit_armed.is_none());
+        press(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+        assert!(app.picker.is_none());
         // The mouse rests on the chat: a hint, never a quit.
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
         term.draw(|f| ui::draw(f, &mut app)).unwrap();
@@ -2047,19 +2051,12 @@ mod event_batch_tests {
         }
         assert!(!app.should_quit);
         assert!(notices_text(&app).contains("Nothing selected"));
-        // Over the header: the double press quits, unless something happens in between.
+        // Over the header too: Ctrl-C never quits.
         handle_event(&mut app, mouse(MouseEventKind::Moved, 0, 0));
-        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
-        press(&mut app, KeyCode::Char('x'), KeyModifiers::NONE);
-        app.input.clear();
-        app.input_cursor = 0;
-        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert!(
-            !app.should_quit,
-            "typing in between disarmed the first press"
-        );
-        press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert!(app.should_quit);
+        for _ in 0..3 {
+            press(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        }
+        assert!(!app.should_quit);
     }
 
     #[test]

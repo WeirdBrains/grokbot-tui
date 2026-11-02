@@ -621,6 +621,8 @@ pub struct App {
     pub keyboard_enhancement: bool,
     /// The Fuzzball keyboard protocol is active (structured key events).
     pub fuzzball_keys: bool,
+    /// The terminal answered the startup DA1 probe (false: queries are skipped).
+    pub terminal_answers: bool,
     /// `/kitty` changed `keys.kitty_protocol`: re-apply it in the event loop.
     pub kitty_reapply: bool,
     /// One-time Apple Terminal newline hint already shown this process.
@@ -921,6 +923,7 @@ impl App {
             tooltip: crate::tooltip::TooltipState::default(),
             keyboard_enhancement: false,
             fuzzball_keys: false,
+            terminal_answers: true,
             kitty_reapply: false,
             apple_newline_hinted: false,
             sidebar_area: Rect::default(),
@@ -3118,7 +3121,7 @@ impl App {
                 true
             }
             "app.ctrl_c" => {
-                self.ctrl_c(false, std::time::Instant::now());
+                self.ctrl_c(true, std::time::Instant::now());
                 true
             }
             "app.ctrl_c_copy" => {
@@ -3432,9 +3435,8 @@ impl App {
         }
     }
 
-    /// Ctrl-C (`copy`: Ctrl-Shift-C), resolved by [`crate::keyctx::ctrl_c`]. Never quits
-    /// at once: a lone Ctrl-C asks, a second within [`QUIT_CONFIRM`] (nothing done in
-    /// between) quits.
+    /// Ctrl-C / Ctrl-Shift-C, resolved by [`crate::keyctx::ctrl_c`]. The key handler always
+    /// passes `copy = true` (Ctrl-C is copy and never quits; Ctrl-D / Ctrl-Q quit).
     pub fn ctrl_c(&mut self, copy: bool, now: Instant) {
         use crate::keyctx::CtrlC;
         let act = crate::keyctx::ctrl_c(&self.key_ctx(now), copy);
@@ -3476,17 +3478,17 @@ impl App {
             CtrlC::BodyHint => self.info(
                 "Nothing selected. Shift-drag (Option-drag in macOS terminals) selects text \
                  with your terminal, F6 turns mouse capture off, /copy copies the last reply. \
-                 Ctrl-Q quits."
+                 Ctrl-D quits."
                     .into(),
             ),
             CtrlC::NothingToCopy => self.info(
                 "Nothing selected to copy. Shift-drag (Option-drag in macOS terminals) selects \
-                 with your terminal; /copy copies the last bot reply."
+                 with your terminal; /copy copies the last bot reply. Ctrl-D quits."
                     .into(),
             ),
             CtrlC::ArmQuit => {
                 self.quit_armed = Some(now);
-                self.info("Press Ctrl-C again to quit (or Ctrl-Q / /quit).".into());
+                self.info("Press Ctrl-C again to quit (or Ctrl-D / Ctrl-Q / /quit).".into());
             }
             CtrlC::Quit => self.should_quit = true,
         }

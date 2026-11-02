@@ -31,6 +31,112 @@ pub fn run<T: Send + 'static>(wait: Duration, f: impl FnOnce() -> T + Send + 'st
     rx.recv_timeout(wait).ok()
 }
 
+/// One shared deadline for all startup queries.
+#[derive(Debug, Clone, Copy)]
+pub struct Budget {
+    deadline: std::time::Instant,
+}
+
+impl Budget {
+    pub fn new(total: Duration) -> Self {
+        Budget {
+            deadline: std::time::Instant::now() + total,
+        }
+    }
+    /// Time left (zero once spent).
+    pub fn left(&self) -> Duration {
+        self.deadline
+            .saturating_duration_since(std::time::Instant::now())
+    }
+    /// Run `f` within what is left of the budget; `None` (without running it) when spent.
+    pub fn run<T: Send + 'static>(&self, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+        let left = self.left();
+        if left.is_zero() {
+            return None;
+        }
+        run(left, f)
+    }
+}
+
+/// Send DA1 (`ESC [ c`, which every VT terminal answers) and wait at most `wait` for the
+/// answer. `false` means the terminal doesn't answer queries at all, so the others are
+/// skipped instead of each waiting for its own timeout. Call in raw mode, before anything
+/// else reads input. Non-unix: assumed to answer (the other queries stay bounded).
+#[cfg(unix)]
+pub fn terminal_answers(wait: Duration) -> bool {
+    use std::io::{Read, Write};
+    use std::os::fd::AsRawFd;
+    let Ok(mut tty) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+    else {
+        return false;
+    };
+    if tty.write_all(b"\x1b[c").and_then(|_| tty.flush()).is_err() {
+        return false;
+    }
+    let deadline = std::time::Instant::now() + wait;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 256];
+    while buf.len() < 4096 {
+        if has_da1(&buf) {
+            return true;
+        }
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        let mut pfd = libc::pollfd {
+            fd: tty.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: one valid pollfd for an open file descriptor we own.
+        let ready = unsafe { libc::poll(&mut pfd, 1, left.as_millis().max(1) as i32) };
+        if ready <= 0 {
+            return has_da1(&buf);
+        }
+        match tty.read(&mut chunk) {
+            Ok(0) | Err(_) => return has_da1(&buf),
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+        }
+    }
+    has_da1(&buf)
+}
+
+#[cfg(not(unix))]
+pub fn terminal_answers(_wait: Duration) -> bool {
+    true
+}
+
+/// A complete DA1 answer (`ESC [ ? … c`) is in `buf`.
+pub fn has_da1(buf: &[u8]) -> bool {
+    buf.windows(3)
+        .position(|w| w == b"\x1b[?")
+        .is_some_and(|i| buf[i + 3..].contains(&b'c'))
+}
+
+/// Throw away terminal input that arrived but wasn't read (late answers to startup
+/// queries), so it can't be taken for key presses.
+pub fn discard_pending_input() {
+    #[cfg(unix)]
+    // SAFETY: tcflush on stdin; harmless if stdin isn't a terminal.
+    unsafe {
+        libc::tcflush(libc::STDIN_FILENO, libc::TCIFLUSH);
+    }
+}
+
+/// Why the UI can't start: stdin or stdout isn't a terminal.
+pub fn no_tty_reason(stdin_tty: bool, stdout_tty: bool) -> Option<&'static str> {
+    match (stdin_tty, stdout_tty) {
+        (true, true) => None,
+        (false, true) => Some("stdin is not a terminal"),
+        (true, false) => Some("stdout is not a terminal"),
+        (false, false) => Some("stdin and stdout are not terminals"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,5 +170,37 @@ mod tests {
         assert_eq!(startup_wait(0), Duration::from_millis(1000));
         assert_eq!(startup_wait(1500), Duration::from_millis(1500));
         assert_eq!(startup_wait(60_000), Duration::from_millis(5000));
+    }
+
+    #[test]
+    fn budget_is_shared_and_skips_when_spent() {
+        let b = Budget::new(Duration::from_millis(150));
+        let t = Instant::now();
+        let a: Option<u8> = b.run(|| {
+            loop {
+                std::thread::sleep(Duration::from_secs(60));
+            }
+        });
+        let c: Option<u8> = b.run(|| {
+            loop {
+                std::thread::sleep(Duration::from_secs(60));
+            }
+        });
+        assert_eq!((a, c), (None, None));
+        assert!(
+            t.elapsed() < Duration::from_millis(600),
+            "{:?}",
+            t.elapsed()
+        );
+        assert_eq!(b.run(|| 1), None);
+        assert_eq!(Budget::new(Duration::from_secs(1)).run(|| 1), Some(1));
+    }
+
+    #[test]
+    fn da1_and_tty_reasons() {
+        assert!(has_da1(b"\x1b[?62;22c"));
+        assert!(!has_da1(b"\x1b[?62;22"));
+        assert_eq!(no_tty_reason(true, true), None);
+        assert_eq!(no_tty_reason(false, true), Some("stdin is not a terminal"));
     }
 }
