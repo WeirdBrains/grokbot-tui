@@ -1,29 +1,10 @@
 //! Detecting whether the terminal has a light or dark background, for the "system"
 //! theme mode ([`crate::theme::Mode::System`]).
 //!
-//! Tried in order, once at startup (before the event loop reads input):
-//! 1. an OSC 11 query (`ESC ] 11 ; ? ST`): the terminal answers with its background color;
+//! Tried in order, once at startup:
+//! 1. the OSC 11 reply (background color) from the startup burst ([`crate::probe`]);
 //! 2. the `COLORFGBG` environment variable (`"15;0"` = light text on black).
-//!
-//! The query is followed by a DA1 request (`ESC [ c`), which every terminal answers, so a
-//! terminal that ignores OSC 11 doesn't make us wait for the timeout.
 use crate::theme::Variant;
-
-/// How long to wait for the terminal's answers.
-#[cfg(unix)]
-const QUERY_TIMEOUT_MS: i32 = 200;
-
-/// Detect the terminal background. Call while the terminal is in raw mode and before
-/// anything else reads stdin. `None` when it can't be told.
-pub fn detect() -> Option<Variant> {
-    query_osc11()
-        .and_then(|reply| parse_osc11(&reply))
-        .or_else(|| {
-            std::env::var("COLORFGBG")
-                .ok()
-                .and_then(|v| parse_colorfgbg(&v))
-        })
-}
 
 /// `COLORFGBG` is `"<fg>;<bg>"` (sometimes `"<fg>;default;<bg>"`) with ANSI color numbers.
 /// Background 7 (light gray) and 9–15 (bright colors, incl. 15 = white) are light;
@@ -66,59 +47,6 @@ pub fn parse_osc11(reply: &[u8]) -> Option<Variant> {
     })
 }
 
-/// True once `buf` holds a complete DA1 answer (`ESC [ ? … c`).
-#[cfg_attr(not(unix), allow(dead_code))]
-fn has_da1(buf: &[u8]) -> bool {
-    buf.windows(3)
-        .position(|w| w == b"\x1b[?")
-        .is_some_and(|i| buf[i + 3..].contains(&b'c'))
-}
-
-/// Send OSC 11 + DA1 to the controlling terminal and collect the answers.
-#[cfg(unix)]
-fn query_osc11() -> Option<Vec<u8>> {
-    use std::io::{Read, Write};
-    use std::os::fd::AsRawFd;
-    use std::time::{Duration, Instant};
-
-    let mut tty = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-        .ok()?;
-    tty.write_all(b"\x1b]11;?\x1b\\\x1b[c").ok()?;
-    tty.flush().ok()?;
-    let deadline = Instant::now() + Duration::from_millis(QUERY_TIMEOUT_MS as u64);
-    let mut buf = Vec::new();
-    let mut chunk = [0u8; 256];
-    while !has_da1(&buf) && buf.len() < 4096 {
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            break;
-        }
-        let mut pfd = libc::pollfd {
-            fd: tty.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        // SAFETY: one valid pollfd for an open file descriptor we own.
-        let ready = unsafe { libc::poll(&mut pfd, 1, left.as_millis() as i32) };
-        if ready <= 0 {
-            break;
-        }
-        match tty.read(&mut chunk) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => buf.extend_from_slice(&chunk[..n]),
-        }
-    }
-    (!buf.is_empty()).then_some(buf)
-}
-
-#[cfg(not(unix))]
-fn query_osc11() -> Option<Vec<u8>> {
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,12 +87,5 @@ mod tests {
         assert_eq!(parse_osc11(b"nonsense"), None);
         assert_eq!(parse_osc11(b"\x1b]11;rgb:zz/00/00\x07"), None);
         assert_eq!(parse_osc11(b"\x1b]11;rgb:00000/0/0\x07"), None);
-    }
-
-    #[test]
-    fn da1_ends_the_wait() {
-        assert!(!has_da1(b"\x1b]11;rgb:0/0/0\x1b\\"));
-        assert!(!has_da1(b"\x1b[?62;22"));
-        assert!(has_da1(b"\x1b]11;rgb:0/0/0\x1b\\\x1b[?62;22c"));
     }
 }

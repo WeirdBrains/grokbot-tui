@@ -47,6 +47,7 @@ mod notify;
 mod notify_rules;
 mod picker;
 mod presence;
+mod probe;
 mod select;
 mod settings;
 mod ssh;
@@ -233,31 +234,27 @@ fn main() -> Result<()> {
     }
 
     let mut term = ratatui::init();
-    // Raw mode is on and nothing reads input yet. All startup queries share one deadline
-    // (graphics.detect_timeout_ms, clamped to 1–5 s). A DA1 probe goes first: a terminal
-    // that doesn't answer it gets safe defaults at once (dark/unknown background, no
-    // Fuzzball, halfblocks images, legacy keys) instead of every query timing out in turn.
+    // Raw mode is on and nothing reads input yet. Every startup query goes out in one
+    // burst ending in DA1, and one reader collects the answers under a single deadline
+    // (graphics.detect_timeout_ms, clamped to 1–5 s), stopping at DA1. A terminal that
+    // answers nothing gets safe defaults (dark/unknown background, no Fuzzball,
+    // halfblocks images, legacy keys) after one deadline.
     let query_wait = bounded::startup_wait(app.config.graphics_detect_timeout_ms);
-    let budget = bounded::Budget::new(query_wait);
-    let answers = bounded::terminal_answers(budget.left());
-    app.terminal_answers = answers;
-    if answers {
-        app.detected_variant = budget.run(appearance::detect).flatten();
-        // Fuzzball first (one query + DA1), then ratatui-image's kitty/sixel/iTerm2 query.
-        let fz_wait = budget.left();
-        app.fuzz_caps = budget.run(move || fuzzball::detect(fz_wait)).flatten();
-        app.image_picker = budget
-            .run(imageview::detect_picker)
-            .unwrap_or_else(ratatui_image::picker::Picker::halfblocks);
-    } else {
-        app.image_picker = ratatui_image::picker::Picker::halfblocks();
-    }
+    let answers = probe::probe(query_wait);
+    app.terminal_answers = answers.da1;
+    app.detected_variant = answers.background.or_else(|| {
+        std::env::var("COLORFGBG")
+            .ok()
+            .and_then(|v| appearance::parse_colorfgbg(&v))
+    });
+    app.fuzz_caps = answers.fuzz.clone();
+    app.image_picker = imageview::picker_from(&answers);
     imageview::apply_images_protocol(&mut app);
     execute!(std::io::stdout(), EnableMouseCapture)?;
     let _ = execute!(std::io::stdout(), EnableBracketedPaste);
     // Focus reports drive the presence claim (released on blur).
     let _ = execute!(std::io::stdout(), event::EnableFocusChange);
-    enable_keys(&mut app, budget.left());
+    enable_keys(&mut app, KeySupport::Known(answers.kitty_keys));
     // Late answers to a query that timed out must not be read as keys.
     bounded::discard_pending_input();
     suspend::install();
@@ -335,7 +332,7 @@ fn run(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             disable_shift_enter();
             enable_keys(
                 app,
-                bounded::startup_wait(app.config.graphics_detect_timeout_ms),
+                KeySupport::Query(bounded::startup_wait(app.config.graphics_detect_timeout_ms)),
             );
             app.info(format!("Keyboard: {}.", keys_mode_name(app)));
             dirty = true;
@@ -1352,17 +1349,28 @@ fn kitty_flags() -> ratatui::crossterm::event::KeyboardEnhancementFlags {
 /// answers the query; on: always; off: never), and always send modifyOtherKeys level 1
 /// (harmless when ignored). Returns whether the kitty protocol is active. Without it the
 /// ESC-prefix Alt handling (`keys.esc_alt_timeout_ms`) stays in use.
-fn enable_shift_enter(mode: crate::config::KittyProtocol, wait: std::time::Duration) -> bool {
+/// Whether the kitty keyboard protocol is supported: known from the startup burst, or
+/// asked again (after a suspend or a settings change).
+#[derive(Debug, Clone, Copy)]
+enum KeySupport {
+    Known(bool),
+    Query(std::time::Duration),
+}
+
+fn enable_shift_enter(mode: crate::config::KittyProtocol, support: KeySupport) -> bool {
     use crate::config::KittyProtocol;
     use ratatui::crossterm::event::PushKeyboardEnhancementFlags;
     use std::io::Write;
     let push = match mode {
         KittyProtocol::Off => false,
         KittyProtocol::On => true,
-        KittyProtocol::Auto => bounded::run(wait, || {
-            ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
-        })
-        .unwrap_or(false),
+        KittyProtocol::Auto => match support {
+            KeySupport::Known(k) => k,
+            KeySupport::Query(wait) => bounded::run(wait, || {
+                ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
+            })
+            .unwrap_or(false),
+        },
     };
     let mut out = std::io::stdout();
     if push {
@@ -1395,7 +1403,7 @@ pub fn want_fuzzball_keys(
 /// kitty per `keys.kitty_protocol`, else legacy keys. Sets `app.fuzzball_keys` and
 /// `app.keyboard_enhancement` (true for Fuzzball and kitty: both report Alt and a plain
 /// Esc unambiguously).
-fn enable_keys(app: &mut App, wait: std::time::Duration) {
+fn enable_keys(app: &mut App, support: KeySupport) {
     if want_fuzzball_keys(app.config.keys_protocol, app.fuzz_caps.as_ref()) {
         use std::io::Write;
         let mut out = std::io::stdout();
@@ -1416,7 +1424,7 @@ fn enable_keys(app: &mut App, wait: std::time::Duration) {
         } else {
             crate::config::KittyProtocol::Off
         };
-    app.keyboard_enhancement = enable_shift_enter(mode, wait);
+    app.keyboard_enhancement = enable_shift_enter(mode, support);
 }
 
 /// "fuzzball", "kitty" or "legacy": the keyboard protocol in use.
@@ -1499,7 +1507,7 @@ fn suspend_and_resume(term: &mut ratatui::DefaultTerminal, app: &mut App) -> Res
     let _ = execute!(std::io::stdout(), event::EnableFocusChange);
     enable_keys(
         app,
-        bounded::startup_wait(app.config.graphics_detect_timeout_ms),
+        KeySupport::Query(bounded::startup_wait(app.config.graphics_detect_timeout_ms)),
     );
     app.needs_clear = true;
     app.force_clear = true;

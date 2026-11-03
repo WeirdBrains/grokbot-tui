@@ -21,9 +21,6 @@ const GQ_ID: u32 = 2;
 /// Default bound on the detection wait (`graphics.detect_timeout_ms`). The terminal's DA1
 /// answer ends the wait at once, so this only matters on slow links (SSH).
 pub const DEFAULT_DETECT_TIMEOUT_MS: u64 = 1500;
-/// Extra wait after DA1 inside tmux (tmux answers DA1 itself, then forwards passthrough).
-#[cfg(unix)]
-const TMUX_EXTRA_MS: u64 = 80;
 /// GNU screen passthrough pieces (spec §3.2: at most 768 bytes).
 const SCREEN_PIECE: usize = 768;
 /// Largest pixel edge we upload (the terminal scales to the cells).
@@ -185,74 +182,6 @@ pub fn parse_caps(buf: &[u8], mux: Mux) -> Option<Caps> {
         }
     }
     Some(caps)
-}
-
-/// True once `buf` holds a complete DA1 answer (`ESC [ ? … c`).
-#[cfg(unix)]
-fn has_da1(buf: &[u8]) -> bool {
-    buf.windows(3)
-        .position(|w| w == b"\x1b[?")
-        .is_some_and(|i| buf[i + 3..].contains(&b'c'))
-}
-
-/// Ask the controlling terminal. Call in raw mode before anything else reads stdin.
-/// `GROKBOT_TUI_FUZZBALL=off` skips the query.
-#[cfg(unix)]
-pub fn detect(timeout: std::time::Duration) -> Option<Caps> {
-    use std::io::{Read, Write};
-    use std::os::fd::AsRawFd;
-    use std::time::{Duration, Instant};
-    if std::env::var_os("GROKBOT_TUI_FUZZBALL").is_some_and(|v| v == "off") {
-        return None;
-    }
-    let mux = Mux::from_env();
-    let mut tty = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-        .ok()?;
-    tty.write_all(detect_query(mux).as_bytes()).ok()?;
-    tty.flush().ok()?;
-    let mut deadline = Instant::now() + timeout;
-    let mut extended = false;
-    let mut buf = Vec::new();
-    let mut chunk = [0u8; 512];
-    while buf.len() < 8192 {
-        if has_da1(&buf) {
-            // Direct: the Fuzzball reply comes before DA1. tmux: wait a little more.
-            if mux != Mux::Tmux || parse_caps(&buf, mux).is_some() {
-                break;
-            }
-            if !extended {
-                extended = true;
-                deadline = deadline.min(Instant::now() + Duration::from_millis(TMUX_EXTRA_MS));
-            }
-        }
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            break;
-        }
-        let mut pfd = libc::pollfd {
-            fd: tty.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        // SAFETY: one valid pollfd for an open file descriptor we own.
-        let ready = unsafe { libc::poll(&mut pfd, 1, left.as_millis() as i32) };
-        if ready <= 0 {
-            break;
-        }
-        match tty.read(&mut chunk) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => buf.extend_from_slice(&chunk[..n]),
-        }
-    }
-    parse_caps(&buf, mux)
-}
-
-#[cfg(not(unix))]
-pub fn detect(_timeout: std::time::Duration) -> Option<Caps> {
-    None
 }
 
 pub fn b64(b: &[u8]) -> String {

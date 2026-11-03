@@ -42,14 +42,70 @@ pub struct ImageView {
 /// The decoded image (or why not), sent back from the loader task.
 pub type Loaded = Result<(image::DynamicImage, u64), String>;
 
-/// Ask the terminal which graphics protocol it speaks; halfblocks when it can't say
-/// (Windows console, tmux without passthrough, pipes). Call after raw mode / alternate
-/// screen and before reading events.
-pub fn detect_picker() -> Picker {
-    if std::env::var_os("GROKBOT_TUI_IMAGES").is_some_and(|v| v == "halfblocks") {
+/// Build the picker from the startup burst's answers ([`crate::probe`]): kitty graphics,
+/// else sixel (from DA1), else iTerm2 by environment, else halfblocks. Images need a cell
+/// size: from `CSI 16 t`, else the window size in pixels; without one, halfblocks.
+pub fn picker_from(a: &crate::probe::Answers) -> Picker {
+    use ratatui_image::picker::ProtocolType;
+    if !crate::probe::Want::from_env().images {
         return Picker::halfblocks();
     }
-    Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks())
+    let Some(cell) = a.cell.or_else(window_cell_size) else {
+        return Picker::halfblocks();
+    };
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    // WezTerm and Konsole: their kitty placeholders / sixel are unreliable (as upstream).
+    let blacklisted = env("WEZTERM_EXECUTABLE").is_some() || env("KONSOLE_VERSION").is_some();
+    let iterm2 = env("TERM_PROGRAM").is_some_and(|t| {
+        [
+            "iTerm",
+            "WezTerm",
+            "mintty",
+            "vscode",
+            "Tabby",
+            "Hyper",
+            "rio",
+            "Bobcat",
+            "WarpTerminal",
+        ]
+        .iter()
+        .any(|n| t.contains(n))
+    }) || env("LC_TERMINAL").is_some_and(|t| t.contains("iTerm"));
+    #[allow(deprecated)]
+    let mut p = Picker::from_fontsize(ratatui_image::FontSize::new(cell.0, cell.1));
+    let proto = if a.kitty_graphics && !blacklisted {
+        Some(ProtocolType::Kitty)
+    } else if a.sixel && !blacklisted {
+        Some(ProtocolType::Sixel)
+    } else if iterm2 {
+        Some(ProtocolType::Iterm2)
+    } else {
+        None
+    };
+    if let Some(proto) = proto {
+        p.set_protocol_type(proto);
+    }
+    p
+}
+
+/// Cell size from the window size in pixels (`TIOCGWINSZ`), when the terminal reports it.
+fn window_cell_size() -> Option<(u16, u16)> {
+    #[cfg(unix)]
+    {
+        let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+        // SAFETY: TIOCGWINSZ fills a winsize we own.
+        if unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) } != 0
+            || ws.ws_col == 0
+            || ws.ws_row == 0
+            || ws.ws_xpixel == 0
+            || ws.ws_ypixel == 0
+        {
+            return None;
+        }
+        Some((ws.ws_xpixel / ws.ws_col, ws.ws_ypixel / ws.ws_row))
+    }
+    #[cfg(not(unix))]
+    None
 }
 
 /// Pick the graphics path per `images.protocol`: Fuzzball (if it answered), then kitty,

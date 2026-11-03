@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.37.3] - 2026-11-02
+
+### Changed
+- Startup terminal queries are truly concurrent: the background colour, Fuzzball
+  capability / graphics, kitty graphics, kitty keyboard, cell size and cursor position
+  queries go out in one burst followed by DA1, and a single reader routes each reply by
+  its type under the shared `graphics.detect_timeout_ms` deadline, stopping at DA1. A
+  slow terminal now costs its slowest reply instead of the sum (simulated: 0.76 s, was
+  cut off at the 1.5 s deadline with answers lost); a silent one still draws after one
+  deadline (~1.5 s). Late replies are still discarded.
+
 ## [1.37.2] - 2026-11-02
 
 ### Changed
