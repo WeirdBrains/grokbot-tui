@@ -16,6 +16,8 @@ mod datadir;
 mod download;
 mod emoji;
 mod emojipicker;
+#[cfg(test)]
+mod envvars;
 mod fuzzball;
 mod fuzzy;
 mod help;
@@ -2407,5 +2409,86 @@ mod fuzzball_keys_tests {
         assert!(!want_fuzzball_keys(K::Auto, None));
         assert!(!want_fuzzball_keys(K::Auto, Some(&caps(false, Mux::None))));
         assert!(!want_fuzzball_keys(K::Auto, Some(&caps(true, Mux::Tmux))));
+    }
+}
+
+#[cfg(test)]
+mod man_tests {
+    use super::Cli;
+    use clap::CommandFactory;
+
+    /// The ENVIRONMENT and FILES sections appended to grokbot-tui.1.
+    fn extra_sections() -> String {
+        let esc = |s: &str| s.replace('\\', "\\\\").replace('-', "\\-");
+        let mut s = String::from(".SH ENVIRONMENT\n");
+        for (name, desc) in crate::envvars::ENV_VARS {
+            s.push_str(&format!(".TP\n\\fB{}\\fR\n{}\n", esc(name), esc(desc)));
+        }
+        s.push_str(".PP\nEvery older GB_* name (e.g. GB_GROKBOT_TOKEN) still works when its GROKBOT_TUI_* name is not set.\n");
+        s.push_str(".SH FILES\n.TP\n\\fI~/.grokbot\\-tui/context.db\\fR\nAccounts, logins, chats, prompt history, preferences and the search index (override the directory with \\fB\\-\\-data\\-dir\\fR).\n.TP\n\\fI<data dir>/themes/\\fR\nTheme files (see \\fB\\-\\-list\\-themes\\fR).\n");
+        s.push_str(".SH SEE ALSO\nIn\\-app help: F1 or /help. Docs: https://weirdbrains.github.io/grokbot\\-tui/docs/\n");
+        s
+    }
+
+    /// Every man page, generated from the clap definitions (`UPDATE_MAN=1 cargo test man_pages` rewrites man/).
+    fn pages() -> Vec<(String, Vec<u8>)> {
+        let tmp = tempfile::tempdir().unwrap();
+        clap_mangen::generate_to(Cli::command(), tmp.path()).unwrap();
+        let mut v: Vec<(String, Vec<u8>)> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .map(|e| {
+                let p = e.unwrap().path();
+                let name = p.file_name().unwrap().to_string_lossy().to_string();
+                let mut b = std::fs::read(&p).unwrap();
+                if name == "grokbot-tui.1" {
+                    b.extend_from_slice(extra_sections().as_bytes());
+                }
+                (name, b)
+            })
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn man_pages_are_current() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("man");
+        let want = pages();
+        if std::env::var_os("UPDATE_MAN").is_some() {
+            std::fs::create_dir_all(&dir).unwrap();
+            for e in std::fs::read_dir(&dir).unwrap() {
+                let _ = std::fs::remove_file(e.unwrap().path());
+            }
+            for (n, b) in &want {
+                std::fs::write(dir.join(n), b).unwrap();
+            }
+        }
+        let mut have: Vec<String> = std::fs::read_dir(&dir)
+            .map(|r| {
+                r.map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        have.sort();
+        let names: Vec<String> = want.iter().map(|(n, _)| n.clone()).collect();
+        assert_eq!(
+            have, names,
+            "man/ is stale: run UPDATE_MAN=1 cargo test man_pages"
+        );
+        for (n, b) in &want {
+            assert!(
+                std::fs::read(dir.join(n)).unwrap() == *b,
+                "man/{n} is stale: run UPDATE_MAN=1 cargo test man_pages"
+            );
+        }
+        // Every flag is in the page.
+        let main =
+            String::from_utf8_lossy(&want.iter().find(|(n, _)| n == "grokbot-tui.1").unwrap().1)
+                .to_string();
+        for a in Cli::command().get_arguments() {
+            if let Some(l) = a.get_long() {
+                assert!(main.contains(&l.replace('-', "\\-")), "--{l} missing");
+            }
+        }
     }
 }

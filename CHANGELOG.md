@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.40.0] - 2026-11-04
+
+### Added
+- Website: <https://weirdbrains.github.io/grokbot-tui/> (GitHub Pages, `gh-pages`
+  branch): front page with a hero screenshot, features, downloads that always point at
+  the latest release, a screenshot gallery, a Themes page with every built-in theme in
+  dark and light (18 shots), and every doc rendered as a page. Built by `site/build.py`,
+  checked by `site/check.py`; see `docs/website.md` (deploying, adding a custom domain).
+- Screenshots generated headlessly: the ignored test `app::screenshots::site_screenshots`
+  drives the TUI with the mock API in a temp data dir and renders each screen to HTML;
+  `scripts/screenshots.sh` turns them into PNGs with headless Chromium.
+- Docs: a guide per feature in `docs/` (install and downloads per OS, login and accounts,
+  chats and bots, team bots and groups, attachments, images and terminal graphics,
+  search, notifications, browser and SSH, themes, keybindings and vim mode, settings,
+  MCP, configuration and environment variables, data and privacy, troubleshooting,
+  development, website) with a `docs/README.md` index.
+- `docs/reference/help.md`: every in-app help page, generated from the app's help
+  source; a test fails when it is stale (`UPDATE_DOCS=1 cargo test help_reference`).
+- Man pages in `man/` (`grokbot-tui.1` plus the `mcp` subcommands), generated with
+  `clap_mangen` from the CLI definitions, with ENVIRONMENT (every `GROKBOT_TUI_*`
+  variable) and FILES sections; a test keeps them current
+  (`UPDATE_MAN=1 cargo test man_pages`). The `.deb`, `.rpm` and `make install` install
+  them.
+- One list of environment variables (`src/envvars.rs`); a test checks every
+  `GROKBOT_TUI_*` name the source reads is in it, in `/help env`, the man page and
+  `docs/config.md`.
+
+### Changed
+- `/help env` now also lists `GROKBOT_TUI_MAX_RESPONSE_BYTES`,
+  `GROKBOT_TUI_NO_HYPERLINKS`, `GROKBOT_TUI_FORCE_SSH`, `GROKBOT_TUI_FUZZBALL` and
+  `GROKBOT_TUI_IMAGES`.
+- Finished plans moved to `docs/historical/` (theme editor, vim mode, notifications
+  menu and tooltips).
+- The crate homepage is the website; the README links the site, docs and man page.
+- `install-local.sh` installs the man pages from `man/`.
+
 ## [1.39.1] - 2026-11-04
 
 ### Fixed

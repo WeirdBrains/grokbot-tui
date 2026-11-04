@@ -662,6 +662,16 @@ Other
       Never download the default theme (see /help theme-files).
   GROKBOT_TUI_THEME_URL
       Download themes from here instead of the release tag (<url><name>.toml).
+  GROKBOT_TUI_MAX_RESPONSE_BYTES
+      Cap on one gateway response body in bytes (default 64 MiB).
+  GROKBOT_TUI_NO_HYPERLINKS
+      Set to turn off OSC 8 hyperlinks.
+  GROKBOT_TUI_FORCE_SSH=0|1
+      Override SSH detection (see /help keys, SSH).
+  GROKBOT_TUI_FUZZBALL=off
+      Skip the Fuzzball capability query at startup.
+  GROKBOT_TUI_IMAGES=halfblocks
+      Skip the terminal graphics query; draw images with half blocks.
   The library's own names GROKBOT_ALLOW_LOCAL_GATEWAY and GROKBOT_APP_DIR work too.
 
 Older names: every GB_* variable (e.g. GB_GROKBOT_TOKEN) still works when its
@@ -1150,6 +1160,134 @@ pub fn hint_for_error(msg: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
     use crate::commands::registry;
+
+    /// docs/reference/help.md is every in-app help page, generated from the same
+    /// source (`UPDATE_DOCS=1 cargo test help_reference` rewrites it).
+    pub fn help_reference() -> String {
+        let r = registry();
+        let mut out = String::from(
+            "# In-app help reference\n\n<!-- Generated from src/help.rs and src/commands.rs by \
+             `UPDATE_DOCS=1 cargo test help_reference`; do not edit. -->\n\n\
+             Every page of the built-in help (`F1`, `/help <topic>`), exactly as the app shows it.\n\n",
+        );
+        let names = all_names(&r);
+        out.push_str("Topics and commands: ");
+        out.push_str(
+            &names
+                .iter()
+                .map(|n| format!("[{n}](#{n})"))
+                .collect::<Vec<_>>()
+                .join(" · "),
+        );
+        out.push('\n');
+        for name in names {
+            let p = page(&r, &name).unwrap();
+            out.push_str(&format!(
+                "\n<a id=\"{name}\"></a>\n\n## {}\n\n`/help {name}`\n\n```text\n{}\n```\n",
+                p.title,
+                p.body.trim_end()
+            ));
+            if !p.related.is_empty() {
+                out.push_str(&format!(
+                    "\nRelated: {}\n",
+                    p.related
+                        .iter()
+                        .map(|r| format!("[{r}](#{})", normalize(r)))
+                        .collect::<Vec<_>>()
+                        .join(" · ")
+                ));
+            }
+        }
+        out
+    }
+
+    /// docs/README.md lists every guide, every relative link in docs/ resolves, and every
+    /// screenshot the site lists exists.
+    #[test]
+    fn docs_index_and_links_resolve() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let docs = root.join("docs");
+        let index = std::fs::read_to_string(docs.join("README.md")).unwrap();
+        let mut stack = vec![docs.clone()];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    if !p.ends_with("historical") {
+                        stack.push(p);
+                    }
+                    continue;
+                }
+                if p.extension().and_then(|x| x.to_str()) != Some("md") {
+                    continue;
+                }
+                let rel = p
+                    .strip_prefix(&docs)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if rel != "README.md" {
+                    assert!(
+                        index.contains(&format!("({rel})")),
+                        "docs/README.md misses {rel}"
+                    );
+                }
+                let s = std::fs::read_to_string(&p).unwrap();
+                assert!(s.starts_with("# "), "{rel} has no title");
+                let mut in_code = false;
+                for line in s.lines() {
+                    if line.trim_start().starts_with("```") {
+                        in_code = !in_code;
+                    }
+                    if in_code {
+                        continue;
+                    }
+                    for (i, _) in line.match_indices("](") {
+                        let rest = &line[i + 2..];
+                        let Some(end) = rest.find(')') else { continue };
+                        let href = &rest[..end];
+                        if href.starts_with("http")
+                            || href.starts_with('#')
+                            || href.starts_with("mailto:")
+                            || href == "url"
+                        {
+                            continue;
+                        }
+                        let path = href.split('#').next().unwrap();
+                        assert!(
+                            p.parent().unwrap().join(path).exists(),
+                            "{rel}: broken link {href}"
+                        );
+                    }
+                }
+            }
+        }
+        for line in std::fs::read_to_string(root.join("site/shots.tsv"))
+            .unwrap()
+            .lines()
+        {
+            let name = line.split('\t').next().unwrap();
+            assert!(
+                root.join(format!("site/screenshots/{name}.png")).exists(),
+                "{name}.png"
+            );
+        }
+    }
+
+    #[test]
+    fn help_reference_doc_is_current() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/reference/help.md");
+        let want = help_reference();
+        if std::env::var_os("UPDATE_DOCS").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &want).unwrap();
+        }
+        let have = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            have == want,
+            "docs/reference/help.md is stale: run UPDATE_DOCS=1 cargo test help_reference"
+        );
+    }
 
     #[test]
     fn every_topic_and_command_renders_with_resolvable_related() {

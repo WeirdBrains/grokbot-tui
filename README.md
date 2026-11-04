@@ -1,5 +1,11 @@
 # grokbot-tui — Grok Bot TUI
 
+**Website: <https://weirdbrains.github.io/grokbot-tui/>** · [Docs](docs/README.md) ·
+[Themes](https://weirdbrains.github.io/grokbot-tui/themes/) · [Man page](man/grokbot-tui.1) ·
+[Downloads](https://github.com/WeirdBrains/grokbot-tui/releases/latest)
+
+![grokbot-tui: bot list on the left, message bubbles with reactions, and the attachments bar pulled out on the right](site/screenshots/chat.png)
+
 [![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
 A terminal UI for Grok Bot, written in Rust (2024 edition, Rust 1.89 or newer) with ratatui + crossterm.

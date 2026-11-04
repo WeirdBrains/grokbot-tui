@@ -1,0 +1,103 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH grokbot-tui 1  "grokbot-tui 1.40.0" 
+.SH NAME
+grokbot\-tui \- Terminal UI for Grok Bot
+.SH SYNOPSIS
+\fBgrokbot\-tui\fR [\fB\-\-mock\fR] [\fB\-\-account\fR] [\fB\-\-data\-dir\fR] [\fB\-\-theme\fR] [\fB\-\-list\-themes\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIsubcommands\fR]
+.SH DESCRIPTION
+Terminal UI for Grok Bot
+.SH OPTIONS
+.TP
+\fB\-\-mock\fR
+Use the offline mock API (fake bots, echo replies; any token except "bad" works)
+.TP
+\fB\-\-account\fR \fI<ALIAS>\fR
+Account alias to start in (default: last active account)
+.RS
+May also be specified with the \fBGROKBOT_TUI_ACCOUNT\fR environment variable. 
+.RE
+.TP
+\fB\-\-data\-dir\fR \fI<DIR>\fR
+Data directory holding context.db (default ~/.grokbot\-tui; a pre\-1.2 ~/.gb is moved there)
+.TP
+\fB\-\-theme\fR \fI<NAME>\fR
+Use this theme (a file in <data dir>/themes, without .toml) for this run only; the ui.theme pref, F5 or /theme use set it for good
+.TP
+\fB\-\-list\-themes\fR
+List the themes in <data dir>/themes (● marks the one in use; broken files say why) and exit
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version
+.SH SUBCOMMANDS
+.TP
+grokbot\-tui\-mcp(1)
+MCP server for other agents (Claude Code, Cursor, ...): `mcp serve [\-\-stdio|\-\-http [ADDR]]`, `mcp token`, `mcp config`
+.SH VERSION
+v1.40.0
+.SH ENVIRONMENT
+.TP
+\fBGROKBOT_TUI_TOKEN\fR
+Gateway token override for the startup account (never saved).
+.TP
+\fBGROKBOT_TUI_GATEWAY_URL\fR
+Gateway URL for that token (else the stored URL).
+.TP
+\fBGROKBOT_TUI_GATEWAY_HEADERS\fR
+JSON object of extra gateway headers.
+.TP
+\fBGROKBOT_TUI_CURSOR_API_BASE_URL\fR
+Cursor backend for the EnsureSandBox exchange (must be *.cursor.sh / *.cursor.com).
+.TP
+\fBGROKBOT_TUI_CURSOR_CLIENT_VERSION\fR
+x\-cursor\-client\-version (env > pref cursor.client_version > detected app > 0.70.2).
+.TP
+\fBGROKBOT_TUI_CURSOR_CLIENT_TYPE\fR
+x\-cursor\-client\-type (default sand).
+.TP
+\fBGROKBOT_TUI_SAND_BOX_NAMESPACE\fR
+x\-sand\-box\-namespace (default prod).
+.TP
+\fBGROKBOT_TUI_ACCOUNT\fR
+Starting account alias (same as \-\-account).
+.TP
+\fBGROKBOT_TUI_ALLOW_LOCAL_GATEWAY\fR
+Set to 1 to allow http(s) loopback gateways (development).
+.TP
+\fBGROKBOT_TUI_APP_DIR\fR
+Grok Bot desktop install dir, for version detection.
+.TP
+\fBGROKBOT_TUI_MAX_RESPONSE_BYTES\fR
+Cap on one gateway response body in bytes (default 64 MiB).
+.TP
+\fBGROKBOT_TUI_NO_THEME_DOWNLOAD\fR
+Set to 1 to never download the default theme.
+.TP
+\fBGROKBOT_TUI_THEME_URL\fR
+Download themes from here instead of the release tag (<url><name>.toml).
+.TP
+\fBGROKBOT_TUI_NO_HYPERLINKS\fR
+Set (to anything) to turn off OSC 8 hyperlinks.
+.TP
+\fBGROKBOT_TUI_FORCE_SSH\fR
+0 or 1: override SSH detection (links use the built\-in browser over SSH).
+.TP
+\fBGROKBOT_TUI_FUZZBALL\fR
+off: skip the Fuzzball capability query at startup.
+.TP
+\fBGROKBOT_TUI_IMAGES\fR
+halfblocks: skip the terminal graphics query and draw images with half blocks.
+.PP
+Every older GB_* name (e.g. GB_GROKBOT_TOKEN) still works when its GROKBOT_TUI_* name is not set.
+.SH FILES
+.TP
+\fI~/.grokbot\-tui/context.db\fR
+Accounts, logins, chats, prompt history, preferences and the search index (override the directory with \fB\-\-data\-dir\fR).
+.TP
+\fI<data dir>/themes/\fR
+Theme files (see \fB\-\-list\-themes\fR).
+.SH SEE ALSO
+In\-app help: F1 or /help. Docs: https://weirdbrains.github.io/grokbot\-tui/docs/

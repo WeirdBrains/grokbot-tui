@@ -6515,3 +6515,7 @@ mod msg_search_tests {
         assert!(screen.contains("indexing… 42%"), "{screen}");
     }
 }
+
+#[cfg(test)]
+#[path = "screenshots.rs"]
+mod screenshots;

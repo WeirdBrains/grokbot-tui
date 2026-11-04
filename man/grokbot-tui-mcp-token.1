@@ -1,0 +1,16 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH grokbot-tui-mcp-token 1  "token " 
+.SH NAME
+grokbot\-tui\-mcp\-token \- Print the HTTP bearer token (created on first use) for a client\*(Aqs config
+.SH SYNOPSIS
+\fBgrokbot\-tui mcp token\fR [\fB\-\-rotate\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Print the HTTP bearer token (created on first use) for a client\*(Aqs config
+.SH OPTIONS
+.TP
+\fB\-\-rotate\fR
+Make a new token; clients using the old one stop working
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

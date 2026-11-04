@@ -84,7 +84,7 @@ install_files() {
   for f in "$ROOT"/themes/*.toml; do inst 644 "$f" "$DATADIR/themes"; done
   inst 644 "$ROOT/keymap/default.toml" "$DATADIR/keymap"
   inst 644 "$ROOT/notify-rules/default.toml" "$DATADIR/notify-rules"
-  for f in "$ROOT"/packaging/man/*.1; do inst 644 "$f" "$MANDIR"; done
+  for f in "$ROOT"/man/*.1; do inst 644 "$f" "$MANDIR"; done
   inst 644 "$ROOT/packaging/completions/$NAME.bash" "$BASHDIR" "$NAME"
   inst 644 "$ROOT/packaging/completions/_$NAME" "$ZSHDIR"
   inst 644 "$ROOT/packaging/completions/$NAME.fish" "$FISHDIR"

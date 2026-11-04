@@ -1,0 +1,23 @@
+chat	Chat: bot list on the left, message bubbles with reactions, and the attachments bar pulled out on the right
+chat-compact	The same chat with the right-hand bar tucked away
+search	Ctrl-F searches every bot's messages and attachments locally
+help	Built-in help: the same guides as the docs
+theme-picker	Pick a theme with a live preview (F5)
+theme-catppuccin-dark	Catppuccin (dark)
+theme-catppuccin-light	Catppuccin (light)
+theme-default-dark	Default (dark)
+theme-default-light	Default (light)
+theme-dracula-dark	Dracula (dark)
+theme-dracula-light	Dracula (light)
+theme-gruvbox-dark	Gruvbox (dark)
+theme-gruvbox-light	Gruvbox (light)
+theme-nord-dark	Nord (dark)
+theme-nord-light	Nord (light)
+theme-one-dark	One (dark)
+theme-one-light	One (light)
+theme-rose-pine-dark	Rosé Pine (dark)
+theme-rose-pine-light	Rosé Pine (light)
+theme-solarized-dark	Solarized (dark)
+theme-solarized-light	Solarized (light)
+theme-tokyo-night-dark	Tokyo Night (dark)
+theme-tokyo-night-light	Tokyo Night (light)

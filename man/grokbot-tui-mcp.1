@@ -1,0 +1,23 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH grokbot-tui-mcp 1  "mcp " 
+.SH NAME
+grokbot\-tui\-mcp \- MCP server for other agents (Claude Code, Cursor, ...): `mcp serve [\-\-stdio|\-\-http [ADDR]]`, `mcp token`, `mcp config`
+.SH SYNOPSIS
+\fBgrokbot\-tui mcp\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+MCP server for other agents (Claude Code, Cursor, ...): `mcp serve [\-\-stdio|\-\-http [ADDR]]`, `mcp token`, `mcp config`
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+grokbot\-tui\-mcp\-serve(1)
+Run the MCP server (stdio by default; \-\-http for streamable HTTP on localhost)
+.TP
+grokbot\-tui\-mcp\-token(1)
+Print the HTTP bearer token (created on first use) for a client\*(Aqs config
+.TP
+grokbot\-tui\-mcp\-config(1)
+Show the MCP settings in use and where they live

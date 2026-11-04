@@ -1,0 +1,22 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH grokbot-tui-mcp-serve 1  "serve " 
+.SH NAME
+grokbot\-tui\-mcp\-serve \- Run the MCP server (stdio by default; \-\-http for streamable HTTP on localhost)
+.SH SYNOPSIS
+\fBgrokbot\-tui mcp serve\fR [\fB\-\-stdio\fR] [\fB\-\-http\fR] [\fB\-\-read\-only\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Run the MCP server (stdio by default; \-\-http for streamable HTTP on localhost)
+.SH OPTIONS
+.TP
+\fB\-\-stdio\fR
+Serve over stdin/stdout (default)
+.TP
+\fB\-\-http\fR [\fI<ADDR>\fR]
+Serve streamable HTTP at ADDR (loopback only; default from mcp.toml, else 127.0.0.1:8765). Clients send `Authorization: Bearer <grokbot\-tui mcp token>`
+.TP
+\fB\-\-read\-only\fR
+Refuse send_message and answer_card for this run (overrides mcp.toml)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

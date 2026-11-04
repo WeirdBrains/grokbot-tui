@@ -1,11 +1,11 @@
 [package]
 name = "grokbot-tui"
-version = "1.39.1"
+version = "1.40.0"
 edition = "2024"
 rust-version = "1.89"
 license = "GPL-3.0-or-later"
 authors = ["Michael Christenson II <m3talsmith@gmail.com>"]
-homepage = "https://github.com/WeirdBrains/grokbot-tui"
+homepage = "https://weirdbrains.github.io/grokbot-tui/"
 repository = "https://github.com/WeirdBrains/grokbot-tui"
 description = "Terminal UI for Grok Bot"
 readme = "README.md"
@@ -35,6 +35,7 @@ assets = [
     ["target/release/grokbot-tui", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/grokbot-tui/README.md", "644"],
     ["THIRD_PARTY.md", "usr/share/doc/grokbot-tui/THIRD_PARTY.md", "644"],
+    ["man/*.1", "usr/share/man/man1/", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -45,6 +46,7 @@ assets = [
     { source = "README.md", dest = "/usr/share/doc/grokbot-tui/README.md", mode = "644", doc = true },
     { source = "LICENSE", dest = "/usr/share/licenses/grokbot-tui/LICENSE", mode = "644", doc = true },
     { source = "THIRD_PARTY.md", dest = "/usr/share/doc/grokbot-tui/THIRD_PARTY.md", mode = "644", doc = true },
+    { source = "man/*.1", dest = "/usr/share/man/man1/", mode = "644", doc = true },
 ]
 
 [[bin]]
@@ -97,6 +99,7 @@ libc = "0.2"
 
 
 [dev-dependencies]
+clap_mangen = "0.2"
 tempfile = "3"
 wiremock = "0.6"
 rmcp = { version = "3.8", default-features = false, features = ["client", "server", "transport-async-rw"] }
