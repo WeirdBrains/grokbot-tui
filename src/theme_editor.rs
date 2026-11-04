@@ -1861,7 +1861,7 @@ fn draw_list(f: &mut Frame, ed: &mut ThemeEditor, area: Rect) {
         };
         let sample = if info.framed {
             let b = v.resolve(s).border.unwrap_or(Color::Reset);
-            Span::styled("┌──┐", ratatui::style::Style::default().fg(b))
+            Span::styled("╭──╮", ratatui::style::Style::default().fg(b))
         } else {
             v.style(s).span(" Aa ")
         };
@@ -2237,7 +2237,7 @@ fn draw_detail(f: &mut Frame, ed: &mut ThemeEditor, area: Rect) {
             lines.push(Line::from(spans));
             let sample = if info.framed {
                 let b = v.resolve(s).border.unwrap_or(Color::Reset);
-                Span::styled("┌ box border ┐", ratatui::style::Style::default().fg(b))
+                Span::styled("╭ box border ╮", ratatui::style::Style::default().fg(b))
             } else {
                 v.style(s).span(" The quick brown fox ")
             };

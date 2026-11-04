@@ -743,6 +743,7 @@ pub fn draw(f: &mut Frame, b: &mut Browser, ssh: bool) {
     };
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(rs(theme::browser_frame()))
         .title(Span::styled(title, rs(theme::browser_status())));
     let inner = block.inner(area);

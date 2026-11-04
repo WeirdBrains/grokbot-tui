@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.38.0] - 2026-11-04
+
+### Changed
+- Rounded corners everywhere, to match the desktop Grok Bot app: every themed frame
+  (chat, input, sidebar, help, pickers, shell, toasts, modals), the attachment panel,
+  settings, inbox and browser dialogs, markdown tables and the theme editor previews
+  now draw `╭╮╰╯` instead of `┌┐└┘`.
+- Chat messages sit on a rounded bubble: a `╭─╮` / `│ … │` / `╰─╯` frame around each
+  message's text (yours accent-coloured and right-aligned, the bot's muted and
+  left-aligned), its text wrapped 4 columns narrower for the sides. Links, code-block
+  [⧉] buttons, selection/copy and click-to-react follow the new columns; inline images,
+  media, cards and download rows stay under the bubble.
+- Reaction pills moved from their own row under a message to the bubble's top border,
+  at its top-right corner (like the desktop's reaction pill). The [⧉] [☺+] buttons stay
+  in the row after the message.
+
 ## [1.37.4] - 2026-11-03
 
 ### Fixed

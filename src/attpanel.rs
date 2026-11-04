@@ -297,6 +297,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         let hdr = Rect { height: h, ..area };
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(rs(theme::attach_panel_frame()));
         let inner = block.inner(hdr);
         f.render_widget(block, hdr);
@@ -314,6 +315,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(rs(theme::attach_panel_frame()))
         .title(Span::styled(
             format!(" Files ({total}) "),

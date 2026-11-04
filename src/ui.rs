@@ -823,15 +823,17 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                     }
                 }
             }
-            let (mut body, heads) =
-                entry_lines_ex(e.kind, &e.text, bot_name.as_deref(), Some(bubble));
-            starts.push(lines.len());
-            entries.resize(lines.len(), None);
-            let header = matches!(e.kind, EntryKind::User | EntryKind::Bot);
-            entries
-                .extend((0..body.len()).map(|j| {
-                    (!(header && j == 0) && !heads.iter().any(|h| h.0 == j)).then_some(i)
-                }));
+            let chat = matches!(e.kind, EntryKind::User | EntryKind::Bot);
+            // Chat messages sit on a rounded bubble (1.38.0): the text wraps 4 columns
+            // narrower to leave room for the "│ " / " │" sides.
+            let cwidth = if chat {
+                bubble_content_width(bubble)
+            } else {
+                bubble
+            };
+            let (mut body, mut heads) =
+                entry_lines_ex(e.kind, &e.text, bot_name.as_deref(), Some(cwidth));
+            let mut code_dl: Vec<(usize, Vec<ColHit>)> = vec![];
             // A [⧉] copy button at the top-right of every code block (1.30.0).
             if !heads.is_empty() {
                 let k = crate::emoji::message_key(e.kind as u8, &e.text);
@@ -842,7 +844,7 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                     };
                     let cw = crate::input::str_width(COPY_BUTTON);
                     let lw = l.width();
-                    let end = (*bw).max(lw + 1 + cw).min(bubble);
+                    let end = (*bw).max(lw + 1 + cw).min(cwidth);
                     if end < lw + cw {
                         continue;
                     }
@@ -850,13 +852,50 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                     l.spans.push(Span::raw(" ".repeat(start - lw)));
                     l.spans.push(theme::copy_button().span(COPY_BUTTON));
                     let id = format!("{k}:{n}");
-                    dl.push((
-                        lines.len() + hi,
+                    code_dl.push((
+                        *hi,
                         vec![(start, end, format!("{}{id}", crate::select::COPY_SCHEME))],
                     ));
                     copy_targets.insert(id, code.clone());
                 }
             }
+            let k = crate::emoji::message_key(e.kind as u8, &e.text);
+            let mine_side = e.kind == EntryKind::User;
+            let mine: Vec<&str> = reactions
+                .iter()
+                .filter(|(mk, _)| *mk == k)
+                .map(|(_, em)| em.as_str())
+                .collect();
+            let wrapped = chat && body.len() > 1;
+            if wrapped {
+                // Reactions ride the bubble's top border, at its top-right corner.
+                let pills = reaction_line(&mine, false)
+                    .map(|l| l.spans)
+                    .unwrap_or_default();
+                body = bubble_wrap(body, 1, e.kind, pills);
+                for h in heads.iter_mut() {
+                    h.0 += 1;
+                }
+            }
+            for (hi, hits) in code_dl {
+                let (row, sh) = if wrapped {
+                    (hi + 1, BUBBLE_PAD)
+                } else {
+                    (hi, 0)
+                };
+                let hits = hits
+                    .into_iter()
+                    .map(|(a, b, u)| (a + sh, b + sh, u))
+                    .collect();
+                dl.push((lines.len() + row, hits));
+            }
+            starts.push(lines.len());
+            entries.resize(lines.len(), None);
+            let n = body.len();
+            entries.extend((0..n).map(|j| {
+                let frame = chat && (j == 0 || (wrapped && (j == 1 || j + 1 == n)));
+                (!frame && !heads.iter().any(|h| h.0 == j)).then_some(i)
+            }));
             buttons.extend(std::iter::repeat_n(None, body.len()));
             owners.resize(lines.len(), None);
             let owner = matches!(e.kind, EntryKind::User | EntryKind::Bot)
@@ -978,14 +1017,9 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                     buttons.push(None);
                 }
             }
-            let k = crate::emoji::message_key(e.kind as u8, &e.text);
-            let mine_side = e.kind == EntryKind::User;
-            let mine: Vec<&str> = reactions
-                .iter()
-                .filter(|(mk, _)| *mk == k)
-                .map(|(_, em)| em.as_str())
-                .collect();
-            match reaction_line(&mine, mine_side) {
+            // Chat bubbles show their reactions on the top border; the react button
+            // goes in the blank line after the message.
+            match reaction_line(&mine, mine_side).filter(|_| !wrapped) {
                 Some(l) => {
                     lines.push(react_button_line(l.spans, mine_side));
                     buttons.push(Some(k));
@@ -1854,6 +1888,75 @@ fn draw_help(f: &mut Frame, app: &mut App) {
     );
 }
 
+/// Columns a chat bubble's sides take before the text ("│ ").
+pub const BUBBLE_PAD: usize = 2;
+
+/// Text width inside a bubble at most `bubble` columns wide (sides take 4 columns).
+pub fn bubble_content_width(bubble: usize) -> usize {
+    bubble.saturating_sub(2 * BUBBLE_PAD).max(1)
+}
+
+/// Draw `body[from..]` on a rounded bubble (1.38.0): a `╭─╮` top border, `│ text │`
+/// rows padded to one width, a `╰─╯` bottom border. `pills` (the reaction pills) sit on
+/// the top border at its top-right corner, like the desktop app. Your bubbles take the
+/// accent and stay right-aligned; the bot's are muted and left-aligned.
+pub fn bubble_wrap(
+    body: Vec<Line<'static>>,
+    from: usize,
+    kind: EntryKind,
+    pills: Vec<Span<'static>>,
+) -> Vec<Line<'static>> {
+    let mine = kind == EntryKind::User;
+    let frame = if mine {
+        theme::entry_label(kind)
+    } else {
+        theme::muted()
+    };
+    let pw: usize = pills.iter().map(|s| s.width()).sum();
+    let cw = body[from..]
+        .iter()
+        .map(|l| l.width())
+        .max()
+        .unwrap_or(0)
+        .max(if pw > 0 { pw.saturating_sub(1) } else { 0 });
+    let align = |l: Line<'static>| {
+        if mine {
+            l.alignment(Alignment::Right)
+        } else {
+            l
+        }
+    };
+    let mut out: Vec<Line<'static>> = body[..from].to_vec();
+    let mut top = vec![frame.span("╭")];
+    let dashes = cw + 2;
+    if pw > 0 {
+        top.push(frame.span("─".repeat(dashes.saturating_sub(pw + 1))));
+        top.extend(pills);
+        top.push(frame.span("─"));
+    } else {
+        top.push(frame.span("─".repeat(dashes)));
+    }
+    top.push(frame.span("╮"));
+    out.push(align(Line::from(top)));
+    for l in body.into_iter().skip(from) {
+        let pad = cw - l.width().min(cw);
+        let a = l.alignment.filter(|a| *a != Alignment::Right);
+        let mut spans = vec![frame.span("│ ")];
+        spans.extend(l.spans);
+        spans.push(Span::raw(" ".repeat(pad)));
+        spans.push(frame.span(" │"));
+        let mut nl = Line::from(spans).style(l.style);
+        nl.alignment = a;
+        out.push(align(nl));
+    }
+    out.push(align(Line::from(vec![
+        frame.span("╰"),
+        frame.span("─".repeat(cw + 2)),
+        frame.span("╯"),
+    ])));
+    out
+}
+
 /// Your message as a clean block: wrapped to `max`, every line padded to the longest
 /// line's width so the block's left and right edges are straight when right-aligned.
 pub fn bubble_block(text: &str, max: usize) -> Vec<String> {
@@ -2023,6 +2126,48 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn bubbles_are_rounded_with_reactions_on_the_top_right_corner() {
+        let plain = |l: &Line| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        };
+        let body = entry_lines(EntryKind::Bot, "hello there", Some("Rocky"), Some(20));
+        let pills = reaction_line(&["+1"], false).unwrap().spans;
+        let pw: usize = pills.iter().map(|s| s.width()).sum();
+        let out = bubble_wrap(body.clone(), 1, EntryKind::Bot, pills);
+        assert_eq!(out.len(), body.len() + 2, "top and bottom border rows");
+        assert_eq!(plain(&out[0]), "Rocky");
+        let top = plain(&out[1]);
+        let bottom = plain(out.last().unwrap());
+        assert!(top.starts_with('╭') && top.ends_with("─╮"), "{top}");
+        assert!(bottom.starts_with('╰') && bottom.ends_with('╯'), "{bottom}");
+        let w = crate::input::str_width(&top);
+        assert_eq!(w, crate::input::str_width(&bottom), "straight edges");
+        // The pill ends two columns before the corner (one dash, then ╮).
+        let pill_end: String = top.chars().rev().skip(2).take(1).collect();
+        assert_eq!(pill_end, " ", "pill is the last thing before ─╮: {top}");
+        assert!(w >= pw + 3);
+        for l in &out[2..out.len() - 1] {
+            let p = plain(l);
+            assert!(p.starts_with("│ ") && p.ends_with(" │"), "{p}");
+            assert_eq!(crate::input::str_width(&p), w, "rows as wide as the border");
+        }
+        // Yours: right-aligned, every row.
+        let you = entry_lines(EntryKind::User, "hi", None, Some(20));
+        let out = bubble_wrap(you, 1, EntryKind::User, vec![]);
+        assert!(
+            out[1..]
+                .iter()
+                .all(|l| l.alignment == Some(Alignment::Right))
+        );
+        assert_eq!(plain(&out[1]), "╭────╮");
+        assert_eq!(plain(&out[2]), "│ hi │");
+        assert_eq!(bubble_content_width(30), 26);
+    }
+
+    #[test]
     fn bot_bubble_mirrors_user_bubble_layout() {
         let max = 20;
         let text = "alpha beta gamma delta epsilon zeta";
@@ -2088,13 +2233,13 @@ pub(crate) mod tests {
         let row = |y: u16| (0..w).map(|x| buf[(x, y)].symbol()).collect::<Vec<_>>();
         let at = |y: u16, x: u16, t: &str| row(y)[x as usize..].concat().starts_with(t);
         assert!(
-            at(by - 1, bx, &name),
-            "bot body directly under the bot name"
+            at(by - 2, bx - 2, &name) && at(by - 1, bx - 2, "╭"),
+            "bot bubble (top border, then body) directly under the bot name"
         );
         let (ux, uy) = find("USERBODY");
         // "you" ends where your body ends (right-aligned on the row above).
         assert!(
-            at(uy - 1, ux + 8 - 3, "you"),
+            at(uy - 2, ux + 8 + 2 - 3, "you") && at(uy - 1, ux + 8 + 1, "╮"),
             "your body right edge under 'you'"
         );
         if std::env::var("GBT_DUMP").is_ok() {
@@ -2649,7 +2794,7 @@ pub(crate) mod tests {
         }
         term.draw(|f| draw(f, &mut app)).unwrap();
         let r = screen_rows(&term);
-        assert!(r[18].starts_with('┌'), "box is 12 rows: {r:#?}");
+        assert!(r[18].starts_with('╭'), "box is 12 rows: {r:#?}");
         assert!(r[28].contains("line19"));
         assert!(!r.iter().any(|l| l.contains("line9 ")));
         assert_eq!(term.get_cursor_position().unwrap().y, 28);
@@ -2739,8 +2884,8 @@ pub(crate) mod tests {
                 continue;
             }
             msg_rows += 1;
-            let first = row.find(|c: char| c != ' ').unwrap();
-            let last = row.trim_end().len();
+            let first = row.chars().position(|c| c != ' ').unwrap();
+            let last = row.trim_end().chars().count();
             assert!(last - first <= max, "row wider than 2/3 ({max}): {row:?}");
             if row.contains(": ") {
                 assert!(first < 3, "bot message left-aligned: {row:?}");
@@ -2769,7 +2914,7 @@ pub(crate) mod tests {
         // Some user rows end flush right.
         let right_flush = (0..b.area.height).any(|y| {
             let c = b[(inner_x + inner_w as u16 - 1, y)].symbol();
-            c != " " && c != "│"
+            c != " "
         });
         assert!(right_flush, "user message right-aligned");
     }
@@ -2960,16 +3105,23 @@ pub(crate) mod tests {
                 .unwrap()
         };
         let (a, b) = (row_of("FIRST-MSG"), row_of("SECOND-MSG"));
-        assert_eq!(b, a + 3, "one blank line, then the bot-name header row");
+        assert_eq!(
+            b,
+            a + 5,
+            "bottom border, one blank line, the bot-name header row, the top border"
+        );
         let name = app.active_bot().unwrap().name.clone();
-        let hdr: String = (0..100u16).map(|x| buf[(x, b - 1)].symbol()).collect();
+        let hdr: String = (0..100u16).map(|x| buf[(x, b - 2)].symbol()).collect();
         assert!(hdr.contains(&name), "{hdr:?}");
-        let blank: String = (0..100u16).map(|x| buf[(x, a + 1)].symbol()).collect();
+        let blank: String = (0..100u16).map(|x| buf[(x, a + 2)].symbol()).collect();
         assert!(!blank.contains("MSG"));
         // Left padding: two spaces between the chat border and the text.
         let line: String = (0..100u16).map(|x| buf[(x, a)].symbol()).collect();
-        let border = line[..line.find("FIRST-MSG").unwrap()].rfind('│').unwrap();
-        let after_border = &line[border + '│'.len_utf8()..];
+        let pre = &line[..line.find("FIRST-MSG").unwrap()];
+        assert!(pre.ends_with("│ "), "bubble side, one space: {line:?}");
+        let pre = &pre[..pre.len() - "│ ".len()];
+        let border = pre.rfind('│').unwrap();
+        let after_border = &pre[border + '│'.len_utf8()..];
         assert!(after_border.starts_with("  "), "{line:?}");
     }
 }

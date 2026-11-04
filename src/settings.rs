@@ -693,6 +693,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     };
     let block = Block::new()
         .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
         .title(title)
         .title_bottom(" ←/→ tab · ↑/↓ row · Enter change/open · r reload · Esc back ")
         .style(theme::settings_frame())

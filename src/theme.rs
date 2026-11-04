@@ -631,7 +631,7 @@ impl VariantSpec {
             st = st.faint(true);
         }
         if STYLE_SLOTS.get(slot_index).is_some_and(|s| s.framed) {
-            st = st.border(Border::normal());
+            st = st.border(Border::rounded());
             if let Some(c) = r.border {
                 st = st.border_foreground(c);
             }

@@ -628,6 +628,7 @@ pub fn draw_toasts(f: &mut Frame, app: &mut App) {
         let title: String = n.title.chars().take(TOAST_W as usize - 8).collect();
         let block = Block::new()
             .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
             .title(format!(" 🔔 {title} "))
             .style(theme::notification_toast())
             .border_style(theme::notification_toast());
@@ -677,6 +678,7 @@ pub fn draw_page(f: &mut Frame, app: &mut App) {
     f.render_widget(Clear, area);
     let block = Block::new()
         .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
         .title(format!(" 🔔 Notifications · {unread} unread / {total} "))
         .title_bottom(
             " ↑/↓ move · Enter open · m read/unread · a all read · c clear all · Esc back ",

@@ -159,7 +159,7 @@ Type `:` and part of a name, then **Tab**, to pick an emoji (`:tada` → 🎉), 
 popup as slash-command completion. Complete `:name:` shortcodes are turned into emoji when you
 send. Emoji (ZWJ families, flags, skin tones, `❤️` with VS16) count as one character and two
 columns in the input and in chat wrapping. `/react 👍` (or `/react :thumbsup:`, vim `r`)
-toggles a reaction pill under the newest bot message. Tab completes the emoji (already on the
+toggles a reaction pill on the newest bot message (top-right corner of its bubble). Tab completes the emoji (already on the
 message, then recently used, then 👍 ❤️ 😂 🎉 🔥 👀 ✅…) and the message index; `/unreact` +
 Tab offers what's on the message. Every message has a `[☺+]` button (theme part
 `react_button`): click it, use bare `/react`, or vim `R` (`message.react_picker`) for a
@@ -337,6 +337,10 @@ Theme parts: `attach_panel_frame`, `attach_panel_filter`, `attach_panel_count`,
 
 Bot replies are laid out like your messages: the bot's name on its own row, the reply
 directly under it, the same 2/3 bubble width, on the left where yours are on the right.
+Since 1.38.0 each message's text sits on a rounded bubble (`╭─╮ │ … │ ╰─╯`), accent-
+coloured for yours and muted for the bot's, and its reaction pills ride the bubble's top
+border at the top-right corner, like the desktop app. Every panel, dialog, popup and the
+input box uses rounded corners too.
 
 ### Grok Bot cards: questions, approvals, secrets, forms and drafts (1.29.0)
 

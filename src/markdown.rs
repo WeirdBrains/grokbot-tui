@@ -344,7 +344,7 @@ impl R {
             }
             vec![(s, border)]
         };
-        self.emit(rule("┌", "┬", "┐"));
+        self.emit(rule("╭", "┬", "╮"));
         for (ri, row) in t.rows.iter().enumerate() {
             let mut line: Vec<Seg> = vec![("│".into(), border)];
             for (c, cw) in w.iter().enumerate() {
@@ -366,7 +366,7 @@ impl R {
                 self.emit(rule("├", "┼", "┤"));
             }
         }
-        self.emit(rule("└", "┴", "┘"));
+        self.emit(rule("╰", "┴", "╯"));
     }
 
     fn event(&mut self, ev: Event) {
@@ -820,7 +820,7 @@ mod tests {
             "rust",
             " fn main() {} ",
             "──────",
-            "┌───┬────┐",
+            "╭───┬────╮",
             "│ a │ bb │",
             "├───┼────┤",
             "│ 1 │ 22 │",
