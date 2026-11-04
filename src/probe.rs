@@ -43,12 +43,22 @@ pub struct Answers {
     pub background: Option<Variant>,
     pub fuzz: Option<Caps>,
     pub kitty_graphics: bool,
+    /// Kitty graphics accepts zlib-compressed (`o=z`) transmissions.
+    pub kitty_compression: bool,
+    /// The compression probe got any answer (OK or an error).
+    pub kitty_compression_replied: bool,
     /// `CSI ? flags u`: the kitty keyboard protocol is supported.
     pub kitty_keys: bool,
     /// Cell size in pixels (width, height) from `CSI 6 ; h ; w t`.
     pub cell: Option<(u16, u16)>,
     pub cpr: bool,
 }
+
+/// Kitty `o=z` (zlib) transmission probe, as ratatui-image's `kitty_compression` option
+/// sends it: the one-pixel query with its payload deflated. `eJxjYGAAAAADAAE=` is
+/// base64(zlib([0, 0, 0])). A terminal that can inflate answers `Gi=32;OK`.
+pub const KITTY_COMPRESSION_QUERY: &str =
+    "\x1b_Gi=32,s=1,v=1,a=q,t=d,f=24,o=z;eJxjYGAAAAADAAE=\x1b\\";
 
 /// The burst, DA1 last.
 pub fn query(mux: Mux, want: Want) -> String {
@@ -63,6 +73,7 @@ pub fn query(mux: Mux, want: Want) -> String {
             "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\",
             mux,
         ));
+        s.push_str(&fuzzball::wrap(KITTY_COMPRESSION_QUERY, mux));
     }
     s.push_str("\x1b[?u\x1b[16t\x1b[6n\x1b[c");
     s
@@ -172,6 +183,10 @@ pub fn parse(buf: &[u8], mux: Mux) -> Answers {
             Seq::Apc(body) if body.starts_with(b"Gi=31") => {
                 a.kitty_graphics = body.windows(3).any(|w| w == b";OK");
             }
+            Seq::Apc(body) if body.starts_with(b"Gi=32") => {
+                a.kitty_compression_replied = true;
+                a.kitty_compression = body.windows(3).any(|w| w == b";OK");
+            }
             _ => {}
         }
     }
@@ -187,7 +202,7 @@ fn all_in(a: &Answers, want: Want) -> bool {
         && a.cell.is_some()
         && a.cpr
         && (!want.fuzzball || a.fuzz.is_some())
-        && (!want.images || a.kitty_graphics)
+        && (!want.images || (a.kitty_graphics && a.kitty_compression_replied))
 }
 
 /// Read replies from `fd` until DA1 (tmux: everything, or a grace after DA1) or `wait`
@@ -291,6 +306,7 @@ mod tests {
             "\x1b]11;?",
             "\x1bP=Fz",
             "\x1b_Gi=31",
+            "\x1b_Gi=32,s=1,v=1,a=q,t=d,f=24,o=z;",
             "\x1b[?u",
             "\x1b[16t",
             "\x1b[6n",
@@ -324,6 +340,57 @@ mod tests {
         assert!(a.da1 && !a.sixel && !a.kitty_keys && a.background.is_none());
         // Kitty graphics error.
         assert!(!parse(b"\x1b_Gi=31;ENOTSUPPORTED\x1b\\", Mux::None).kitty_graphics);
+    }
+
+    #[test]
+    fn kitty_compression_reply_is_parsed() {
+        let a = parse(
+            b"\x1b_Gi=31;OK\x1b\\\x1b_Gi=32;OK\x1b\\\x1b[?62;22c",
+            Mux::None,
+        );
+        assert!(a.kitty_graphics && a.kitty_compression && a.kitty_compression_replied);
+        // Kitty graphics without inflate: the probe is refused, images stay uncompressed.
+        let a = parse(
+            b"\x1b_Gi=31;OK\x1b\\\x1b_Gi=32;EINVAL:bad\x1b\\\x1b[?62;22c",
+            Mux::None,
+        );
+        assert!(a.kitty_graphics && !a.kitty_compression && a.kitty_compression_replied);
+        // No reply at all: uncompressed.
+        let a = parse(b"\x1b[?62;22c", Mux::None);
+        assert!(!a.kitty_compression && !a.kitty_compression_replied);
+        // An OK for the plain probe isn't one for the compressed probe, and vice versa.
+        let a = parse(b"\x1b_Gi=32;OK\x1b\\", Mux::None);
+        assert!(a.kitty_compression && !a.kitty_graphics);
+    }
+
+    #[test]
+    fn kitty_compression_probe_payload_is_zlib_of_one_black_pixel() {
+        // zlib: CMF 0x78, FLG 0x9c (header checksum), then deflate of [0, 0, 0] and the
+        // Adler-32 of [0, 0, 0] (0x00030001).
+        let b64 = KITTY_COMPRESSION_QUERY
+            .split_once(';')
+            .and_then(|(_, r)| r.strip_suffix("\x1b\\"))
+            .unwrap();
+        assert_eq!(b64, "eJxjYGAAAAADAAE=");
+        let bytes = b64_decode(b64);
+        assert_eq!(&bytes[..2], &[0x78, 0x9c]);
+        assert_eq!(((bytes[0] as u16) << 8 | bytes[1] as u16) % 31, 0);
+        assert_eq!(&bytes[bytes.len() - 4..], &[0, 3, 0, 1]);
+    }
+
+    fn b64_decode(s: &str) -> Vec<u8> {
+        const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = vec![];
+        let (mut acc, mut bits) = (0u32, 0);
+        for c in s.bytes().filter(|&c| c != b'=') {
+            acc = acc << 6 | T.iter().position(|&t| t == c).unwrap() as u32;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((acc >> bits) as u8);
+            }
+        }
+        out
     }
 
     fn pipe() -> (std::os::fd::RawFd, std::fs::File) {

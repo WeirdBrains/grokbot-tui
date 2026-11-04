@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.37.4] - 2026-11-03
+
+### Fixed
+- Kitty images are sent zlib-compressed (`o=z`) again when the terminal supports it.
+  1.37.3's single startup burst dropped ratatui-image's own compression probe; the
+  burst now carries the same one-pixel compressed kitty query (`i=32`), the shared
+  reader parses its reply under the `graphics.detect_timeout_ms` deadline, and kitty
+  protocols are built with compression on. No reply or a refusal keeps images
+  uncompressed. No extra startup latency (the probe rides the existing burst).
+
 ## [1.37.3] - 2026-11-02
 
 ### Changed

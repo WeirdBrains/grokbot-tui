@@ -155,14 +155,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             .as_ref()
             .is_none_or(|(_, c, rr)| (*c, *rr) != (cols, rows))
         {
-            m.proto = picker
-                .new_protocol(
-                    (*img).clone(),
-                    r.as_size(),
-                    ratatui_image::Resize::Fit(Some(ratatui_image::FilterType::Triangle)),
-                )
-                .ok()
-                .map(|p| (p, cols, rows));
+            m.proto = crate::imageview::new_protocol(
+                &picker,
+                (*img).clone(),
+                r.as_size(),
+                ratatui_image::Resize::Fit(Some(ratatui_image::FilterType::Triangle)),
+            )
+            .ok()
+            .map(|p| (p, cols, rows));
         }
         if let Some((p, _, _)) = &m.proto
             && app.fuzz.is_none()

@@ -249,6 +249,9 @@ fn main() -> Result<()> {
     });
     app.fuzz_caps = answers.fuzz.clone();
     app.image_picker = imageview::picker_from(&answers);
+    // ratatui-image's own kitty compression probe went with its stdio query; the burst
+    // carries it now. No reply (or a refusal) keeps images uncompressed.
+    imageview::set_kitty_compression(answers.kitty_compression && answers.kitty_graphics);
     imageview::apply_images_protocol(&mut app);
     execute!(std::io::stdout(), EnableMouseCapture)?;
     let _ = execute!(std::io::stdout(), EnableBracketedPaste);

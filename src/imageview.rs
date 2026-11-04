@@ -42,6 +42,100 @@ pub struct ImageView {
 /// The decoded image (or why not), sent back from the loader task.
 pub type Loaded = Result<(image::DynamicImage, u64), String>;
 
+static KITTY_COMPRESSION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Send kitty images zlib-compressed (`o=z`): set at startup when the terminal answered
+/// the compression probe ([`crate::probe::KITTY_COMPRESSION_QUERY`]) with OK.
+pub fn set_kitty_compression(on: bool) {
+    KITTY_COMPRESSION.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn kitty_compression() -> bool {
+    KITTY_COMPRESSION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A fresh kitty image id (ratatui-image picks a random one; ids only need to differ).
+fn kitty_id() -> u32 {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() ^ (d.as_secs() as u32))
+        .unwrap_or(0)
+        ^ std::process::id().rotate_left(16);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    seed.wrapping_add(n.wrapping_mul(0x9E37_79B9)) | 1
+}
+
+/// `Picker::new_resize_protocol`, but kitty images go zlib-compressed when the terminal
+/// can inflate them. ratatui-image only sets that from its own stdio query, which the
+/// startup burst replaces, so the kitty protocol is built here with the flag.
+pub fn new_resize_protocol(picker: &Picker, image: image::DynamicImage) -> StatefulProtocol {
+    resize_protocol_with(picker, image, kitty_compression())
+}
+
+fn resize_protocol_with(
+    picker: &Picker,
+    image: image::DynamicImage,
+    compress: bool,
+) -> StatefulProtocol {
+    if picker.protocol_type() != ProtocolType::Kitty || !compress {
+        return picker.new_resize_protocol(image);
+    }
+    use ratatui_image::protocol::{StatefulProtocolType, kitty::StatefulKitty};
+    StatefulProtocol::new(
+        image,
+        picker.font_size(),
+        None,
+        StatefulProtocolType::Kitty(StatefulKitty::new(kitty_id(), picker.tmux_detected(), true)),
+    )
+}
+
+/// `Picker::new_protocol` with the same kitty compression as [`new_resize_protocol`]
+/// (the resize step mirrors ratatui-image's, which has no background colour here).
+pub fn new_protocol(
+    picker: &Picker,
+    image: image::DynamicImage,
+    size: ratatui::layout::Size,
+    resize: Resize,
+) -> Result<ratatui_image::protocol::Protocol, ratatui_image::errors::Errors> {
+    protocol_with(picker, image, size, resize, kitty_compression())
+}
+
+fn protocol_with(
+    picker: &Picker,
+    image: image::DynamicImage,
+    size: ratatui::layout::Size,
+    resize: Resize,
+    compress: bool,
+) -> Result<ratatui_image::protocol::Protocol, ratatui_image::errors::Errors> {
+    if picker.protocol_type() != ProtocolType::Kitty || !compress {
+        return picker.new_protocol(image, size, resize);
+    }
+    let fs = picker.font_size();
+    let desired = Resize::natural_size(&image, fs);
+    let fits = !matches!(resize, Resize::Scale(_))
+        && desired.width <= size.width
+        && desired.height <= size.height
+        && (image.width() == u32::from(desired.width) * u32::from(fs.width)
+            || image.height() == u32::from(desired.height) * u32::from(fs.height));
+    let (image, area) = if fits {
+        (image, desired)
+    } else {
+        let area = resize.size_for(&image, fs, size);
+        (resize.resize(&image, fs, area, None), area)
+    };
+    Ok(ratatui_image::protocol::Protocol::Kitty(
+        ratatui_image::protocol::kitty::Kitty::new(
+            image,
+            area,
+            kitty_id(),
+            picker.tmux_detected(),
+            true,
+        )?,
+    ))
+}
+
 /// Build the picker from the startup burst's answers ([`crate::probe`]): kitty graphics,
 /// else sixel (from DA1), else iTerm2 by environment, else halfblocks. Images need a cell
 /// size: from `CSI 16 t`, else the window size in pixels; without one, halfblocks.
@@ -344,7 +438,7 @@ impl App {
                 h: img.height(),
                 bytes,
                 img: std::sync::Arc::new(img.clone()),
-                proto: Box::new(self.image_picker.new_resize_protocol(img)),
+                proto: Box::new(new_resize_protocol(&self.image_picker, img)),
             },
             Err(e) => ViewState::Failed(e),
         };
@@ -500,6 +594,91 @@ pub fn kitty_delete_all(p: &Picker) -> Option<&'static str> {
 mod tests {
     use crate::app::{Entry, EntryKind};
 
+    fn kitty_picker() -> super::Picker {
+        #[allow(deprecated)]
+        let mut p = super::Picker::from_fontsize(ratatui_image::FontSize::new(10, 20));
+        p.set_protocol_type(super::ProtocolType::Kitty);
+        p
+    }
+
+    fn noisy_image() -> image::DynamicImage {
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(37, 53, |x, y| {
+            image::Rgb([(x * 7) as u8, (y * 5) as u8, (x ^ y) as u8])
+        }))
+    }
+
+    /// Everything a widget wrote into the buffer (kitty puts its escapes in cell symbols).
+    fn rendered(f: impl FnOnce(ratatui::layout::Rect, &mut ratatui::buffer::Buffer)) -> String {
+        let area = ratatui::layout::Rect::new(0, 0, 20, 10);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        f(area, &mut buf);
+        buf.content.iter().map(|c| c.symbol()).collect()
+    }
+
+    #[test]
+    fn kitty_images_are_compressed_only_when_the_terminal_can_inflate() {
+        use ratatui::widgets::{StatefulWidget, Widget};
+        let p = kitty_picker();
+        let fit = || ratatui_image::Resize::Fit(None);
+        for compress in [true, false] {
+            let proto = super::protocol_with(
+                &p,
+                noisy_image(),
+                ratatui::layout::Size::new(20, 10),
+                fit(),
+                compress,
+            )
+            .unwrap();
+            let out = rendered(|a, b| ratatui_image::Image::new(&proto).render(a, b));
+            assert!(out.contains("\x1b_G"), "kitty transmit drawn");
+            assert_eq!(out.contains("o=z"), compress, "static, compress={compress}");
+
+            let mut sp = super::resize_protocol_with(&p, noisy_image(), compress);
+            let out =
+                rendered(|a, b| ratatui_image::StatefulImage::default().render(a, b, &mut sp));
+            assert!(out.contains("\x1b_G"), "kitty transmit drawn");
+            assert_eq!(
+                out.contains("o=z"),
+                compress,
+                "stateful, compress={compress}"
+            );
+        }
+    }
+
+    #[test]
+    fn compressed_static_protocol_sizes_like_ratatui_image() {
+        let p = kitty_picker();
+        for (size, resize) in [
+            ((20, 10), ratatui_image::Resize::Fit(None)),
+            ((2, 1), ratatui_image::Resize::Fit(None)),
+            ((20, 10), ratatui_image::Resize::Scale(None)),
+            ((3, 2), ratatui_image::Resize::Crop(None)),
+        ] {
+            let size = ratatui::layout::Size::new(size.0, size.1);
+            let ours = super::protocol_with(&p, noisy_image(), size, resize.clone(), true).unwrap();
+            let theirs = p.new_protocol(noisy_image(), size, resize).unwrap();
+            assert_eq!(ours.size(), theirs.size(), "{size:?}");
+        }
+    }
+
+    #[test]
+    fn other_protocols_ignore_the_compression_flag() {
+        let mut p = kitty_picker();
+        p.set_protocol_type(super::ProtocolType::Halfblocks);
+        let proto = super::protocol_with(
+            &p,
+            noisy_image(),
+            ratatui::layout::Size::new(20, 10),
+            ratatui_image::Resize::Fit(None),
+            true,
+        )
+        .unwrap();
+        assert!(matches!(
+            proto,
+            ratatui_image::protocol::Protocol::Halfblocks(_)
+        ));
+    }
+
     #[test]
     fn only_sixel_and_iterm2_need_a_full_clear() {
         use super::ProtocolType as T;
@@ -580,7 +759,7 @@ mod tests {
             }],
             idx: 0,
             state: super::ViewState::Ready {
-                proto: Box::new(app.image_picker.new_resize_protocol(img.clone())),
+                proto: Box::new(super::new_resize_protocol(&app.image_picker, img.clone())),
                 img: std::sync::Arc::new(img),
                 w: 40,
                 h: 20,

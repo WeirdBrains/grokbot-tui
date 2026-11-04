@@ -233,7 +233,8 @@ impl App {
             if !fuzz_drawn
                 && !self.inline.protos.contains_key(&k)
                 && let Some(State::Ready(img)) = self.inline.states.get(&s.key)
-                && let Ok(p) = self.image_picker.new_protocol(
+                && let Ok(p) = crate::imageview::new_protocol(
+                    &self.image_picker,
                     (**img).clone(),
                     r.as_size(),
                     ratatui_image::Resize::Fit(Some(ratatui_image::FilterType::Triangle)),
