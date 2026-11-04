@@ -53,6 +53,12 @@ pub struct MsgSearch {
     pub error: Option<String>,
     /// Clickable rows (each result is two rows), set by the renderer.
     pub list_area: Rect,
+    /// A query is running on the worker thread.
+    pub searching: bool,
+    /// When the debounced query should run.
+    pub due: Option<std::time::Instant>,
+    /// Backfill percent while older messages are still being indexed (1.39.1).
+    pub indexing: Option<u8>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -78,6 +84,9 @@ impl MsgSearch {
             typing: !vim || query.is_empty(),
             error: None,
             list_area: Rect::default(),
+            searching: false,
+            due: None,
+            indexing: None,
         }
     }
 
@@ -271,6 +280,11 @@ pub fn draw(f: &mut Frame, s: &mut MsgSearch, area: Rect) {
         Paragraph::new(Line::from(vec![
             theme::key_hint().span("search › "),
             theme::modal_text().span(format!("{}{caret}", s.query)),
+            theme::muted().span(
+                s.indexing
+                    .map(|p| format!("   indexing… {p}% (older messages appear when done)"))
+                    .unwrap_or_default(),
+            ),
         ])),
         q,
     );
@@ -289,6 +303,8 @@ pub fn draw(f: &mut Frame, s: &mut MsgSearch, area: Rect) {
         lines.push(Line::from(theme::muted().span(
             "Type words to search every cached message, attachment name and sent text file (local only).",
         )));
+    } else if s.hits.is_empty() && (s.searching || s.due.is_some()) {
+        lines.push(Line::from(theme::muted().span("Searching…")));
     } else if s.hits.is_empty() {
         lines.push(Line::from(theme::muted().span("No matches.")));
     }

@@ -69,7 +69,12 @@ Keys
 What's searched
   Attachment contents: only files you sent from this computer since 1.39.0, if they were
   text (UTF-8, no NUL bytes) and at most 256 KiB; their text is cached in context.db when
-  you send. Images, PDFs, binaries and files the bot sent are matched by name only.",
+  you send. Images, PDFs, binaries and files the bot sent are matched by name only.
+
+Never blocks the UI
+  Queries run on a worker thread (debounced while you type). After an upgrade, older
+  messages are indexed in the background; until then the box shows indexing… N% and
+  those messages appear when it finishes (it resumes after a restart).",
         related: &["keys", "cmd-search", "cmd-history"],
     },
     Topic {

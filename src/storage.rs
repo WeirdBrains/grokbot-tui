@@ -200,10 +200,9 @@ const V11: &str = "ALTER TABLE messages ADD COLUMN attachments TEXT;";
 
 /// v11 -> v12: local full-text search (1.39.0). `messages_fts` mirrors every message's
 /// text and its attachments' names/paths (rowid = `messages.id`), kept in sync by
-/// triggers and backfilled here. `attachment_text` caches the text of small text-like
+/// triggers; existing rows are backfilled off the UI thread (see V13). `attachment_text` caches the text of small text-like
 /// files you sent (read locally at send time), indexed by `attachment_text_fts`.
 const V12: &str = "CREATE VIRTUAL TABLE messages_fts USING fts5(body, files, tokenize = 'unicode61 remove_diacritics 2');
-    INSERT INTO messages_fts(rowid, body, files) SELECT m.id, m.text, COALESCE((SELECT group_concat(COALESCE(json_extract(j.value, '$.name'), '') || ' ' || COALESCE(json_extract(j.value, '$.path'), ''), ' ') FROM json_each(CASE WHEN json_valid(m.attachments) THEN m.attachments ELSE '[]' END) j), '') FROM messages m;
     CREATE TRIGGER messages_fts_ai AFTER INSERT ON messages BEGIN
       INSERT INTO messages_fts(rowid, body, files) VALUES (NEW.id, NEW.text, COALESCE((SELECT group_concat(COALESCE(json_extract(j.value, '$.name'), '') || ' ' || COALESCE(json_extract(j.value, '$.path'), ''), ' ') FROM json_each(CASE WHEN json_valid(NEW.attachments) THEN NEW.attachments ELSE '[]' END) j), ''));
     END;
@@ -233,7 +232,113 @@ const V12: &str = "CREATE VIRTUAL TABLE messages_fts USING fts5(body, files, tok
       INSERT INTO attachment_text_fts(rowid, name, text) VALUES (NEW.rowid, NEW.name, NEW.text);
     END;";
 
-const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12];
+/// v12 -> v13 (1.39.1): the FTS backfill moved out of the migration onto its own thread.
+/// `fts_backfill` records how far it got (`next_id`) up to the newest row that existed at
+/// migration time (`max_id`; later rows are indexed by the triggers), so it resumes after
+/// a quit and skips rows already indexed.
+const V13: &str = "CREATE TABLE fts_backfill (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      next_id INTEGER NOT NULL,
+      max_id INTEGER NOT NULL,
+      done INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO fts_backfill(id, next_id, max_id, done)
+      SELECT 1, 0, COALESCE(MAX(id), 0), CASE WHEN COUNT(*) = 0 THEN 1 ELSE 0 END FROM messages;";
+
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13];
+
+/// The `files` column of `messages_fts` for row `m` (attachment names and paths).
+const FTS_FILES_M: &str = "COALESCE((SELECT group_concat(COALESCE(json_extract(j.value, '$.name'), '') || ' ' || COALESCE(json_extract(j.value, '$.path'), ''), ' ') FROM json_each(CASE WHEN json_valid(m.attachments) THEN m.attachments ELSE '[]' END) j), '')";
+
+/// Rows per backfill batch (each its own short transaction).
+pub const FTS_BATCH: i64 = 500;
+
+/// Index one batch of pre-existing messages into `messages_fts`. Returns `(done, percent)`.
+/// Idempotent: rows already in the index (from the triggers or an earlier run) are skipped.
+pub fn fts_backfill_batch(conn: &Connection, batch: i64) -> Result<(bool, u8)> {
+    let row: Option<(i64, i64, i64)> = conn
+        .query_row(
+            "SELECT next_id, max_id, done FROM fts_backfill WHERE id = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let Some((next, max, done)) = row else {
+        return Ok((true, 100));
+    };
+    if done != 0 || next >= max {
+        conn.execute("UPDATE fts_backfill SET done = 1 WHERE id = 1", [])?;
+        return Ok((true, 100));
+    }
+    let end = (next + batch.max(1)).min(max);
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        &format!(
+            "INSERT INTO messages_fts(rowid, body, files) SELECT m.id, m.text, {FTS_FILES_M}
+             FROM messages m WHERE m.id > ?1 AND m.id <= ?2
+             AND NOT EXISTS (SELECT 1 FROM messages_fts f WHERE f.rowid = m.id)"
+        ),
+        params![next, end],
+    )?;
+    tx.execute(
+        "UPDATE fts_backfill SET next_id = ?1, done = (?1 >= max_id) WHERE id = 1",
+        params![end],
+    )?;
+    tx.commit()?;
+    let pct = ((end * 100) / max.max(1)).clamp(0, 100) as u8;
+    Ok((end >= max, if end >= max { 100 } else { pct.min(99) }))
+}
+
+/// A second connection to `context.db` for a worker thread (WAL, waits on locks).
+pub fn open_side_conn(path: &Path) -> Result<Connection> {
+    let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
+    conn.busy_timeout(std::time::Duration::from_secs(10))?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    Ok(conn)
+}
+
+/// Run the whole backfill on this thread in batches, publishing the percent to `progress`.
+pub fn run_fts_backfill(
+    path: &Path,
+    progress: &std::sync::atomic::AtomicU8,
+    batch: i64,
+) -> Result<()> {
+    let conn = open_side_conn(path)?;
+    loop {
+        let (done, pct) = fts_backfill_batch(&conn, batch)?;
+        progress.store(pct, std::sync::atomic::Ordering::Relaxed);
+        if done {
+            return Ok(());
+        }
+        // Let the UI's own writes in between batches.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+/// Start the backfill on its own thread ("fts-backfill"). The returned percent is 100
+/// once every pre-existing message is searchable (or the backfill gave up).
+pub fn spawn_fts_backfill(
+    path: PathBuf,
+    initial: u8,
+) -> std::sync::Arc<std::sync::atomic::AtomicU8> {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    let p = std::sync::Arc::new(AtomicU8::new(initial));
+    if initial >= 100 {
+        return p;
+    }
+    let q = p.clone();
+    let spawned = std::thread::Builder::new()
+        .name("fts-backfill".into())
+        .spawn(move || {
+            let _ = run_fts_backfill(&path, &q, FTS_BATCH);
+            q.store(100, Ordering::Relaxed);
+        });
+    if spawned.is_err() {
+        p.store(100, Ordering::Relaxed);
+    }
+    p
+}
 
 /// One remembered prompt (newest-first lists).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -315,6 +420,9 @@ impl Store {
             Connection::open(&path).with_context(|| format!("opening {}", path.display()))?;
         set_mode(&path, 0o600)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
+        // WAL so the search and backfill threads' own connections never block the UI.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        let _ = conn.pragma_update(None, "journal_mode", "WAL");
         migrate(&conn)?;
 
         let saved: Option<String> = conn
@@ -374,6 +482,42 @@ impl Store {
 
     pub fn account(&self) -> &Account {
         &self.account
+    }
+
+    /// A store bound to `account` on its own connection (no migration), for worker
+    /// threads: search queries and attachment-text capture.
+    pub fn open_side(dir: &Path, account: Account) -> Result<Self> {
+        let conn = open_side_conn(&dir.join("context.db"))?;
+        Ok(Self {
+            dir: dir.to_path_buf(),
+            conn,
+            account,
+            env_account: None,
+        })
+    }
+
+    /// Backfill progress at startup: 100 when every message is already indexed.
+    pub fn fts_backfill_percent(&self) -> u8 {
+        self.conn
+            .query_row(
+                "SELECT done, next_id, max_id FROM fts_backfill WHERE id = 1",
+                [],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .map(|(d, n, m)| {
+                if d != 0 || n >= m {
+                    100
+                } else {
+                    ((n * 100) / m.max(1)).min(99) as u8
+                }
+            })
+            .unwrap_or(100)
     }
 
     pub fn accounts(&self) -> Result<Vec<Account>> {
@@ -1883,7 +2027,8 @@ mod prompt_history_store_tests {
 
     const DROP_V12: &str =
         "DROP TRIGGER messages_fts_ai; DROP TRIGGER messages_fts_ad; DROP TRIGGER messages_fts_au;
-        DROP TABLE messages_fts; DROP TABLE attachment_text_fts; DROP TABLE attachment_text;";
+        DROP TABLE messages_fts; DROP TABLE attachment_text_fts; DROP TABLE attachment_text;
+        DROP TABLE fts_backfill;";
 
     #[test]
     fn v12_backfills_fts_and_triggers_keep_it_in_sync() {
@@ -1901,6 +2046,12 @@ mod prompt_history_store_tests {
         let s = Store::open(d.path(), None).unwrap();
         assert_eq!(s.schema_version().unwrap(), MIGRATIONS.len());
         let w = |q: &str| crate::msgsearch::parse_query(q);
+        // The migration no longer backfills; the backfill thread does.
+        assert!(s.fts_backfill_percent() < 100);
+        let p = std::sync::atomic::AtomicU8::new(0);
+        run_fts_backfill(&s.db_path(), &p, 1).unwrap();
+        assert_eq!(p.load(std::sync::atomic::Ordering::Relaxed), 100);
+        assert_eq!(s.fts_backfill_percent(), 100);
         let h = s.search_messages(&w("kubernetes OLD"), 10).unwrap();
         assert_eq!(h.len(), 1, "backfilled, case-insensitive, every word");
         assert_eq!(h[0].bot_id, "a");
@@ -1925,6 +2076,64 @@ mod prompt_history_store_tests {
             "odd input is safe"
         );
         assert!(s.search_messages(&[], 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn fts_backfill_resumes_after_an_interruption_and_is_idempotent() {
+        let d = tempfile::tempdir().unwrap();
+        {
+            let s = Store::open(d.path(), None).unwrap();
+            s.conn
+                .execute_batch(&format!("{DROP_V12} PRAGMA user_version = 11;"))
+                .unwrap();
+            for i in 0..25 {
+                s.append_message("a", &msg(Role::User, &format!("zebra number {i}")))
+                    .unwrap();
+            }
+        }
+        let s = Store::open(d.path(), None).unwrap();
+        let fts = |s: &Store| -> i64 {
+            s.conn
+                .query_row("SELECT COUNT(*) FROM messages_fts", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(fts(&s), 0, "startup migration only creates the tables");
+        // A row written after the migration is indexed by the trigger right away.
+        s.append_message("a", &msg(Role::Bot, "zebra late"))
+            .unwrap();
+        assert_eq!(fts(&s), 1);
+        // Two batches of 10, then "quit".
+        {
+            let c = open_side_conn(&s.db_path()).unwrap();
+            assert_eq!(fts_backfill_batch(&c, 10).unwrap(), (false, 40));
+            assert_eq!(fts_backfill_batch(&c, 10).unwrap(), (false, 80));
+        }
+        assert_eq!(fts(&s), 21);
+        assert_eq!(s.fts_backfill_percent(), 80);
+        // Reopen: resumes where it stopped, finishes, and never double-indexes.
+        drop(s);
+        let s = Store::open(d.path(), None).unwrap();
+        let p = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
+        let q = p.clone();
+        let path = s.db_path();
+        std::thread::spawn(move || run_fts_backfill(&path, &q, 10).unwrap())
+            .join()
+            .unwrap();
+        assert_eq!(p.load(std::sync::atomic::Ordering::Relaxed), 100);
+        assert_eq!(fts(&s), 26);
+        // Running again (e.g. reset by hand) skips rows already indexed.
+        s.conn
+            .execute("UPDATE fts_backfill SET next_id = 0, done = 0", [])
+            .unwrap();
+        run_fts_backfill(&s.db_path(), &std::sync::atomic::AtomicU8::new(0), 7).unwrap();
+        assert_eq!(fts(&s), 26);
+        let h = s
+            .search_messages(&crate::msgsearch::parse_query("zebra"), 100)
+            .unwrap();
+        assert_eq!(h.len(), 26);
+        // A fresh database has nothing to backfill.
+        let (f, _d2) = store();
+        assert_eq!(f.fts_backfill_percent(), 100);
     }
 
     #[test]

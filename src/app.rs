@@ -356,6 +356,13 @@ pub enum Event {
         desktop_entry: Option<String>,
         result: std::result::Result<LoginOk, String>,
     },
+    /// Results of local message search query `seq` (from a worker thread).
+    MsgSearch {
+        seq: u64,
+        result: std::result::Result<Vec<crate::storage::SearchHit>, String>,
+    },
+    /// Sent attachments' text was cached for search (worker thread; nothing to do).
+    AttachmentTextSaved,
     Bots {
         epoch: u64,
         mode: BotsFetch,
@@ -671,6 +678,12 @@ pub struct App {
     pub history_search: Option<crate::history::Search>,
     /// `/search` / Ctrl-F local message search overlay (1.39.0).
     pub msg_search: Option<crate::msgsearch::MsgSearch>,
+    /// Search queries sent to the worker (results older than the newest are dropped).
+    pub msg_search_seq: u64,
+    /// Wait after the last keystroke before querying (zero in tests).
+    pub msg_search_debounce: Duration,
+    /// FTS backfill percent from the `fts-backfill` thread (100 = done; 1.39.1).
+    pub fts_progress: Arc<std::sync::atomic::AtomicU8>,
     /// (bot id, feed entry, since): a jumped-to message briefly highlighted.
     pub flash: Option<(String, usize, Instant)>,
     /// Tab-completion popup for slash commands.
@@ -838,6 +851,9 @@ pub enum BotsFetch {
 impl App {
     pub fn new(store: Store, rt: tokio::runtime::Handle, mock: bool) -> Result<Self> {
         let config = store.load_config()?;
+        // Index pre-existing messages for /search on its own thread (1.39.1).
+        let fts_progress =
+            crate::storage::spawn_fts_backfill(store.db_path(), store.fts_backfill_percent());
         let backend_base = std::env::var(CURSOR_API_ENV)
             .ok()
             .filter(|s| !s.trim().is_empty())
@@ -958,6 +974,9 @@ impl App {
             history_draft: None,
             history_search: None,
             msg_search: None,
+            msg_search_seq: 0,
+            msg_search_debounce: Duration::from_millis(120),
+            fts_progress,
             flash: None,
             completion: None,
             body_sel: None,
@@ -1048,6 +1067,7 @@ impl App {
         self.inbox.tick(std::time::Instant::now());
         self.pump();
         let now = Instant::now();
+        self.msg_search_tick(now);
         if let Some((at, _)) = self.login_retry
             && now >= at
             && !self.connecting
@@ -1141,6 +1161,24 @@ impl App {
         }
         self.inflight = self.inflight.saturating_sub(1);
         match ev {
+            Event::MsgSearch { seq, result } => {
+                if let Some(s) = self.msg_search.as_mut()
+                    && seq == self.msg_search_seq
+                {
+                    s.searching = false;
+                    match result {
+                        Ok(h) => {
+                            s.error = None;
+                            s.set_hits(h);
+                        }
+                        Err(e) => {
+                            s.error = Some(format!("Search failed: {e}"));
+                            s.set_hits(vec![]);
+                        }
+                    }
+                }
+            }
+            Event::AttachmentTextSaved => {}
             Event::Login {
                 epoch,
                 method,
@@ -3022,22 +3060,69 @@ impl App {
     /// Open the local message search (`/search [words]`, Ctrl-F).
     pub fn open_msg_search(&mut self, q: &str) {
         let mut s = crate::msgsearch::MsgSearch::new(q.trim(), self.keys_are_vim());
-        self.run_msg_search(&mut s);
+        s.indexing = self.fts_percent();
         self.msg_search = Some(s);
+        self.start_msg_search();
     }
 
-    fn run_msg_search(&self, s: &mut crate::msgsearch::MsgSearch) {
-        let words = crate::msgsearch::parse_query(&s.query);
-        match self.store.search_messages(&words, crate::msgsearch::LIMIT) {
-            Ok(h) => {
-                s.error = None;
-                s.set_hits(h);
-            }
-            Err(e) => {
-                s.error = Some(format!("Search failed: {e:#}"));
-                s.set_hits(vec![]);
-            }
+    /// Backfill percent while the search index is still being built, else `None`.
+    pub fn fts_percent(&self) -> Option<u8> {
+        let p = self.fts_progress.load(std::sync::atomic::Ordering::Relaxed);
+        (p < 100).then_some(p)
+    }
+
+    /// The query changed: run it after the debounce (stale results are dropped).
+    fn queue_msg_search(&mut self, s: &mut crate::msgsearch::MsgSearch) {
+        self.msg_search_seq += 1;
+        s.due = Some(Instant::now() + self.msg_search_debounce);
+        if self.msg_search_debounce.is_zero() {
+            s.due = Some(Instant::now());
         }
+    }
+
+    /// Debounced queries that are due, and the indexing note (every tick).
+    fn msg_search_tick(&mut self, now: Instant) {
+        let pct = self.fts_percent();
+        let Some(s) = self.msg_search.as_mut() else {
+            return;
+        };
+        if s.indexing.is_some() && pct.is_none() {
+            // The backfill just finished: rerun so older messages show up.
+            s.due = Some(now);
+            self.msg_search_seq += 1;
+        }
+        s.indexing = pct;
+        if s.due.is_some_and(|d| now >= d) {
+            self.start_msg_search();
+        }
+    }
+
+    /// Run the overlay's query now on a blocking worker with its own connection; the
+    /// hits come back as [`Event::MsgSearch`].
+    fn start_msg_search(&mut self) {
+        let Some(s) = self.msg_search.as_mut() else {
+            return;
+        };
+        s.due = None;
+        let words = crate::msgsearch::parse_query(&s.query);
+        self.msg_search_seq += 1;
+        let seq = self.msg_search_seq;
+        if words.is_empty() {
+            s.searching = false;
+            s.error = None;
+            s.set_hits(vec![]);
+            return;
+        }
+        s.searching = true;
+        let (dir, account) = (self.store.dir.clone(), self.store.account().clone());
+        let tx = self.tx.clone();
+        self.inflight += 1;
+        self.rt.spawn_blocking(move || {
+            let result = Store::open_side(&dir, account)
+                .and_then(|st| st.search_messages(&words, crate::msgsearch::LIMIT))
+                .map_err(|e| format!("{e:#}"));
+            let _ = tx.send(Event::MsgSearch { seq, result });
+        });
     }
 
     pub fn msg_search_key(&mut self, k: ratatui::crossterm::event::KeyEvent) {
@@ -3046,7 +3131,7 @@ impl App {
         };
         match s.key(k) {
             crate::msgsearch::Outcome::Cancel => return,
-            crate::msgsearch::Outcome::Requery => self.run_msg_search(&mut s),
+            crate::msgsearch::Outcome::Requery => self.queue_msg_search(&mut s),
             crate::msgsearch::Outcome::Jump(i) => {
                 if let Some(h) = s.hits.get(i).cloned() {
                     self.jump_to_hit(&h);
@@ -4000,10 +4085,21 @@ impl App {
             self.error(format!("Could not save message: {e:#}"));
             return;
         }
-        for (path, name, local) in texts {
-            if let Some(t) = crate::msgsearch::text_of_file(&local) {
-                let _ = self.store.save_attachment_text(&path, &name, &t);
-            }
+        if !texts.is_empty() {
+            // Read and cache the files' text off the UI thread (1.39.1).
+            let (dir, account) = (self.store.dir.clone(), self.store.account().clone());
+            let tx = self.tx.clone();
+            self.inflight += 1;
+            self.rt.spawn_blocking(move || {
+                if let Ok(st) = Store::open_side(&dir, account) {
+                    for (path, name, local) in texts {
+                        if let Some(t) = crate::msgsearch::text_of_file(&local) {
+                            let _ = st.save_attachment_text(&path, &name, &t);
+                        }
+                    }
+                }
+                let _ = tx.send(Event::AttachmentTextSaved);
+            });
         }
         // Optimistic UX without a second source: the pending row is in SQLite, so
         // rebuilding from it shows the message immediately.
@@ -4270,6 +4366,7 @@ pub mod tests {
         });
         // Keep toast overlays off so layout/snapshot tests stay stable.
         app.notices_board.settings.dnd = true;
+        app.msg_search_debounce = Duration::ZERO;
         (app, d)
     }
 
@@ -6311,6 +6408,7 @@ mod msg_search_tests {
         for c in "NEEDLE".chars() {
             app.msg_search_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
         }
+        tests::settle(&mut app);
         let s = app.msg_search.as_ref().expect("open");
         assert_eq!(s.hits.len(), 1);
         assert_eq!(s.hits[0].bot_id, other);
@@ -6321,6 +6419,7 @@ mod msg_search_tests {
         assert_eq!(app.flash.as_ref().map(|f| f.1), Some(1));
         // /search opens with the words already run.
         tests::type_line(&mut app, "/search here needle");
+        tests::settle(&mut app);
         assert_eq!(app.msg_search.as_ref().unwrap().hits.len(), 1);
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
         term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
@@ -6348,5 +6447,71 @@ mod msg_search_tests {
         });
         assert!(app.msg_search.is_none());
         assert_eq!(app.pending_jump, Some(1));
+    }
+
+    #[test]
+    fn search_results_arrive_from_the_worker_and_stale_ones_are_dropped() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = tests::test_app(&rt);
+        tests::mock_login(&mut app, "t");
+        let bot = app.bots[0].id.clone();
+        for t in ["alpha one", "beta two"] {
+            app.store
+                .append_message(
+                    &bot,
+                    &Message {
+                        role: Role::Bot,
+                        text: t.into(),
+                        remote_id: None,
+                        attachments: vec![],
+                    },
+                )
+                .unwrap();
+        }
+        app.msg_search_debounce = Duration::from_secs(3600);
+        app.open_msg_search("alpha");
+        // Not answered on the UI thread: the query is in flight.
+        assert!(app.msg_search.as_ref().unwrap().searching);
+        assert!(app.msg_search.as_ref().unwrap().hits.is_empty());
+        let first = app.msg_search_seq;
+        // Typing queues a debounced query; the earlier answer is now stale.
+        app.msg_search_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert!(app.msg_search_seq > first);
+        app.wait_idle(Duration::from_secs(5));
+        assert!(
+            app.msg_search.as_ref().unwrap().hits.is_empty(),
+            "stale result dropped"
+        );
+        // A stale event is ignored; the current one lands.
+        app.handle(Event::MsgSearch {
+            seq: first,
+            result: Ok(vec![]),
+        });
+        app.msg_search.as_mut().unwrap().query = "beta".into();
+        app.msg_search_debounce = Duration::ZERO;
+        app.msg_search_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        app.msg_search_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        tests::settle(&mut app);
+        let s = app.msg_search.as_ref().unwrap();
+        assert!(!s.searching);
+        assert_eq!(s.hits.len(), 1);
+        assert!(s.hits[0].snippet_src.contains("beta"));
+        // While the backfill runs, the overlay says so.
+        app.fts_progress
+            .store(42, std::sync::atomic::Ordering::Relaxed);
+        app.tick();
+        assert_eq!(app.msg_search.as_ref().unwrap().indexing, Some(42));
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let screen: String = (0..30u16)
+            .map(|y| {
+                (0..100u16)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+                    + "\n"
+            })
+            .collect();
+        assert!(screen.contains("indexing… 42%"), "{screen}");
     }
 }

@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.39.1] - 2026-11-04
+
+### Fixed
+- Search indexing no longer blocks startup or the UI. The schema migration only creates
+  the FTS tables and triggers; existing messages are backfilled on a dedicated
+  `fts-backfill` thread with its own SQLite connection (WAL), in batches of 500, each its
+  own short transaction. Schema v13 adds `fts_backfill` (next id, max id, done), so the
+  backfill resumes after a quit, and it skips rows already indexed by the triggers or
+  an earlier run.
+- Search queries run off the UI thread (a blocking worker with its own connection);
+  results come back through the app's event channel, typing is debounced (120 ms) and
+  stale results are dropped. While the backfill runs, the search box shows
+  `indexing… N%`, and the query reruns when it finishes.
+- The text of files you send is read and cached for search on a worker thread instead
+  of the UI thread.
+- The main connection now uses WAL and a busy timeout so worker connections never stall it.
+
 ## [1.39.0] - 2026-11-04
 
 ### Added

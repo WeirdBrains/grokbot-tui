@@ -510,6 +510,14 @@ wheel move; **Enter** or a click opens that bot's chat, scrolls to the message a
 it; **Ctrl-O** (vim `o`) also opens the matched attachment; Esc closes (vim: `q`; `/` or
 `i` edits the words).
 
+Search never blocks the UI (1.39.1): queries run on a worker thread with their own
+SQLite connection (WAL mode), debounced while you type, and older results are dropped
+when a newer query is in flight. After an upgrade, existing messages are indexed in the
+background in small batches; until that finishes the search box shows `indexing… N%`
+and older messages appear when it is done. The backfill records its progress in
+`context.db`, so it resumes where it stopped if you quit. The text of files you send is
+read and cached on a worker thread too.
+
 ## Prompt history and completion
 
 Every prompt and slash command you submit is saved in `context.db` (per account, newest
