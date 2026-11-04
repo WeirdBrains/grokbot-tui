@@ -7,6 +7,7 @@
 "ctrl-c" = "app.ctrl_c"
 "ctrl-shift-c" = "app.ctrl_c_copy"
 "ctrl-r" = "input.history_search"
+"ctrl-f" = "search.open"
 "ctrl-a" = "selection.select_all"
 "ctrl-z" = "input.undo_clear"
 "f1" = "help.open"

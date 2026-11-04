@@ -25,6 +25,7 @@ pub const ACTIONS: &[&str] = &[
     "focus.next",
     "focus.prev",
     "input.history_search",
+    "search.open",
     "input.undo_clear",
     "input.paste",
     "input.newline",

@@ -134,6 +134,14 @@ pub fn registry() -> Registry {
                 run: history,
             },
             Command {
+                name: "search",
+                aliases: &["find"],
+                usage: "/search <words>",
+                help: "Search every cached message and attachment, all bots (local only; also Ctrl-F)",
+                complete: no_complete,
+                run: search,
+            },
+            Command {
                 name: "react",
                 aliases: &["unreact"],
                 usage: "/react <emoji|:code:> [n]",
@@ -614,6 +622,11 @@ fn shell(app: &mut App, args: &str) -> Result<()> {
         bail!("Usage: /shell <command>   e.g. /shell ls -la");
     }
     app.run_shell_command(args);
+    Ok(())
+}
+
+fn search(app: &mut App, args: &str) -> Result<()> {
+    app.open_msg_search(args);
     Ok(())
 }
 

@@ -669,6 +669,10 @@ pub struct App {
     pub history_draft: Option<String>,
     /// Ctrl-R fuzzy history search overlay.
     pub history_search: Option<crate::history::Search>,
+    /// `/search` / Ctrl-F local message search overlay (1.39.0).
+    pub msg_search: Option<crate::msgsearch::MsgSearch>,
+    /// (bot id, feed entry, since): a jumped-to message briefly highlighted.
+    pub flash: Option<(String, usize, Instant)>,
     /// Tab-completion popup for slash commands.
     pub completion: Option<crate::complete::Popup>,
     /// In-app selection in the chat body.
@@ -953,6 +957,8 @@ impl App {
             history_idx: None,
             history_draft: None,
             history_search: None,
+            msg_search: None,
+            flash: None,
             completion: None,
             body_sel: None,
             body_plain: String::new(),
@@ -2866,6 +2872,7 @@ impl App {
             || self.help.is_some()
             || self.shell.is_some()
             || self.history_search.is_some()
+            || self.msg_search.is_some()
             || self.completion.is_some()
             || self.menu.open.is_some()
             || self.image_view.is_some()
@@ -3010,6 +3017,117 @@ impl App {
             .with_selected("cancel")
             .on_cancel(|app| app.info("Prompt history kept.".into())),
         );
+    }
+
+    /// Open the local message search (`/search [words]`, Ctrl-F).
+    pub fn open_msg_search(&mut self, q: &str) {
+        let mut s = crate::msgsearch::MsgSearch::new(q.trim(), self.keys_are_vim());
+        self.run_msg_search(&mut s);
+        self.msg_search = Some(s);
+    }
+
+    fn run_msg_search(&self, s: &mut crate::msgsearch::MsgSearch) {
+        let words = crate::msgsearch::parse_query(&s.query);
+        match self.store.search_messages(&words, crate::msgsearch::LIMIT) {
+            Ok(h) => {
+                s.error = None;
+                s.set_hits(h);
+            }
+            Err(e) => {
+                s.error = Some(format!("Search failed: {e:#}"));
+                s.set_hits(vec![]);
+            }
+        }
+    }
+
+    pub fn msg_search_key(&mut self, k: ratatui::crossterm::event::KeyEvent) {
+        let Some(mut s) = self.msg_search.take() else {
+            return;
+        };
+        match s.key(k) {
+            crate::msgsearch::Outcome::Cancel => return,
+            crate::msgsearch::Outcome::Requery => self.run_msg_search(&mut s),
+            crate::msgsearch::Outcome::Jump(i) => {
+                if let Some(h) = s.hits.get(i).cloned() {
+                    self.jump_to_hit(&h);
+                    return;
+                }
+            }
+            crate::msgsearch::Outcome::OpenAttachment(i) => {
+                if let Some(h) = s.hits.get(i).cloned() {
+                    self.open_hit_attachment(&h);
+                    return;
+                }
+            }
+            crate::msgsearch::Outcome::None => {}
+        }
+        self.msg_search = Some(s);
+    }
+
+    /// Mouse in the search overlay: wheel moves, a click jumps to that result.
+    pub fn msg_search_mouse(&mut self, m: ratatui::crossterm::event::MouseEvent) {
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+        let Some(s) = self.msg_search.as_mut() else {
+            return;
+        };
+        match m.kind {
+            MouseEventKind::ScrollUp => s.move_by(-crate::history::WHEEL_STEP as i64),
+            MouseEventKind::ScrollDown => s.move_by(crate::history::WHEEL_STEP as i64),
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(h) = s
+                    .hit_at(m.column, m.row)
+                    .and_then(|i| s.hits.get(i).cloned())
+                {
+                    self.msg_search = None;
+                    self.jump_to_hit(&h);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Switch to the hit's bot, scroll its message to the top and flash it.
+    /// Returns the feed entry index, or None (an error notice says why).
+    pub fn jump_to_hit(&mut self, h: &crate::storage::SearchHit) -> Option<usize> {
+        let Some(bi) = self.bots.iter().position(|b| b.id == h.bot_id) else {
+            self.error(format!(
+                "{} isn't in your bot list right now (/reload, then search again).",
+                h.bot_name
+            ));
+            return None;
+        };
+        if self.active != Some(bi) {
+            self.select_bot(bi);
+        } else {
+            self.reload_bot_log(&h.bot_id);
+        }
+        match self.store.message_index(&h.bot_id, h.id) {
+            Ok(Some(i)) => {
+                self.jump_to_entry(i);
+                self.flash = Some((h.bot_id.clone(), i, Instant::now()));
+                Some(i)
+            }
+            _ => {
+                self.error("That message is no longer stored locally.".into());
+                None
+            }
+        }
+    }
+
+    /// Jump to the hit and open its matched attachment (else its first one).
+    fn open_hit_attachment(&mut self, h: &crate::storage::SearchHit) {
+        let path = h
+            .attachment
+            .as_ref()
+            .map(|(_, p)| p.clone())
+            .or_else(|| h.attachments.first().map(|a| a.path.clone()));
+        if self.jump_to_hit(h).is_none() {
+            return;
+        }
+        match path {
+            Some(p) => self.open_attachment(&p, crate::attach::Then::Open),
+            None => self.info("That message has no attachment.".into()),
+        }
     }
 
     /// Mouse in the history overlay: wheel scrolls, click selects / takes.
@@ -3243,6 +3361,10 @@ impl App {
             }
             "input.history_search" => {
                 self.open_history_search();
+                true
+            }
+            "search.open" => {
+                self.open_msg_search("");
                 true
             }
             "input.undo_clear" => {
@@ -3852,6 +3974,18 @@ impl App {
             );
             return;
         }
+        // Local copies of text-like files being sent, cached for /search (1.39.0).
+        let texts: Vec<(String, String, std::path::PathBuf)> = self
+            .attach
+            .staged
+            .iter()
+            .filter_map(|st| match &st.state {
+                crate::attach::State::Done(a) => {
+                    Some((a.path.clone(), a.name.clone(), st.path.clone()))
+                }
+                _ => None,
+            })
+            .collect();
         let Some(attachments) = self.take_attachments_for_send(&text) else {
             return;
         };
@@ -3865,6 +3999,11 @@ impl App {
         if let Err(e) = self.store.append_message(&bot, &mine) {
             self.error(format!("Could not save message: {e:#}"));
             return;
+        }
+        for (path, name, local) in texts {
+            if let Some(t) = crate::msgsearch::text_of_file(&local) {
+                let _ = self.store.save_attachment_text(&path, &name, &t);
+            }
         }
         // Optimistic UX without a second source: the pending row is in SQLite, so
         // rebuilding from it shows the message immediately.
@@ -6139,5 +6278,75 @@ mod prompt_history_tests {
         }
         assert_eq!(app.store.prompt_history(10_000).unwrap().len(), 100);
         assert_eq!(app.prompt_history[0], "/whoami 149");
+    }
+}
+
+#[cfg(test)]
+mod msg_search_tests {
+    use super::*;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn search_jumps_to_the_message_in_another_bot_and_flashes_it() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = tests::test_app(&rt);
+        tests::mock_login(&mut app, "t");
+        assert!(app.bots.len() >= 2);
+        let other = app.bots[1].id.clone();
+        for (i, t) in ["first", "the needle is here", "last"].iter().enumerate() {
+            app.store
+                .append_message(
+                    &other,
+                    &Message {
+                        role: Role::Bot,
+                        text: (*t).into(),
+                        remote_id: Some(format!("r{i}")),
+                        attachments: vec![],
+                    },
+                )
+                .unwrap();
+        }
+        app.select_bot(0);
+        app.open_msg_search("");
+        for c in "NEEDLE".chars() {
+            app.msg_search_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        let s = app.msg_search.as_ref().expect("open");
+        assert_eq!(s.hits.len(), 1);
+        assert_eq!(s.hits[0].bot_id, other);
+        app.msg_search_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.msg_search.is_none());
+        assert_eq!(app.active_bot().unwrap().id, other);
+        assert_eq!(app.pending_jump, Some(1));
+        assert_eq!(app.flash.as_ref().map(|f| f.1), Some(1));
+        // /search opens with the words already run.
+        tests::type_line(&mut app, "/search here needle");
+        assert_eq!(app.msg_search.as_ref().unwrap().hits.len(), 1);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let screen: String = (0..30u16)
+            .map(|y| {
+                (0..100u16)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+                    + "\n"
+            })
+            .collect();
+        assert!(screen.contains("Search messages (1)"), "{screen}");
+        assert!(screen.contains("╭ Search messages"), "rounded: {screen}");
+        assert!(screen.contains("needle is here"), "{screen}");
+        // A click on the result jumps too.
+        let a = app.msg_search.as_ref().unwrap().list_area;
+        app.msg_search_mouse(ratatui::crossterm::event::MouseEvent {
+            kind: ratatui::crossterm::event::MouseEventKind::Down(
+                ratatui::crossterm::event::MouseButton::Left,
+            ),
+            column: a.x + 1,
+            row: a.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(app.msg_search.is_none());
+        assert_eq!(app.pending_jump, Some(1));
     }
 }

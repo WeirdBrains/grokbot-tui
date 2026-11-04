@@ -198,7 +198,42 @@ const V10: &str = "CREATE TABLE IF NOT EXISTS reactions (
 /// v10 -> v11: files sent with a message (JSON list of [`crate::api::Attachment`]).
 const V11: &str = "ALTER TABLE messages ADD COLUMN attachments TEXT;";
 
-const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11];
+/// v11 -> v12: local full-text search (1.39.0). `messages_fts` mirrors every message's
+/// text and its attachments' names/paths (rowid = `messages.id`), kept in sync by
+/// triggers and backfilled here. `attachment_text` caches the text of small text-like
+/// files you sent (read locally at send time), indexed by `attachment_text_fts`.
+const V12: &str = "CREATE VIRTUAL TABLE messages_fts USING fts5(body, files, tokenize = 'unicode61 remove_diacritics 2');
+    INSERT INTO messages_fts(rowid, body, files) SELECT m.id, m.text, COALESCE((SELECT group_concat(COALESCE(json_extract(j.value, '$.name'), '') || ' ' || COALESCE(json_extract(j.value, '$.path'), ''), ' ') FROM json_each(CASE WHEN json_valid(m.attachments) THEN m.attachments ELSE '[]' END) j), '') FROM messages m;
+    CREATE TRIGGER messages_fts_ai AFTER INSERT ON messages BEGIN
+      INSERT INTO messages_fts(rowid, body, files) VALUES (NEW.id, NEW.text, COALESCE((SELECT group_concat(COALESCE(json_extract(j.value, '$.name'), '') || ' ' || COALESCE(json_extract(j.value, '$.path'), ''), ' ') FROM json_each(CASE WHEN json_valid(NEW.attachments) THEN NEW.attachments ELSE '[]' END) j), ''));
+    END;
+    CREATE TRIGGER messages_fts_ad AFTER DELETE ON messages BEGIN
+      DELETE FROM messages_fts WHERE rowid = OLD.id;
+    END;
+    CREATE TRIGGER messages_fts_au AFTER UPDATE OF text, attachments ON messages BEGIN
+      DELETE FROM messages_fts WHERE rowid = OLD.id;
+      INSERT INTO messages_fts(rowid, body, files) VALUES (NEW.id, NEW.text, COALESCE((SELECT group_concat(COALESCE(json_extract(j.value, '$.name'), '') || ' ' || COALESCE(json_extract(j.value, '$.path'), ''), ' ') FROM json_each(CASE WHEN json_valid(NEW.attachments) THEN NEW.attachments ELSE '[]' END) j), ''));
+    END;
+    CREATE TABLE attachment_text (
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        name TEXT NOT NULL,
+        text TEXT NOT NULL,
+        PRIMARY KEY (account_id, path)
+    );
+    CREATE VIRTUAL TABLE attachment_text_fts USING fts5(name, text, tokenize = 'unicode61 remove_diacritics 2');
+    CREATE TRIGGER attachment_text_ai AFTER INSERT ON attachment_text BEGIN
+      INSERT INTO attachment_text_fts(rowid, name, text) VALUES (NEW.rowid, NEW.name, NEW.text);
+    END;
+    CREATE TRIGGER attachment_text_ad AFTER DELETE ON attachment_text BEGIN
+      DELETE FROM attachment_text_fts WHERE rowid = OLD.rowid;
+    END;
+    CREATE TRIGGER attachment_text_au AFTER UPDATE ON attachment_text BEGIN
+      DELETE FROM attachment_text_fts WHERE rowid = OLD.rowid;
+      INSERT INTO attachment_text_fts(rowid, name, text) VALUES (NEW.rowid, NEW.name, NEW.text);
+    END;";
+
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12];
 
 /// One remembered prompt (newest-first lists).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -647,6 +682,144 @@ impl Store {
         Ok(())
     }
 
+    // ---- local search (1.39.0; never touches the network)
+
+    /// Messages of every bot of this account matching all `words` (case-insensitive,
+    /// prefix per word) in their text, attachment names/paths or cached attachment
+    /// text. Newest first, at most `limit`.
+    pub fn search_messages(&self, words: &[String], limit: usize) -> Result<Vec<SearchHit>> {
+        if words.is_empty() {
+            return Ok(vec![]);
+        }
+        let q = fts_query(words);
+        let mut hits = match self.search_fts(&q, limit) {
+            Ok(h) => h,
+            Err(_) => self.search_like(words, limit)?,
+        };
+        // Cached attachment text (files you sent).
+        let paths: Vec<(String, String, String)> = self
+            .conn
+            .prepare(
+                "SELECT a.path, a.name, a.text FROM attachment_text_fts f
+                 JOIN attachment_text a ON a.rowid = f.rowid
+                 WHERE attachment_text_fts MATCH ?1 AND a.account_id = ?2",
+            )
+            .and_then(|mut st| {
+                st.query_map(params![q, self.account.id], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                })?
+                .collect()
+            })
+            .unwrap_or_default();
+        for (path, name, text) in paths {
+            let mut st = self.conn.prepare(&format!(
+                "{SEARCH_SELECT} FROM messages m
+                 LEFT JOIN bots b ON b.account_id = m.account_id AND b.bot_id = m.bot_id,
+                 json_each(CASE WHEN json_valid(m.attachments) THEN m.attachments ELSE '[]' END) j
+                 WHERE m.account_id = ?1 AND json_extract(j.value, '$.path') = ?2"
+            ))?;
+            let rows = st.query_map(params![self.account.id, path], search_row)?;
+            for h in rows {
+                let mut h = h?;
+                if let Some(old) = hits.iter_mut().find(|o| o.id == h.id) {
+                    if old.attachment.is_none() {
+                        old.attachment = Some((name.clone(), path.clone()));
+                        old.in_content = true;
+                        old.snippet_src = text.clone();
+                    }
+                    continue;
+                }
+                h.attachment = Some((name.clone(), path.clone()));
+                h.in_content = true;
+                h.snippet_src = text.clone();
+                hits.push(h);
+            }
+        }
+        for h in hits.iter_mut().filter(|h| h.attachment.is_none()) {
+            // Matched via the attachment names/paths rather than the text?
+            let lower = h.snippet_src.to_lowercase();
+            if !words.iter().all(|w| lower.contains(&w.to_lowercase())) {
+                h.attachment = h
+                    .attachments
+                    .iter()
+                    .find(|a| {
+                        let n = format!("{} {}", a.name, a.path).to_lowercase();
+                        words.iter().any(|w| n.contains(&w.to_lowercase()))
+                    })
+                    .map(|a| (a.name.clone(), a.path.clone()));
+            }
+        }
+        hits.sort_by(|a, b| b.at.cmp(&a.at).then(b.id.cmp(&a.id)));
+        hits.truncate(limit);
+        Ok(hits)
+    }
+
+    fn search_fts(&self, q: &str, limit: usize) -> Result<Vec<SearchHit>> {
+        let mut st = self.conn.prepare(&format!(
+            "{SEARCH_SELECT} FROM messages_fts f JOIN messages m ON m.id = f.rowid
+             LEFT JOIN bots b ON b.account_id = m.account_id AND b.bot_id = m.bot_id
+             WHERE messages_fts MATCH ?1 AND m.account_id = ?2
+             ORDER BY m.created_at DESC, m.id DESC LIMIT ?3"
+        ))?;
+        let rows = st.query_map(params![q, self.account.id, limit as i64], search_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Fallback without FTS5 (or for a query FTS can't parse): substring match per word
+    /// over the text and the attachments JSON.
+    pub fn search_like(&self, words: &[String], limit: usize) -> Result<Vec<SearchHit>> {
+        let mut sql = format!(
+            "{SEARCH_SELECT} FROM messages m
+             LEFT JOIN bots b ON b.account_id = m.account_id AND b.bot_id = m.bot_id
+             WHERE m.account_id = ?1"
+        );
+        let mut args: Vec<String> = vec![];
+        for w in words {
+            args.push(format!(
+                "%{}%",
+                w.to_lowercase()
+                    .replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_")
+            ));
+            let n = args.len() + 1;
+            sql.push_str(&format!(
+                " AND (lower(m.text) LIKE ?{n} ESCAPE '\\' OR lower(COALESCE(m.attachments, '')) LIKE ?{n} ESCAPE '\\')"
+            ));
+        }
+        sql.push_str(&format!(
+            " ORDER BY m.created_at DESC, m.id DESC LIMIT {limit}"
+        ));
+        let mut st = self.conn.prepare(&sql)?;
+        let mut p: Vec<&dyn rusqlite::ToSql> = vec![&self.account.id];
+        for a in &args {
+            p.push(a);
+        }
+        let rows = st.query_map(p.as_slice(), search_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Cache a sent attachment's text for search (local only).
+    pub fn save_attachment_text(&self, path: &str, name: &str, text: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO attachment_text(account_id, path, name, text) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(account_id, path) DO UPDATE SET name = excluded.name, text = excluded.text",
+            params![self.account.id, path, name, text],
+        )?;
+        Ok(())
+    }
+
+    /// Position of message row `id` in [`Self::messages`] order (= the chat feed index).
+    pub fn message_index(&self, bot_id: &str, id: i64) -> Result<Option<usize>> {
+        let mut st = self.conn.prepare(
+            "SELECT id FROM messages WHERE account_id = ?1 AND bot_id = ?2 ORDER BY ord IS NULL, ord, id",
+        )?;
+        let ids = st
+            .query_map(params![self.account.id, bot_id], |r| r.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(ids.iter().position(|&i| i == id))
+    }
+
     // ---- messages (active account)
 
     pub fn append_message(&self, bot_id: &str, m: &Message) -> Result<()> {
@@ -1050,6 +1223,59 @@ fn attachments_json(a: &[crate::api::Attachment]) -> Option<String> {
     (!a.is_empty()).then(|| serde_json::to_string(a).unwrap_or_default())
 }
 
+/// One local search result.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchHit {
+    /// `messages.id`.
+    pub id: i64,
+    pub bot_id: String,
+    pub bot_name: String,
+    pub role: Role,
+    /// UTC `YYYY-MM-DD HH:MM:SS`.
+    pub at: String,
+    /// Text the snippet is cut from (the message, or the matching attachment's text).
+    pub snippet_src: String,
+    pub attachments: Vec<crate::api::Attachment>,
+    /// (name, path) of the attachment that matched, if the match is in one.
+    pub attachment: Option<(String, String)>,
+    /// The match is in the attachment's cached text (not just its name).
+    pub in_content: bool,
+}
+
+const SEARCH_SELECT: &str = "SELECT m.id, m.bot_id, COALESCE(b.name, m.bot_id), m.role, m.text, m.created_at, m.attachments";
+
+fn search_row(r: &rusqlite::Row) -> rusqlite::Result<SearchHit> {
+    let role: String = r.get(3)?;
+    Ok(SearchHit {
+        id: r.get(0)?,
+        bot_id: r.get(1)?,
+        bot_name: r.get(2)?,
+        role: if role == "user" {
+            Role::User
+        } else {
+            Role::Bot
+        },
+        snippet_src: r.get(4)?,
+        at: r.get::<_, Option<String>>(5)?.unwrap_or_default(),
+        attachments: r
+            .get::<_, Option<String>>(6)?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default(),
+        attachment: None,
+        in_content: false,
+    })
+}
+
+/// FTS5 query for `words`: every word must match (implicit AND), each as a quoted
+/// prefix term so punctuation can't break the syntax.
+pub fn fts_query(words: &[String]) -> String {
+    words
+        .iter()
+        .map(|w| format!("\"{}\"*", w.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn user_version(conn: &Connection) -> Result<usize> {
     Ok(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))? as usize)
 }
@@ -1095,7 +1321,7 @@ fn set_mode(_: &Path, _: u32) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn msg(role: Role, t: &str) -> Message {
+    pub(super) fn msg(role: Role, t: &str) -> Message {
         Message {
             role,
             text: t.into(),
@@ -1122,7 +1348,7 @@ mod tests {
         }
     }
 
-    fn store() -> (Store, tempfile::TempDir) {
+    pub(super) fn store() -> (Store, tempfile::TempDir) {
         let d = tempfile::tempdir().unwrap();
         (Store::open(d.path().join("gb"), None).unwrap(), d)
     }
@@ -1594,6 +1820,7 @@ mod tests {
 
 #[cfg(test)]
 mod prompt_history_store_tests {
+    use super::tests::{msg, store};
     use super::*;
 
     #[test]
@@ -1654,6 +1881,109 @@ mod prompt_history_store_tests {
         assert!(s.reactions("b1").unwrap().is_empty());
     }
 
+    const DROP_V12: &str =
+        "DROP TRIGGER messages_fts_ai; DROP TRIGGER messages_fts_ad; DROP TRIGGER messages_fts_au;
+        DROP TABLE messages_fts; DROP TABLE attachment_text_fts; DROP TABLE attachment_text;";
+
+    #[test]
+    fn v12_backfills_fts_and_triggers_keep_it_in_sync() {
+        let d = tempfile::tempdir().unwrap();
+        {
+            let s = Store::open(d.path(), None).unwrap();
+            s.conn
+                .execute_batch(&format!("{DROP_V12} PRAGMA user_version = 11;"))
+                .unwrap();
+            s.append_message("a", &msg(Role::User, "Old Kubernetes question"))
+                .unwrap();
+            s.append_message("b", &msg(Role::Bot, "unrelated reply"))
+                .unwrap();
+        }
+        let s = Store::open(d.path(), None).unwrap();
+        assert_eq!(s.schema_version().unwrap(), MIGRATIONS.len());
+        let w = |q: &str| crate::msgsearch::parse_query(q);
+        let h = s.search_messages(&w("kubernetes OLD"), 10).unwrap();
+        assert_eq!(h.len(), 1, "backfilled, case-insensitive, every word");
+        assert_eq!(h[0].bot_id, "a");
+        assert!(
+            s.search_messages(&w("kubernetes reply"), 10)
+                .unwrap()
+                .is_empty()
+        );
+        // New rows are indexed by the trigger; prefix match; newest first.
+        s.append_message("b", &msg(Role::Bot, "kubernetes pods are old news"))
+            .unwrap();
+        let h = s.search_messages(&w("kube old"), 10).unwrap();
+        assert_eq!(h.len(), 2);
+        assert_eq!(h[0].bot_id, "b", "newest first");
+        // Deletes leave the index.
+        s.clear_messages("b").unwrap();
+        assert_eq!(s.search_messages(&w("kube"), 10).unwrap().len(), 1);
+        // The LIKE fallback agrees.
+        assert_eq!(s.search_like(&w("KUBERNETES old"), 10).unwrap().len(), 1);
+        assert!(
+            s.search_messages(&w("\"%_"), 10).is_ok(),
+            "odd input is safe"
+        );
+        assert!(s.search_messages(&[], 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_matches_attachment_names_and_cached_text() {
+        let (s, _d) = store();
+        let a = crate::api::Attachment {
+            path: "alias-9".into(),
+            name: "deploy-notes.txt".into(),
+            size: Some(10),
+            content_type: None,
+        };
+        s.append_message(
+            "a",
+            &Message {
+                role: Role::User,
+                text: "see attached".into(),
+                remote_id: None,
+                attachments: vec![a],
+            },
+        )
+        .unwrap();
+        let w = |q: &str| crate::msgsearch::parse_query(q);
+        let h = s.search_messages(&w("deploy notes"), 10).unwrap();
+        assert_eq!(h.len(), 1);
+        assert_eq!(h[0].attachment.as_ref().unwrap().0, "deploy-notes.txt");
+        assert!(!h[0].in_content);
+        // Content of the file (cached at send time).
+        assert!(s.search_messages(&w("zanzibar"), 10).unwrap().is_empty());
+        s.save_attachment_text("alias-9", "deploy-notes.txt", "rollout to Zanzibar first")
+            .unwrap();
+        let h = s.search_messages(&w("zanzibar rollout"), 10).unwrap();
+        assert_eq!(h.len(), 1);
+        assert!(h[0].in_content);
+        assert!(h[0].snippet_src.contains("Zanzibar"));
+        // Upsert replaces the text in the index.
+        s.save_attachment_text("alias-9", "deploy-notes.txt", "now Lisbon")
+            .unwrap();
+        assert!(s.search_messages(&w("zanzibar"), 10).unwrap().is_empty());
+        assert_eq!(s.search_messages(&w("lisbon"), 10).unwrap().len(), 1);
+        // Other accounts never see it.
+        let mut s = s;
+        s.add_account("other").unwrap();
+        s.use_account("other").unwrap();
+        assert!(s.search_messages(&w("lisbon"), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn message_index_follows_display_order() {
+        let (s, _d) = store();
+        for t in ["one", "two", "three"] {
+            s.append_message("a", &msg(Role::User, t)).unwrap();
+        }
+        let h = s
+            .search_messages(&crate::msgsearch::parse_query("two"), 10)
+            .unwrap();
+        assert_eq!(s.message_index("a", h[0].id).unwrap(), Some(1));
+        assert_eq!(s.message_index("a", 9999).unwrap(), None);
+    }
+
     #[test]
     fn v8_history_rows_survive_the_v9_migration() {
         let d = tempfile::tempdir().unwrap();
@@ -1663,7 +1993,7 @@ mod prompt_history_store_tests {
             // Roll the schema back to v8 (no `bot` column), as an older release left it.
             s.conn
                 .execute_batch(
-                    "ALTER TABLE prompt_history DROP COLUMN bot; ALTER TABLE messages DROP COLUMN attachments; PRAGMA user_version = 8;",
+                    &format!("{DROP_V12} ALTER TABLE prompt_history DROP COLUMN bot; ALTER TABLE messages DROP COLUMN attachments; PRAGMA user_version = 8;"),
                 )
                 .unwrap();
         }

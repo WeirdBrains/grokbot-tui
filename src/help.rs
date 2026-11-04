@@ -28,12 +28,13 @@ Plain text is sent to the active bot. Lines starting with / are commands.
 
 Help topics (Enter on a link below opens it):
   login · login desktop · login cursor · login gateway
-  keys · theme · theme-files · accounts · prefs · env · sync · delivery · troubleshooting
+  keys · message-search · theme · theme-files · accounts · prefs · env · sync · delivery
+  troubleshooting
 
 Search: /help <keyword> (e.g. /help keyring), or press / in this window.
 
 Commands: /help <command> shows usage, examples and related topics.
-  help login logout whoami bots bot history reload account prefs memory theme quit",
+  help login logout whoami bots bot history search reload account prefs memory theme quit",
         related: &[
             "login",
             "login-desktop",
@@ -42,6 +43,34 @@ Commands: /help <command> shows usage, examples and related topics.
             "sync",
             "troubleshooting",
         ],
+    },
+    Topic {
+        id: "message-search",
+        title: "Searching messages",
+        body: "\
+Ctrl-F or /search <words> (alias /find) searches everything cached on this computer for the
+active account: every bot's messages (team bots and groups too, once their chat has been
+opened and synced), the names and paths of attachments, and the text of small text files you
+sent. It never goes to the network.
+
+Matching
+  Every word must match, case-insensitively, as the start of a word (kube finds Kubernetes).
+  Newest first, at most 200 results. Each shows the bot, age and time, a snippet with the
+  words highlighted, and [📎 file …] / [📎 in …] when the match is an attachment's name or
+  its text.
+
+Keys
+  Type to search; ↑/↓, Ctrl-P/N, PgUp/PgDn and the wheel move.
+  Enter or a click: open that bot's chat, scroll to the message and flash it.
+  Ctrl-O: also open the matched attachment (viewer or download).
+  Esc closes. With ui.keys = vim the list starts in list mode when given words: j/k, g/G,
+  Ctrl-d/u move, o opens the file, / or i edits the words, q closes. Keymap: search.open.
+
+What's searched
+  Attachment contents: only files you sent from this computer since 1.39.0, if they were
+  text (UTF-8, no NUL bytes) and at most 256 KiB; their text is cached in context.db when
+  you send. Images, PDFs, binaries and files the bot sent are matched by name only.",
+        related: &["keys", "cmd-search", "cmd-history"],
     },
     Topic {
         id: "login",
@@ -191,6 +220,8 @@ ctrl-c / ctrl-d / ctrl-q in your keymap.toml override these.
                                Otherwise switch focus between input and sidebar
   Ctrl-R                       Fuzzy search prompt history (Ctrl-S reverse; Esc keeps the draft)
   /history [query]             Browse all past prompts (persisted; newest first, age + bot)
+  Ctrl-F / /search <words>     Search every cached message of this account (all bots, team
+                               bots too) and attachment names/text; Enter jumps (see /help search)
   :name then Tab               Emoji shortcode completion (:thumbsup: → 👍); complete :name:
                                shortcodes are also turned into emoji when you send
   Click a link                 Opens it in the built-in browser (links.open_with = builtin,
@@ -220,6 +251,10 @@ ctrl-c / ctrl-d / ctrl-q in your keymap.toml override these.
                                builtin; respect_pref follows links.open_with). Anything that
                                would open an app on the remote machine (o, /open, Ctrl-click,
                                the viewer's o) warns and needs repeating within 5 s.
+  Chat layout                  Each message sits on a rounded bubble (╭─╮ │ … │ ╰─╯): yours on
+                               the right in the accent colour, the bot's on the left, muted,
+                               the name on the row above; reactions ride the bubble's top
+                               border at its top-right corner. Panels and popups are rounded.
   Inline images                Replies' images and your image attachments draw in the bubble
                                (images.inline = on|off, images.inline_max_rows = 12); click
                                one for the viewer. Shown once fully on screen.
@@ -787,6 +822,15 @@ fn command_extra(
              command not found.",
             &["/shell ls -la", "/shell git status", "/sh uptime"],
             &["keys"],
+        ),
+        "search" => (
+            "Search every locally cached message of the active account, across all bots, plus\n\
+             attachment names/paths and the cached text of text files you sent. Local only:\n\
+             never touches the network. Every word must match (case-insensitive, word prefix);\n\
+             newest first, up to 200. Enter or click jumps to the message (it flashes); Ctrl-O\n\
+             opens the matched attachment; Esc closes. Also Ctrl-F (keymap search.open).",
+            &["/search deploy", "/search kube rollout", "/find notes.txt"],
+            &["message-search", "keys"],
         ),
         "history" => (
             "Browse and search every prompt you've sent (kept in context.db per account, so\n\

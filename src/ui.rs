@@ -527,6 +527,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let cursor = draw_main(f, app);
     if app.picker.is_some() {
         draw_picker(f, app);
+    } else if let Some(s) = app.msg_search.as_mut() {
+        crate::msgsearch::draw(f, s, f.area());
     } else if let Some(s) = app.history_search.as_mut() {
         crate::history::draw(f, s, &app.prompt_history, &app.prompt_meta, f.area());
     } else if app.completion.is_some() {
@@ -574,6 +576,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     if app.picker.is_none()
         && app.history_search.is_none()
+        && app.msg_search.is_none()
         && app.completion.is_none()
         && app.shell.is_none()
         && app.help.is_none()
@@ -1169,6 +1172,40 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                 };
                 if pc < inner.width as usize {
                     buf[(inner.x + pc as u16, inner.y + y as u16)].set_style(st);
+                }
+            }
+        }
+    }
+    // A message jumped to from /search flashes briefly (1.39.0).
+    if let Some((fb, fi, since)) = app.flash.clone() {
+        let active = app.active_bot().map(|b| b.id.clone());
+        if since.elapsed() > crate::msgsearch::FLASH || active.as_deref() != Some(fb.as_str()) {
+            app.flash = None;
+        } else if let Some(cache) = app.feed_cache.as_ref() {
+            let st = ratatui::style::Style::from(theme::selected());
+            let buf = f.buffer_mut();
+            let mut row = 0usize;
+            let end = cache
+                .starts
+                .get(fi + 1)
+                .copied()
+                .unwrap_or(cache.lines.len());
+            for (li, n) in cache.rows.iter().enumerate() {
+                let r0 = row;
+                row += n;
+                if li < cache.starts.get(fi).copied().unwrap_or(usize::MAX) || li >= end {
+                    continue;
+                }
+                for r in r0..r0 + n {
+                    let Some(y) = r
+                        .checked_sub(off as usize)
+                        .filter(|y| *y < inner_h as usize)
+                    else {
+                        continue;
+                    };
+                    for x in 0..inner.width {
+                        buf[(inner.x + x, inner.y + y as u16)].set_style(st);
+                    }
                 }
             }
         }

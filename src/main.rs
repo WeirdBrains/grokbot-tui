@@ -43,6 +43,7 @@ mod markdown;
 mod mcp;
 mod media;
 mod menubar;
+mod msgsearch;
 mod notify;
 mod notify_rules;
 mod picker;
@@ -693,6 +694,7 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 && app.help.is_none()
                 && app.shell.is_none()
                 && app.history_search.is_none()
+                && app.msg_search.is_none()
                 && app.card_modal.is_none()
                 && app.settings.is_none()
                 && app.inbox.page.is_none()
@@ -758,8 +760,21 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 app.editor_key(k);
                 return true;
             }
+            if app.msg_search.is_some() {
+                app.msg_search_key(k);
+                return true;
+            }
             if app.history_search.is_some() {
                 app.history_search_key(k);
+                return true;
+            }
+            // Ctrl-F: local message search (1.39.0; vim keymap: search.open).
+            if app.keys_scheme_default()
+                && k.code == KeyCode::Char('f')
+                && k.modifiers.contains(KeyModifiers::CONTROL)
+                && app.editor.is_none()
+            {
+                app.open_msg_search("");
                 return true;
             }
             if app.react_picker.is_some() {
@@ -1171,6 +1186,7 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 app.card_modal_click(m.column, m.row);
             }
         }
+        Event::Mouse(m) if app.msg_search.is_some() => app.msg_search_mouse(m),
         Event::Mouse(m) if app.history_search.is_some() => app.history_search_mouse(m),
         Event::Mouse(m) if app.react_picker.is_some() => app.react_picker_mouse(m),
         Event::Mouse(m) if app.download.is_some() => app.download_mouse(m),

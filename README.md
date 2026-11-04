@@ -73,11 +73,16 @@ In mock mode any token logs in except `bad`. Sending `reject` simulates a 4xx an
  ▀▀▀▀▀▀▀▀▀▀▀▀  █   ▜▟▜▖▟▀▙ ▐▌▟▘    ▐▙▟▘▟▀▙ ▝█▀    theme  ‹default› ▾  dark  light  system  F4   (logo, title,
  ▀▀▀▀▀▀▀▀▀▀▀▀  ▜▖▜▌▐▌▝▘█ █ ▐▛▙     ▐▌▐▌█ █  █▗    login cursor · box.cursorvm.com               switchers)
  ▀▀▀▀▀▀▀▀▀▀▀▀   ▀▀▘▀▀  ▝▀▘ ▀▘▝▘    ▀▀▀ ▝▀▘  ▝▘    mouse: on (F6)
-┌ Bots ──────┐┌ Chat: Helper · Helper is replying ⠹ ──────────────────┐
-│ Helper     ││ you: hi                                               │  body: command output
-│ Coder      ││ Helper: hello!                                        │  and chat transcript
-└────────────┘└───────────────────────────────────────────────────────┘
-┌ /command or message ──────────────────────────────────────────────────┐  bottom input bar
+╭ Bots ──────╮╭ Chat: Helper · Helper is replying ⠹ ──────────────────╮
+│ Helper     ││                                               you     │  body: command output
+│ Coder      ││                                            ╭──────╮   │  and chat transcript,
+│            ││                                            │ hi   │   │  messages on rounded
+│            ││  Helper                                    ╰──────╯   │  bubbles (reactions on
+│            ││  ╭─────────── 👍 ─╮                                   │  the top-right corner)
+│            ││  │ hello!         │                                   │
+│            ││  ╰────────────────╯                                   │
+╰────────────╯╰───────────────────────────────────────────────────────╯
+╭ /command or message ──────────────────────────────────────────────────╮  bottom input bar
 │ > _                                                                   │
 └───────────────────────────────────────────────────────────────────────┘
 ```
@@ -486,6 +491,25 @@ jump the chat scroll. **F10** opens the menu bar. Hover shows a short tooltip af
 with a mode badge on the input. Bindings live in `~/.grokbot-tui/keymap.toml`
 (`/keymap reload` after editing). Default stays classic. See `docs/vim-mode-plan.md`.
 
+## Searching messages (1.39.0)
+
+**Ctrl-F** or `/search <words>` (alias `/find`; vim keymap action `search.open`, bound to
+`ctrl-f`) searches everything cached locally for the active account, never the network:
+
+- every bot's messages in `context.db` (team bots and groups too, once synced), via an
+  SQLite FTS5 index (`messages_fts`, kept in sync by triggers, backfilled on upgrade);
+- attachment names and paths;
+- the text of files you send from this computer (UTF-8, no NUL bytes, ≤ 256 KiB), cached
+  in `attachment_text` at send time. Images, binaries, larger files and files the bot sent
+  are matched by name only.
+
+Every word must match, case-insensitively, as a word prefix (`kube` finds Kubernetes).
+Results are newest first (up to 200), each with the bot, age and time, a highlighted
+snippet and `[📎 file …]` / `[📎 in …]` for attachment matches. ↑/↓, PgUp/PgDn and the
+wheel move; **Enter** or a click opens that bot's chat, scrolls to the message and flashes
+it; **Ctrl-O** (vim `o`) also opens the matched attachment; Esc closes (vim: `q`; `/` or
+`i` edits the words).
+
 ## Prompt history and completion
 
 Every prompt and slash command you submit is saved in `context.db` (per account, newest
@@ -497,6 +521,7 @@ arguments so a pasted token never lands in history.
 - **Up/Down** in the input walk lines, then your prompt history (also prompts sent from
   another grokbot-tui on the same data dir).
 - **Ctrl-R** opens a fuzzy history search (Ctrl-S reverse; Esc keeps the draft).
+- **Ctrl-F** searches your messages and attachments (see Searching messages).
 - **`/history [query]`** (`/prompts`) opens a scrollable browser of every saved prompt with
   its age and bot. Type to fuzzy-filter; ↑/↓, PgUp/PgDn and the mouse wheel move; Enter or
   clicking the selected row puts the prompt in the input (it is not sent); Esc closes. With
@@ -622,6 +647,7 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 100 entries):
 | `/login desktop [entry]` | Opt-in: log in with the Grok Bot desktop app's saved session (see Authentication) |
 | `/logout` | Delete this account's stored credential and clear the session. Chats and memory are kept. (The gateway has no revoke call.) |
 | `/whoami` | Show the account's login details (method, gateway, header names, whether a Cursor token is stored, env override) |
+| `/search <words>` (`/find`) | Search all locally cached messages and attachments across bots (also Ctrl-F); Enter jumps to the message |
 | `/bots` | Refresh and list all bots, including hidden ones and groups |
 | `/bot <name\|id>` (`/use`) | Switch to a bot's chat |
 | `/open [n\|list]` (`/img`) | Open the newest image (then link) from the bot's replies in the system viewer (`xdg-open`, `open`, or the Windows URL handler; vim `o`). `list` numbers them |

@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.39.0] - 2026-11-04
+
+### Added
+- Local message search: Ctrl-F or `/search <words>` (alias `/find`; vim keymap
+  `search.open` on `ctrl-f`). Searches every cached message of the active account
+  across all bots (team bots and groups included), attachment names and paths, and the
+  text of small text files you send (UTF-8, ≤ 256 KiB, cached locally at send time).
+  Never touches the network. Every word must match (case-insensitive word prefix);
+  newest first, up to 200 results with bot, time, a highlighted snippet and an
+  attachment tag. Enter or a click jumps to that bot's chat, scrolls to the message and
+  flashes it; Ctrl-O (vim `o`) opens the matched attachment. Vim list mode: j/k, g/G,
+  Ctrl-d/u, `/` edits, q closes.
+- Schema v12: SQLite FTS5 index `messages_fts` (backfilled from existing messages and
+  kept in sync by insert/update/delete triggers) and `attachment_text` +
+  `attachment_text_fts`. A LIKE search is the fallback if an FTS query can't run.
+- Help: a "message-search" topic and `/help search`; the Keys topic now lists Ctrl-F and
+  describes the 1.38.0 rounded bubble layout.
+
 ## [1.38.0] - 2026-11-04
 
 ### Changed
