@@ -95,7 +95,7 @@ install_files() {
 
 uninstall() {
   echo "Removing $NAME from ${DESTDIR}${PREFIX}"
-  rm -f "$BINDIR/$NAME" "$MANDIR/$NAME.1" "$BASHDIR/$NAME" "$ZSHDIR/_$NAME" "$FISHDIR/$NAME.fish"
+  rm -f "$BINDIR/$NAME" "$MANDIR/$NAME.1" "$MANDIR/$NAME"-*.1 "$BASHDIR/$NAME" "$ZSHDIR/_$NAME" "$FISHDIR/$NAME.fish"
   rm -rf "$DOCDIR" "$LICDIR" "$DATADIR"
   for d in "$BINDIR" "$MANDIR" "$BASHDIR" "$ZSHDIR" "$FISHDIR" "$DESTDIR$PREFIX/share/doc" \
            "$DESTDIR$PREFIX/share/licenses" "$DESTDIR$PREFIX/share"; do

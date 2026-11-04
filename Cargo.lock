@@ -554,6 +554,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "037e2a1a92236d0aff7e845093f64661d6df4c02c9fcc61a60e9e1d736fa392f"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1448,12 +1457,13 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "grokbot-tui"
-version = "1.40.0"
+version = "1.41.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "axum",
  "clap",
+ "clap_complete",
  "clap_mangen",
  "crossterm",
  "dirs",

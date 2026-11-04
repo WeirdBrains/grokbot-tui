@@ -24,6 +24,40 @@ After installing, run `grokbot-tui --mock` to try the UI offline, then `grokbot-
 [log in](login.md). `man grokbot-tui` (from the `.deb`/`.rpm` or `make install`) lists every
 flag and environment variable.
 
+## Shell completions (1.41.0)
+
+grokbot-tui completes its flags and subcommands (including `mcp serve|token|config` and
+`completions`) in bash, zsh, fish, PowerShell and elvish. The scripts are generated from
+the CLI definitions, committed in
+[`packaging/completions/`](../packaging/completions) and kept in sync by a test
+(`UPDATE_COMPLETIONS=1 cargo test completions` rewrites them). In the app: `/help completions`.
+
+Installed automatically:
+
+| package | bash | zsh | fish |
+|---------|------|-----|------|
+| `.deb` | `/usr/share/bash-completion/completions/grokbot-tui` | `/usr/share/zsh/vendor-completions/_grokbot-tui` | `/usr/share/fish/vendor_completions.d/grokbot-tui.fish` |
+| `.rpm`, AUR (`grokbot-tui`, `grokbot-tui-bin`) | `/usr/share/bash-completion/completions/grokbot-tui` | `/usr/share/zsh/site-functions/_grokbot-tui` | `/usr/share/fish/vendor_completions.d/grokbot-tui.fish` |
+| `make install` / `install-local.sh` | `PREFIX/share/bash-completion/completions/grokbot-tui` | `PREFIX/share/zsh/site-functions/_grokbot-tui` | `PREFIX/share/fish/vendor_completions.d/grokbot-tui.fish` |
+
+The release archives (`.tar.xz`, `.zip`) carry all five scripts in
+`packaging/completions/`. With the shell installers, MSI, `.pkg` or Homebrew, print the
+script for your shell yourself:
+
+```sh
+source <(grokbot-tui completions bash)                                   # bash: add to ~/.bashrc
+grokbot-tui completions zsh > ~/.zfunc/_grokbot-tui                       # zsh: fpath=(~/.zfunc $fpath) before compinit
+grokbot-tui completions fish > ~/.config/fish/completions/grokbot-tui.fish
+grokbot-tui completions elvish > ~/.config/elvish/lib/grokbot-tui.elv     # then `use grokbot-tui` in rc.elv
+```
+
+```powershell
+grokbot-tui completions powershell | Out-String | Invoke-Expression      # add to $PROFILE
+```
+
+Note for zsh with `.deb`: Debian's zsh reads `/usr/share/zsh/vendor-completions`; run
+`compinit` again (or start a new shell) after installing.
+
 ## Install
 
 Prebuilt packages are attached to each [GitHub Release](https://github.com/WeirdBrains/grokbot-tui/releases)

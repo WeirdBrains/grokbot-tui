@@ -36,7 +36,7 @@ tap = "WeirdBrains/homebrew-tap"
 # (choose standard or -ffmpeg) are built by build-ffmpeg-variant.yml.
 global-artifacts-jobs = ["./build-linux-packages", "./build-ffmpeg-variant"]
 # Shipped in every archive next to LICENSE and README.
-include = ["THIRD_PARTY.md"]
+include = ["THIRD_PARTY.md", "packaging/completions"]
 # Publish jobs: render the AUR PKGBUILD + winget manifests from the real release sha256s.
 # Automatic Homebrew publishing is commented out until the WeirdBrains/homebrew-tap repo
 # and the HOMEBREW_TAP_TOKEN secret exist. To re-enable it, swap the two lines below and

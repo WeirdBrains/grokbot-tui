@@ -4,7 +4,7 @@
 
 Every page of the built-in help (`F1`, `/help <topic>`), exactly as the app shows it.
 
-Topics and commands: [overview](#overview) · [message-search](#message-search) · [login](#login) · [login-desktop](#login-desktop) · [login-cursor](#login-cursor) · [login-gateway](#login-gateway) · [keys](#keys) · [theme](#theme) · [theme-files](#theme-files) · [accounts](#accounts) · [prefs](#prefs) · [env](#env) · [sync](#sync) · [delivery](#delivery) · [troubleshooting](#troubleshooting) · [help](#help) · [login](#login) · [logout](#logout) · [whoami](#whoami) · [mouse](#mouse) · [theme](#theme) · [copy](#copy) · [bots](#bots) · [refresh](#refresh) · [bot](#bot) · [shell](#shell) · [history](#history) · [search](#search) · [react](#react) · [attach](#attach) · [browse](#browse) · [notifications](#notifications) · [settings](#settings) · [links](#links) · [status](#status) · [header](#header) · [sidebar](#sidebar) · [emoji](#emoji) · [graphics](#graphics) · [kitty](#kitty) · [license](#license) · [media](#media) · [attachments](#attachments) · [card](#card) · [menu](#menu) · [mute](#mute) · [detach](#detach) · [view](#view) · [download](#download) · [open](#open) · [reload](#reload) · [account](#account) · [prefs](#prefs) · [memory](#memory) · [notify](#notify) · [keymap](#keymap) · [switch](#switch) · [quit](#quit)
+Topics and commands: [overview](#overview) · [message-search](#message-search) · [login](#login) · [login-desktop](#login-desktop) · [login-cursor](#login-cursor) · [login-gateway](#login-gateway) · [keys](#keys) · [theme](#theme) · [theme-files](#theme-files) · [accounts](#accounts) · [prefs](#prefs) · [env](#env) · [completions](#completions) · [sync](#sync) · [delivery](#delivery) · [troubleshooting](#troubleshooting) · [help](#help) · [login](#login) · [logout](#logout) · [whoami](#whoami) · [mouse](#mouse) · [theme](#theme) · [copy](#copy) · [bots](#bots) · [refresh](#refresh) · [bot](#bot) · [shell](#shell) · [history](#history) · [search](#search) · [react](#react) · [attach](#attach) · [browse](#browse) · [notifications](#notifications) · [settings](#settings) · [links](#links) · [status](#status) · [header](#header) · [sidebar](#sidebar) · [emoji](#emoji) · [graphics](#graphics) · [kitty](#kitty) · [license](#license) · [media](#media) · [attachments](#attachments) · [card](#card) · [menu](#menu) · [mute](#mute) · [detach](#detach) · [view](#view) · [download](#download) · [open](#open) · [reload](#reload) · [account](#account) · [prefs](#prefs) · [memory](#memory) · [notify](#notify) · [keymap](#keymap) · [switch](#switch) · [quit](#quit)
 
 <a id="overview"></a>
 
@@ -24,7 +24,7 @@ Plain text is sent to the active bot. Lines starting with / are commands.
 
 Help topics (Enter on a link below opens it):
   login · login desktop · login cursor · login gateway
-  keys · message-search · theme · theme-files · accounts · prefs · env · sync · delivery
+  keys · message-search · theme · theme-files · accounts · prefs · env · completions · sync · delivery
   troubleshooting
 
 Search: /help <keyword> (e.g. /help keyring), or press / in this window.
@@ -715,6 +715,33 @@ and where it came from.
 ```
 
 Related: [prefs](#prefs) · [login-cursor](#login-cursor) · [login-gateway](#login-gateway) · [troubleshooting](#troubleshooting)
+
+<a id="completions"></a>
+
+## Shell completions
+
+`/help completions`
+
+```text
+grokbot-tui completes its flags and subcommands (mcp serve/token/config, completions) in
+bash, zsh, fish, PowerShell and elvish. Packages install them for you:
+
+  .deb / .rpm / AUR / make install   bash, zsh and fish, in the system completion folders
+  release archives                   the scripts are in completions/ (or packaging/completions/)
+
+Or print one yourself (generated from this binary, so always current):
+
+  bash        source <(grokbot-tui completions bash)            (add to ~/.bashrc)
+  zsh         grokbot-tui completions zsh > ~/.zfunc/_grokbot-tui
+              (with fpath=(~/.zfunc $fpath); autoload -U compinit; compinit in ~/.zshrc)
+  fish        grokbot-tui completions fish > ~/.config/fish/completions/grokbot-tui.fish
+  PowerShell  grokbot-tui completions powershell | Out-String | Invoke-Expression
+              (add to $PROFILE)
+  elvish      grokbot-tui completions elvish > ~/.config/elvish/lib/grokbot-tui.elv
+              (then use grokbot-tui in rc.elv)
+```
+
+Related: [env](#env) · [overview](#overview)
 
 <a id="sync"></a>
 

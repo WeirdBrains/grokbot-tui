@@ -16,6 +16,7 @@ the same definitions as `--help`.
 | `--theme <NAME>` | Use this theme for this run only |
 | `--list-themes` | List the theme files and exit |
 | `mcp serve [--stdio\|--http [ADDR]]`, `mcp token`, `mcp config` | The [MCP server](mcp.md) |
+| `completions <bash\|zsh\|fish\|powershell\|elvish>` | Print a [shell completion](install.md#shell-completions-1410) script |
 | `-h`, `--help` / `-V`, `--version` | Help and version |
 
 ## Environment variables

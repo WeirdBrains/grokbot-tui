@@ -28,7 +28,7 @@ Plain text is sent to the active bot. Lines starting with / are commands.
 
 Help topics (Enter on a link below opens it):
   login · login desktop · login cursor · login gateway
-  keys · message-search · theme · theme-files · accounts · prefs · env · sync · delivery
+  keys · message-search · theme · theme-files · accounts · prefs · env · completions · sync · delivery
   troubleshooting
 
 Search: /help <keyword> (e.g. /help keyring), or press / in this window.
@@ -681,6 +681,28 @@ Data lives in ~/.grokbot-tui/context.db (override with --data-dir). On first sta
 an old ~/.gb folder is moved there. /whoami shows the client version in use
 and where it came from.",
         related: &["prefs", "login-cursor", "login-gateway", "troubleshooting"],
+    },
+    Topic {
+        id: "completions",
+        title: "Shell completions",
+        body: "\
+grokbot-tui completes its flags and subcommands (mcp serve/token/config, completions) in
+bash, zsh, fish, PowerShell and elvish. Packages install them for you:
+
+  .deb / .rpm / AUR / make install   bash, zsh and fish, in the system completion folders
+  release archives                   the scripts are in completions/ (or packaging/completions/)
+
+Or print one yourself (generated from this binary, so always current):
+
+  bash        source <(grokbot-tui completions bash)            (add to ~/.bashrc)
+  zsh         grokbot-tui completions zsh > ~/.zfunc/_grokbot-tui
+              (with fpath=(~/.zfunc $fpath); autoload -U compinit; compinit in ~/.zshrc)
+  fish        grokbot-tui completions fish > ~/.config/fish/completions/grokbot-tui.fish
+  PowerShell  grokbot-tui completions powershell | Out-String | Invoke-Expression
+              (add to $PROFILE)
+  elvish      grokbot-tui completions elvish > ~/.config/elvish/lib/grokbot-tui.elv
+              (then use grokbot-tui in rc.elv)",
+        related: &["env", "overview"],
     },
     Topic {
         id: "sync",

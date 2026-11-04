@@ -1,6 +1,6 @@
 [package]
 name = "grokbot-tui"
-version = "1.40.0"
+version = "1.41.0"
 edition = "2024"
 rust-version = "1.89"
 license = "GPL-3.0-or-later"
@@ -36,6 +36,9 @@ assets = [
     ["README.md", "usr/share/doc/grokbot-tui/README.md", "644"],
     ["THIRD_PARTY.md", "usr/share/doc/grokbot-tui/THIRD_PARTY.md", "644"],
     ["man/*.1", "usr/share/man/man1/", "644"],
+    ["packaging/completions/grokbot-tui.bash", "usr/share/bash-completion/completions/grokbot-tui", "644"],
+    ["packaging/completions/_grokbot-tui", "usr/share/zsh/vendor-completions/_grokbot-tui", "644"],
+    ["packaging/completions/grokbot-tui.fish", "usr/share/fish/vendor_completions.d/grokbot-tui.fish", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -47,6 +50,9 @@ assets = [
     { source = "LICENSE", dest = "/usr/share/licenses/grokbot-tui/LICENSE", mode = "644", doc = true },
     { source = "THIRD_PARTY.md", dest = "/usr/share/doc/grokbot-tui/THIRD_PARTY.md", mode = "644", doc = true },
     { source = "man/*.1", dest = "/usr/share/man/man1/", mode = "644", doc = true },
+    { source = "packaging/completions/grokbot-tui.bash", dest = "/usr/share/bash-completion/completions/grokbot-tui", mode = "644" },
+    { source = "packaging/completions/_grokbot-tui", dest = "/usr/share/zsh/site-functions/_grokbot-tui", mode = "644" },
+    { source = "packaging/completions/grokbot-tui.fish", dest = "/usr/share/fish/vendor_completions.d/grokbot-tui.fish", mode = "644" },
 ]
 
 [[bin]]
@@ -67,6 +73,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 clap = { version = "4", features = ["derive", "env"] }
+clap_complete = "4"
 dirs = "6"
 async-trait = "0.1"
 anyhow = "1"

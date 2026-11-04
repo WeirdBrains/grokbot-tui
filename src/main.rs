@@ -103,7 +103,40 @@ enum Cmd {
         #[command(subcommand)]
         cmd: mcp::McpCmd,
     },
+    /// Print a shell completion script to stdout: bash, zsh, fish, powershell or elvish
+    /// (e.g. `source <(grokbot-tui completions bash)`).
+    Completions {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
+
+/// The completion script for `shell`, generated from the CLI definitions.
+fn completion_script(shell: clap_complete::Shell) -> Vec<u8> {
+    use clap::CommandFactory;
+    let mut out = Vec::new();
+    clap_complete::generate(shell, &mut Cli::command(), "grokbot-tui", &mut out);
+    if shell == clap_complete::Shell::Bash {
+        // clap_complete 4.6 mangles the hyphen in "grokbot-tui" two ways in bash (the
+        // word loop says grokbot__tui__subcmd__mcp, the case labels
+        // grokbot__subcmd__tui__subcmd__mcp), so subcommands never completed. Use one.
+        out = String::from_utf8_lossy(&out)
+            .replace("grokbot__subcmd__tui", "grokbot__tui")
+            .into_bytes();
+    }
+    out
+}
+
+/// File name of each shell's script in packaging/completions/ (the names the shells
+/// look for in their completion directories).
+#[cfg(test)]
+pub(crate) const COMPLETION_FILES: &[(clap_complete::Shell, &str)] = &[
+    (clap_complete::Shell::Bash, "grokbot-tui.bash"),
+    (clap_complete::Shell::Zsh, "_grokbot-tui"),
+    (clap_complete::Shell::Fish, "grokbot-tui.fish"),
+    (clap_complete::Shell::PowerShell, "_grokbot-tui.ps1"),
+    (clap_complete::Shell::Elvish, "grokbot-tui.elv"),
+];
 
 /// Environment variable renames applied at startup, in order: `(old name, new name)`.
 /// First the pre-1.2 `GB_*` names fall back onto their `GROKBOT_TUI_*` replacements, then
@@ -157,6 +190,11 @@ fn main() -> Result<()> {
         unsafe { std::env::set_var(name, value) };
     }
     let cli = Cli::parse();
+    if let Some(Cmd::Completions { shell }) = &cli.cmd {
+        use std::io::Write;
+        std::io::stdout().write_all(&completion_script(*shell))?;
+        return Ok(());
+    }
     // --data-dir overrides everything, including the ~/.gb migration.
     let (dir, notice) = match cli.data_dir {
         Some(d) => (d, None),
@@ -2448,6 +2486,36 @@ mod man_tests {
             .collect();
         v.sort();
         v
+    }
+
+    /// packaging/completions/ is generated from the CLI
+    /// (`UPDATE_COMPLETIONS=1 cargo test completions` rewrites it).
+    #[test]
+    fn completions_are_current() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("packaging/completions");
+        let update = std::env::var_os("UPDATE_COMPLETIONS").is_some();
+        if update {
+            std::fs::create_dir_all(&dir).unwrap();
+        }
+        for (shell, name) in super::COMPLETION_FILES {
+            let want = super::completion_script(*shell);
+            if update {
+                std::fs::write(dir.join(name), &want).unwrap();
+            }
+            let have = std::fs::read(dir.join(name)).unwrap_or_default();
+            assert!(
+                have == want,
+                "packaging/completions/{name} is stale: run UPDATE_COMPLETIONS=1 cargo test completions"
+            );
+            let s = String::from_utf8_lossy(&want);
+            for word in ["mcp", "serve", "completions", "data-dir"] {
+                assert!(s.contains(word), "{name} misses {word}");
+            }
+            assert!(
+                !s.contains("grokbot__subcmd__tui"),
+                "{name}: mixed bash names"
+            );
+        }
     }
 
     #[test]

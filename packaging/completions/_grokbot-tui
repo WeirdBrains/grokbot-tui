@@ -1,0 +1,289 @@
+#compdef grokbot-tui
+
+autoload -U is-at-least
+
+_grokbot-tui() {
+    typeset -A opt_args
+    typeset -a _arguments_options
+    local ret=1
+
+    if is-at-least 5.2; then
+        _arguments_options=(-s -S -C)
+    else
+        _arguments_options=(-s -C)
+    fi
+
+    local context curcontext="$curcontext" state line
+    _arguments "${_arguments_options[@]}" : \
+'--account=[Account alias to start in (default\: last active account)]:ALIAS:_default' \
+'--data-dir=[Data directory holding context.db (default ~/.grokbot-tui; a pre-1.2 ~/.gb is moved there)]:DIR:_files' \
+'--theme=[Use this theme (a file in <data dir>/themes, without .toml) for this run only; the ui.theme pref, F5 or /theme use set it for good]:NAME:_default' \
+'--mock[Use the offline mock API (fake bots, echo replies; any token except "bad" works)]' \
+'--list-themes[List the themes in <data dir>/themes (● marks the one in use; broken files say why) and exit]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'-V[Print version]' \
+'--version[Print version]' \
+":: :_grokbot-tui_commands" \
+"*::: :->grokbot-tui" \
+&& ret=0
+    case $state in
+    (grokbot-tui)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:grokbot-tui-command-$line[1]:"
+        case $line[1] in
+            (mcp)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_grokbot-tui__subcmd__mcp_commands" \
+"*::: :->mcp" \
+&& ret=0
+
+    case $state in
+    (mcp)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:grokbot-tui-mcp-command-$line[1]:"
+        case $line[1] in
+            (serve)
+_arguments "${_arguments_options[@]}" : \
+'--http=[Serve streamable HTTP at ADDR (loopback only; default from mcp.toml, else 127.0.0.1\:8765). Clients send \`Authorization\: Bearer <grokbot-tui mcp token>\`]::ADDR:_default' \
+'(--http)--stdio[Serve over stdin/stdout (default)]' \
+'--read-only[Refuse send_message and answer_card for this run (overrides mcp.toml)]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(token)
+_arguments "${_arguments_options[@]}" : \
+'--rotate[Make a new token; clients using the old one stop working]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(config)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_grokbot-tui__subcmd__mcp__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:grokbot-tui-mcp-help-command-$line[1]:"
+        case $line[1] in
+            (serve)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(token)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(config)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(completions)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':shell:(bash elvish fish powershell zsh)' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_grokbot-tui__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:grokbot-tui-help-command-$line[1]:"
+        case $line[1] in
+            (mcp)
+_arguments "${_arguments_options[@]}" : \
+":: :_grokbot-tui__subcmd__help__subcmd__mcp_commands" \
+"*::: :->mcp" \
+&& ret=0
+
+    case $state in
+    (mcp)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:grokbot-tui-help-mcp-command-$line[1]:"
+        case $line[1] in
+            (serve)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(token)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(config)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(completions)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+}
+
+(( $+functions[_grokbot-tui_commands] )) ||
+_grokbot-tui_commands() {
+    local commands; commands=(
+'mcp:MCP server for other agents (Claude Code, Cursor, ...)\: \`mcp serve \[--stdio|--http \[ADDR\]\]\`, \`mcp token\`, \`mcp config\`' \
+'completions:Print a shell completion script to stdout\: bash, zsh, fish, powershell or elvish (e.g. \`source <(grokbot-tui completions bash)\`)' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'grokbot-tui commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__completions_commands] )) ||
+_grokbot-tui__subcmd__completions_commands() {
+    local commands; commands=()
+    _describe -t commands 'grokbot-tui completions commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__help_commands] )) ||
+_grokbot-tui__subcmd__help_commands() {
+    local commands; commands=(
+'mcp:MCP server for other agents (Claude Code, Cursor, ...)\: \`mcp serve \[--stdio|--http \[ADDR\]\]\`, \`mcp token\`, \`mcp config\`' \
+'completions:Print a shell completion script to stdout\: bash, zsh, fish, powershell or elvish (e.g. \`source <(grokbot-tui completions bash)\`)' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'grokbot-tui help commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__help__subcmd__completions_commands] )) ||
+_grokbot-tui__subcmd__help__subcmd__completions_commands() {
+    local commands; commands=()
+    _describe -t commands 'grokbot-tui help completions commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__help__subcmd__help_commands] )) ||
+_grokbot-tui__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'grokbot-tui help help commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__help__subcmd__mcp_commands] )) ||
+_grokbot-tui__subcmd__help__subcmd__mcp_commands() {
+    local commands; commands=(
+'serve:Run the MCP server (stdio by default; --http for streamable HTTP on localhost)' \
+'token:Print the HTTP bearer token (created on first use) for a client'\''s config' \
+'config:Show the MCP settings in use and where they live' \
+    )
+    _describe -t commands 'grokbot-tui help mcp commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__help__subcmd__mcp__subcmd__config_commands] )) ||
+_grokbot-tui__subcmd__help__subcmd__mcp__subcmd__config_commands() {
+    local commands; commands=()
+    _describe -t commands 'grokbot-tui help mcp config commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__help__subcmd__mcp__subcmd__serve_commands] )) ||
+_grokbot-tui__subcmd__help__subcmd__mcp__subcmd__serve_commands() {
+    local commands; commands=()
+    _describe -t commands 'grokbot-tui help mcp serve commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__help__subcmd__mcp__subcmd__token_commands] )) ||
+_grokbot-tui__subcmd__help__subcmd__mcp__subcmd__token_commands() {
+    local commands; commands=()
+    _describe -t commands 'grokbot-tui help mcp token commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__mcp_commands] )) ||
+_grokbot-tui__subcmd__mcp_commands() {
+    local commands; commands=(
+'serve:Run the MCP server (stdio by default; --http for streamable HTTP on localhost)' \
+'token:Print the HTTP bearer token (created on first use) for a client'\''s config' \
+'config:Show the MCP settings in use and where they live' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'grokbot-tui mcp commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__mcp__subcmd__config_commands] )) ||
+_grokbot-tui__subcmd__mcp__subcmd__config_commands() {
+    local commands; commands=()
+    _describe -t commands 'grokbot-tui mcp config commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__mcp__subcmd__help_commands] )) ||
+_grokbot-tui__subcmd__mcp__subcmd__help_commands() {
+    local commands; commands=(
+'serve:Run the MCP server (stdio by default; --http for streamable HTTP on localhost)' \
+'token:Print the HTTP bearer token (created on first use) for a client'\''s config' \
+'config:Show the MCP settings in use and where they live' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'grokbot-tui mcp help commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__mcp__subcmd__help__subcmd__config_commands] )) ||
+_grokbot-tui__subcmd__mcp__subcmd__help__subcmd__config_commands() {
+    local commands; commands=()
+    _describe -t commands 'grokbot-tui mcp help config commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__mcp__subcmd__help__subcmd__help_commands] )) ||
+_grokbot-tui__subcmd__mcp__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'grokbot-tui mcp help help commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__mcp__subcmd__help__subcmd__serve_commands] )) ||
+_grokbot-tui__subcmd__mcp__subcmd__help__subcmd__serve_commands() {
+    local commands; commands=()
+    _describe -t commands 'grokbot-tui mcp help serve commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__mcp__subcmd__help__subcmd__token_commands] )) ||
+_grokbot-tui__subcmd__mcp__subcmd__help__subcmd__token_commands() {
+    local commands; commands=()
+    _describe -t commands 'grokbot-tui mcp help token commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__mcp__subcmd__serve_commands] )) ||
+_grokbot-tui__subcmd__mcp__subcmd__serve_commands() {
+    local commands; commands=()
+    _describe -t commands 'grokbot-tui mcp serve commands' commands "$@"
+}
+(( $+functions[_grokbot-tui__subcmd__mcp__subcmd__token_commands] )) ||
+_grokbot-tui__subcmd__mcp__subcmd__token_commands() {
+    local commands; commands=()
+    _describe -t commands 'grokbot-tui mcp token commands' commands "$@"
+}
+
+if [ "$funcstack[1]" = "_grokbot-tui" ]; then
+    _grokbot-tui "$@"
+else
+    compdef _grokbot-tui grokbot-tui
+fi

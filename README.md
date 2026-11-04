@@ -57,6 +57,10 @@ The install puts the binary in `PREFIX/bin`, docs and `THIRD_PARTY.md` in
 the example themes, keymap and notify rules in `PREFIX/share/grokbot-tui`. Uninstall
 removes only those; your settings and history stay.
 
+Shell completions for bash, zsh and fish come with the `.deb`, `.rpm`, AUR packages and
+`make install`; otherwise `grokbot-tui completions <shell>` prints one (see
+[docs/install.md](docs/install.md#shell-completions-1410)).
+
 ## Run
 
 ```sh
@@ -67,6 +71,7 @@ grokbot-tui --data-dir /tmp/gbtest         # different data directory (holds con
 grokbot-tui --account work                 # start in an account (or GROKBOT_TUI_ACCOUNT=work)
 grokbot-tui --theme solar                  # use a theme for this run only (not saved)
 grokbot-tui --list-themes                  # list the theme files (● = in use) and exit
+grokbot-tui completions bash               # shell completions (bash|zsh|fish|powershell|elvish)
 ```
 
 In mock mode any token logs in except `bad`. Sending `reject` simulates a 4xx and `unknown` simulates a 5xx after the prompt has landed.
