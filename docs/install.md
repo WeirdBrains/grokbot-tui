@@ -28,8 +28,8 @@ flag and environment variable.
 
 grokbot-tui completes its flags and subcommands (including `mcp serve|token|config` and
 `completions`) in bash, zsh, fish, PowerShell and elvish. The scripts are generated from
-the CLI definitions. Release archives carry them in a top-level
-[`completions/`](../completions) folder and a test keeps them current
+the CLI definitions. Release archives carry them in a top-level `completions/` folder
+and a test keeps them current
 (`UPDATE_COMPLETIONS=1 cargo test completions` rewrites them). In the app: `/help completions`.
 
 Installed automatically:
