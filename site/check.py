@@ -4,7 +4,7 @@ import re, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "target" / "site"
-base = "/grokbot-tui/"
+base = "/"
 if "--base" in sys.argv:
     base = sys.argv[sys.argv.index("--base") + 1]
 bad = []

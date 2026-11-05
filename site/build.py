@@ -6,7 +6,7 @@ import markdown
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "target" / "site"
-BASE = "/grokbot-tui/"
+BASE = "/"
 if "--base" in sys.argv:
     BASE = sys.argv[sys.argv.index("--base") + 1]
     BASE = BASE if BASE.endswith("/") else BASE + "/"
@@ -205,6 +205,10 @@ def main():
     shutil.copy(ROOT / "site" / "style.css", OUT / "style.css")
     shutil.copytree(ROOT / "site" / "screenshots", OUT / "screenshots")
     (OUT / ".nojekyll").write_text("")
+    # If a CNAME file exists in site/, copy it — GitHub Pages custom domains need it.
+    cname = ROOT / "site" / "CNAME"
+    if cname.exists():
+        shutil.copy(cname, OUT / "CNAME")
     (OUT / "index.html").write_text(front())
     (OUT / "themes").mkdir()
     (OUT / "themes" / "index.html").write_text(themes_page())
