@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.41.1] - 2026-11-05
+
+### Security
+- Release artifacts now include detached ASCII-armored GPG signatures (`.asc`) for verification. Signatures are generated in CI and attached to every GitHub Release alongside the assets. See PACKAGING.md for verification steps. Note: signatures are produced only when repository secrets `GPG_PRIVATE_KEY` (armored key) and optional `GPG_PASSPHRASE` are configured by maintainers.
+
 ## [1.41.0] - 2026-11-04
 
 ### Added

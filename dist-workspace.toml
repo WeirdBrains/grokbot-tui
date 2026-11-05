@@ -34,17 +34,17 @@ tap = "WeirdBrains/homebrew-tap"
 # .deb/.rpm built alongside dist's artifacts, so they are attached to the release.
 # The -ffmpeg variant archives and the grokbot-tui-setup.{sh,ps1} wrapper installers
 # (choose standard or -ffmpeg) are built by build-ffmpeg-variant.yml.
-global-artifacts-jobs = ["./build-linux-packages", "./build-ffmpeg-variant"]
+global-artifacts-jobs = ["./build-linux-packages", "./build-ffmpeg-variant", "./sign-artifacts"]
 # Shipped in every archive next to LICENSE and README.
 include = ["THIRD_PARTY.md", "packaging/completions"]
-# Publish jobs: render the AUR PKGBUILD + winget manifests from the real release sha256s.
-# Automatic Homebrew publishing is commented out until the WeirdBrains/homebrew-tap repo
-# and the HOMEBREW_TAP_TOKEN secret exist. To re-enable it, swap the two lines below and
-# run `dist generate` (see PACKAGING.md).
-# publish-jobs = ["homebrew", "./publish-manifests"]
-publish-jobs = ["./publish-manifests"]
-# publish-manifests uploads its files to the GitHub release.
-github-custom-job-permissions = { "publish-manifests" = { contents = "write" } }
+# Publish jobs: render the AUR PKGBUILD + winget manifests from the real release sha256s,
+# and build native Arch packages (.pkg.tar.zst) from the PKGBUILD (grokbot-tui-bin),
+# uploading them to the GitHub Release.
+# Automatic Homebrew publishing is commented out until the WeirdBrains/homebrew-tap repo and token exist.
+# publish-jobs = ["homebrew", "./publish-manifests", "./build-arch-packages"]
+publish-jobs = ["./publish-manifests", "./build-arch-packages"]
+# grant upload permission to custom publish jobs
+github-custom-job-permissions = { "publish-manifests" = { contents = "write" }, "build-arch-packages" = { contents = "write" } }
 
 # Mac runners: macos-14 is retired on 2026-11-02 (brownouts before that), so pin both Mac
 # targets to supported images (x86_64 was already dist's default macos-15-intel).

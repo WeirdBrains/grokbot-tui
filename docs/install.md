@@ -28,8 +28,8 @@ flag and environment variable.
 
 grokbot-tui completes its flags and subcommands (including `mcp serve|token|config` and
 `completions`) in bash, zsh, fish, PowerShell and elvish. The scripts are generated from
-the CLI definitions, committed in
-[`packaging/completions/`](../packaging/completions) and kept in sync by a test
+the CLI definitions. Release archives carry them in a top-level
+[`completions/`](../completions) folder and a test keeps them current
 (`UPDATE_COMPLETIONS=1 cargo test completions` rewrites them). In the app: `/help completions`.
 
 Installed automatically:
@@ -41,7 +41,7 @@ Installed automatically:
 | `make install` / `install-local.sh` | `PREFIX/share/bash-completion/completions/grokbot-tui` | `PREFIX/share/zsh/site-functions/_grokbot-tui` | `PREFIX/share/fish/vendor_completions.d/grokbot-tui.fish` |
 
 The release archives (`.tar.xz`, `.zip`) carry all five scripts in
-`packaging/completions/`. With the shell installers, MSI, `.pkg` or Homebrew, print the
+`completions/`. With the shell installers, MSI, `.pkg` or Homebrew, print the
 script for your shell yourself:
 
 ```sh
@@ -68,6 +68,12 @@ Prebuilt packages are attached to each [GitHub Release](https://github.com/Weird
 - **Windows:** `grokbot-tui-x86_64-pc-windows-msvc.msi` · **macOS:** `grokbot-tui-<arch>.pkg` (unsigned)
 - **Debian/Ubuntu:** `sudo apt install ./grokbot-tui_<ver>-1_<arch>.deb`
 - **Fedora:** `sudo dnf install ./grokbot-tui-<ver>-1.<arch>.rpm`
+- **Arch Linux (local package):** download the `grokbot-tui-bin-<ver>-1-<arch>.pkg.tar.zst`
+  from the release page (when present), then:
+  - verify (optional): `gpg --verify grokbot-tui-bin-<ver>-1-<arch>.pkg.tar.zst.asc grokbot-tui-bin-<ver>-1-<arch>.pkg.tar.zst`
+  - install: `sudo pacman -U ./grokbot-tui-bin-<ver>-1-<arch>.pkg.tar.zst`
+  - update: repeat with a newer file; pacman replaces the installed version
+  - uninstall: `sudo pacman -R grokbot-tui-bin` (or `grokbot-tui` for the source-built package)
 - **Homebrew, AUR, winget:** once published (see PACKAGING.md), `brew install WeirdBrains/tap/grokbot-tui`,
   `yay -S grokbot-tui-bin`, `winget install WeirdBrains.grokbot-tui`
 - **From source:** `make install` from a checkout (see [Install from a local checkout](./install.md#install-from-a-local-checkout))

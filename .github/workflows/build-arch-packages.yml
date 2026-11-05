@@ -1,0 +1,127 @@
+name: Build Arch packages
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  arch-packages:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+            container: archlinux:base-devel
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+            container: archlinuxarm/archlinuxarm:latest
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PLAN: ${{ inputs.plan }}
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Read tag and version from the dist plan
+        id: plan
+        shell: bash
+        run: |
+          tag=$(jq -r '.announcement_tag' <<<"$PLAN")
+          version=$(jq -r '.releases[] | select(.app_name == "grokbot-tui") | .app_version' <<<"$PLAN")
+          [[ -n $tag && $tag != null && -n $version && $version != null ]]
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install tooling (pacman)
+        shell: bash
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed git curl jq binutils fakeroot base-devel namcap gnupg github-cli
+
+      - name: Download checksums and source tarball from the release
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        shell: bash
+        run: |
+          mkdir -p checksums
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p '*.sha256' -D checksums
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p 'source.tar.gz' -D .
+          echo "$(awk '{print $1}' checksums/source.tar.gz.sha256)  source.tar.gz" | sha256sum -c -
+
+      - name: Render AUR PKGBUILDs from release (for packaging)
+        id: render
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        shell: bash
+        run: |
+          srcdir=$(tar -tzf source.tar.gz | head -1 | cut -d/ -f1)
+          bash packaging/render-manifests.sh "$TAG" "$VERSION" checksums "$srcdir" out
+          ls -lR out/aur
+
+      - name: Build grokbot-tui-bin (${{ matrix.arch }})
+        working-directory: out/aur/grokbot-tui-bin
+        shell: bash
+        run: |
+          useradd -m builder || true
+          chown -R builder .
+          # Preinstall runtime deps to avoid makepkg needing sudo
+          pacman -S --noconfirm --needed glibc gcc-libs alsa-lib
+          su builder -c 'makepkg --clean --force --noconfirm'
+          ls -l *.pkg.tar.zst
+
+      - name: Import GPG key (if configured)
+        id: import
+        if: env.GPG_PRIVATE_KEY != ''
+        shell: bash
+        run: |
+          echo "::notice::Importing GPG private key from repository secret GPG_PRIVATE_KEY"
+          cat > "$RUNNER_TEMP/release.key" <<'EOF'
+${{ secrets.GPG_PRIVATE_KEY }}
+EOF
+          gpg --batch --import "$RUNNER_TEMP/release.key"
+          gpg --list-secret-keys || true
+
+      - name: Sign packages (.asc) (if key configured)
+        if: env.GPG_PRIVATE_KEY != ''
+        working-directory: out/aur/grokbot-tui-bin
+        env:
+          PASSPHRASE: ${{ env.GPG_PASSPHRASE }}
+        shell: bash
+        run: |
+          for f in *.pkg.tar.zst; do
+            [ -f "$f" ] || continue
+            if [ -n "${PASSPHRASE:-}" ]; then
+              gpg --pinentry-mode loopback --passphrase "$PASSPHRASE" --armor --detach-sign --batch --yes --output "$f.asc" "$f"
+            else
+              gpg --pinentry-mode loopback --armor --detach-sign --batch --yes --output "$f.asc" "$f"
+            fi
+          done
+          ls -l
+
+      - name: Upload packages to the GitHub Release
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        working-directory: out/aur/grokbot-tui-bin
+        shell: bash
+        run: |
+          files=(*.pkg.tar.zst *.pkg.tar.zst.asc)
+          gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Upload as workflow artifacts too
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-arch-packages-${{ matrix.arch }}
+          path: out/aur/grokbot-tui-bin/*.pkg.tar.zst*

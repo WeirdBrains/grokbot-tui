@@ -1,0 +1,110 @@
+name: Sign release artifacts
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: ubuntu-22.04
+    env:
+      # Pass secrets into env for conditional checks; steps never echo these.
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download built artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Show artifact inventory (debug)
+        run: |
+          shopt -s globstar || true
+          echo "Artifacts downloaded to ./artifacts:"
+          ls -lR artifacts || true
+
+      - name: Import GPG key (if configured)
+        id: import
+        if: env.GPG_PRIVATE_KEY != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::notice::Importing GPG private key from repository secret GPG_PRIVATE_KEY"
+          # Import armored key; do not echo contents.
+          cat > "$RUNNER_TEMP/release.key" <<'EOF'
+${{ secrets.GPG_PRIVATE_KEY }}
+EOF
+          gpg --batch --import "$RUNNER_TEMP/release.key"
+          # List keys without fingerprints to confirm presence (non-secret).
+          gpg --list-secret-keys || true
+          # Configure loopback pinentry in case a passphrase is set.
+          echo "pinentry-mode loopback" > "$RUNNER_TEMP/gpg.conf"
+          echo "no-tty" >> "$RUNNER_TEMP/gpg.conf"
+          echo "batch" >> "$RUNNER_TEMP/gpg.conf"
+          echo "GPG_CONF=$RUNNER_TEMP/gpg.conf" >> "$GITHUB_ENV"
+
+      - name: Generate detached signatures (.asc) for artifacts
+        if: env.GPG_PRIVATE_KEY != ''
+        env:
+          PASSPHRASE: ${{ env.GPG_PASSPHRASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          signed=0
+          # File types to sign: release archives, installers, packages and source tarball.
+          exts='tar.xz zip pkg msi deb rpm sh ps1 tar.gz'
+          for f in artifacts/**/*; do
+            # Skip directories and dist manifests; sign distributables only.
+            [ -f "$f" ] || continue
+            case "$f" in
+              *.tar.xz|*.zip|*.pkg|*.msi|*.deb|*.rpm|*.sh|*.ps1|*source.tar.gz)
+                out="$f.asc"
+                echo "Signing $f -> $out"
+                if [ -n "${PASSPHRASE:-}" ]; then
+                  GNUPGHOME="${GNUPGHOME:-$HOME/.gnupg}" \
+                  gpg --pinentry-mode loopback --passphrase "$PASSPHRASE" \
+                      --armor --detach-sign --batch --yes \
+                      --output "$out" "$f"
+                else
+                  GNUPGHOME="${GNUPGHOME:-$HOME/.gnupg}" \
+                  gpg --pinentry-mode loopback \
+                      --armor --detach-sign --batch --yes \
+                      --output "$out" "$f"
+                fi
+                signed=$((signed+1))
+                ;;
+              *) ;;
+            esac
+          done
+          echo "Signed $signed files."
+          if [ "$signed" -eq 0 ]; then
+            echo "::warning::No matching artifacts found to sign."
+          fi
+
+      - name: Note missing signing secrets
+        if: env.GPG_PRIVATE_KEY == ''
+        run: |
+          echo "GPG signing is not configured for this repository; skipping."
+          echo "Set repo secrets GPG_PRIVATE_KEY (armored private key) and optionally GPG_PASSPHRASE to enable artifact signatures." > SIGNING_NOT_CONFIGURED.txt
+
+      - name: Upload signatures (and note if unsigned)
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-signatures
+          path: |
+            artifacts/**/*.asc
+            SIGNING_NOT_CONFIGURED.txt
+          if-no-files-found: warn

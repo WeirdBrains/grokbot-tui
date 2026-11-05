@@ -233,6 +233,15 @@ jobs:
     with:
       plan: ${{ needs.plan.outputs.val }}
     secrets: inherit
+
+  custom-sign-artifacts:
+    needs:
+      - plan
+      - build-local-artifacts
+    uses: ./.github/workflows/sign-artifacts.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit
   # Determines if we should publish/announce
   host:
     needs:
@@ -241,8 +250,9 @@ jobs:
       - build-global-artifacts
       - custom-build-linux-packages
       - custom-build-ffmpeg-variant
+      - custom-sign-artifacts
     # Only run if we're "publishing", and only if plan, local and global didn't fail (skipped is fine)
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.custom-build-linux-packages.result == 'skipped' || needs.custom-build-linux-packages.result == 'success') && (needs.custom-build-ffmpeg-variant.result == 'skipped' || needs.custom-build-ffmpeg-variant.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.custom-build-linux-packages.result == 'skipped' || needs.custom-build-linux-packages.result == 'success') && (needs.custom-build-ffmpeg-variant.result == 'skipped' || needs.custom-build-ffmpeg-variant.result == 'success') && (needs.custom-sign-artifacts.result == 'skipped' || needs.custom-sign-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: "ubuntu-22.04"
@@ -315,15 +325,29 @@ jobs:
     permissions:
       "contents": "write"
 
+  custom-build-arch-packages:
+    needs:
+      - plan
+      - host
+    if: ${{ !fromJson(needs.plan.outputs.val).announcement_is_prerelease || fromJson(needs.plan.outputs.val).publish_prereleases }}
+    uses: ./.github/workflows/build-arch-packages.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit
+    # publish jobs get escalated permissions
+    permissions:
+      "contents": "write"
+
   announce:
     needs:
       - plan
       - host
       - custom-publish-manifests
+      - custom-build-arch-packages
     # use "always() && ..." to allow us to wait for all publish jobs while
     # still allowing individual publish jobs to skip themselves (for prereleases).
     # "host" however must run to completion, no skipping allowed!
-    if: ${{ always() && needs.host.result == 'success' && (needs.custom-publish-manifests.result == 'skipped' || needs.custom-publish-manifests.result == 'success') }}
+    if: ${{ always() && needs.host.result == 'success' && (needs.custom-publish-manifests.result == 'skipped' || needs.custom-publish-manifests.result == 'success') && (needs.custom-build-arch-packages.result == 'skipped' || needs.custom-build-arch-packages.result == 'success') }}
     runs-on: "ubuntu-22.04"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
