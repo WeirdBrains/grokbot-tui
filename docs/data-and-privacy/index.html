@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data directory and privacy · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="">Install and download</a></li><li><a href="/docs/login/" class="">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="">Attachments and the file picker</a></li><li><a href="/docs/images/" class="">Images and terminal graphics</a></li><li><a href="/docs/search/" class="">Searching messages</a></li><li><a href="/docs/notifications/" class="">Notifications</a></li><li><a href="/docs/browser/" class="">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="on">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="data-directory-and-privacy">Data directory and privacy</h1>
+<p>What grokbot-tui stores, where, and what it never stores or sends.</p>
+<h2 id="storage">Storage</h2>
+<p>SQLite at <code>~/.grokbot-tui/context.db</code> (directory <code>0700</code>, file <code>0600</code>; override with <code>--data-dir</code>), via <code>rusqlite</code> with bundled SQLite. Schema version is tracked in <code>PRAGMA user_version</code>.</p>
+<p><strong>Moving from <code>~/.gb</code>.</strong> Before 1.2.0 the data lived in <code>~/.gb</code>. On startup (unless <code>--data-dir</code> is given):</p>
+<ul>
+<li>If <code>~/.grokbot-tui</code> doesn't exist and <code>~/.gb</code> does, <code>~/.gb</code> is renamed to <code>~/.grokbot-tui</code>.</li>
+<li>If that rename fails (e.g. the two are on different filesystems), the folder is copied, every file is
+  verified, and <code>~/.gb</code> is left in place with a notice. If even the copy fails, grokbot-tui keeps using <code>~/.gb</code>.</li>
+<li>If both exist, <code>~/.grokbot-tui</code> is used and a one-time notice says <code>~/.gb</code> was ignored.</li>
+</ul>
+<p>User data is never deleted; remove <code>~/.gb</code> yourself once you no longer need it.</p>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Key</th>
+<th>Columns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>accounts</code></td>
+<td><code>id</code></td>
+<td><code>alias</code> (unique, case-insensitive), <code>created_at</code></td>
+</tr>
+<tr>
+<td><code>credentials</code></td>
+<td><code>account_id</code> → accounts</td>
+<td><code>method</code> (<code>gateway</code>/<code>cursor</code>/<code>desktop</code>), <code>gateway_url</code>, <code>gateway_token</code>, <code>gateway_headers</code> (JSON), <code>cursor_token</code>, <code>desktop_entry</code>, <code>created_at</code>, <code>updated_at</code></td>
+</tr>
+<tr>
+<td><code>bots</code></td>
+<td><code>(account_id, bot_id)</code> → accounts</td>
+<td><code>name</code>, <code>description</code>, <code>hidden</code>, <code>is_group</code></td>
+</tr>
+<tr>
+<td><code>messages</code></td>
+<td><code>id</code>; <code>(account_id, bot_id)</code> → bots</td>
+<td><code>role</code>, <code>text</code>, <code>remote_id</code> (transcript id or <code>pending:&lt;nonce&gt;</code>, unique per account+bot), <code>created_at</code></td>
+</tr>
+<tr>
+<td><code>memory</code></td>
+<td><code>(account_id, bot_id, key)</code> → bots</td>
+<td><code>value</code>, <code>updated_at</code></td>
+</tr>
+<tr>
+<td><code>account_prefs</code></td>
+<td><code>(account_id, key)</code> → accounts</td>
+<td><code>value</code></td>
+</tr>
+<tr>
+<td><code>global_prefs</code></td>
+<td><code>key</code></td>
+<td><code>value</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Migrations:</strong> v1→v2 moved single-account data into account <code>default</code>. v2→v3 replaces the credentials table with the gateway schema.
+The old placeholder-API tokens are <strong>dropped</strong> because they never pointed at a real server, so log in again. v2→v3 also adds <code>messages.remote_id</code> and the bot flags, and deletes the dead <code>api_base_url</code>, <code>request_timeout_secs</code> and <code>paths.*</code> prefs.
+v3→v4 allows method <code>desktop</code> and adds <code>credentials.desktop_entry</code>, keeping existing logins.
+The earlier one-time import from <code>~/.grokbot-tui</code> was removed, since everything it imported is now dead.</p>
+<p><strong>Preferences:</strong> account-scoped <code>default_bot</code>, <code>active_bot</code> (automatic), <code>show_hidden_bots</code> (<code>false</code>); global <code>ui.sidebar_width</code> (<code>24</code>), <code>ui.theme</code> (<code>default</code>), <code>ui.theme_download</code> (<code>true</code>), <code>ui.theme_mode</code> (<code>dark</code>/<code>light</code>/<code>system</code>, default <code>system</code>), <code>active_account</code>.</p>
+<h2 id="chat-feed-and-the-database">Chat feed and the database</h2>
+<p>SQLite (<code>~/.grokbot-tui/context.db</code>) is the single source of truth for the chat feed. The body
+is always rebuilt from <code>store.messages(bot)</code>: polled messages and bot replies are merged
+into the DB first, and your own message is written as a pending row and the feed is
+rebuilt immediately (so it still appears instantly). Notices — command echoes, info,
+errors, delivery warnings — are transient: they are kept in memory per bot, shown in a
+separate "notices (not saved)" section below the chat, and never written to the DB.</p>
+<h2 id="grokbot_api">grokbot_api</h2>
+<p>The gateway client is published separately as <a href="https://crates.io/crates/grokbot_api"><code>grokbot_api</code></a>
+(<a href="https://github.com/WeirdBrains/grokbot_api">source</a>, <a href="https://docs.rs/grokbot_api">docs</a>). It covers every gateway method grok-bot-cli uses: listAgents, sendPrompt,
+getAgentTranscriptTail, getAgentThread, createAgent, updateAgent, deleteAgent, setAgentNotifyOnUpdates,
+setAgentHiddenFromSidebar, createGroup, setGroupMembers, getAgentWorkflows, importAgentWorkflowText,
+deleteAgentWorkflow, resolveLocalToolPermission and resolveAutoReviewApproval. It also covers EnsureSandBox and the URL policy.</p><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/data-and-privacy.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>

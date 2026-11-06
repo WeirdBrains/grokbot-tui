@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chats and bots · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="">Install and download</a></li><li><a href="/docs/login/" class="">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="on">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="">Attachments and the file picker</a></li><li><a href="/docs/images/" class="">Images and terminal graphics</a></li><li><a href="/docs/search/" class="">Searching messages</a></li><li><a href="/docs/notifications/" class="">Notifications</a></li><li><a href="/docs/browser/" class="">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="chats-and-bots">Chats and bots</h1>
+<p>The layout, the bot list, message bubbles, reactions, cards, sync and delivery.</p>
+<h2 id="layout">Layout</h2>
+<pre><code> ▄▀▀▀▀▀▀▀▀▀▀▄  ▗▛▜▖        ▜▌      ▜▛▜▖     ▟     account  @default ▾  F3                       header
+ ▀▀▀▀▀▀▀▀▀▀▀▀  █   ▜▟▜▖▟▀▙ ▐▌▟▘    ▐▙▟▘▟▀▙ ▝█▀    theme  ‹default› ▾  dark  light  system  F4   (logo, title,
+ ▀▀▀▀▀▀▀▀▀▀▀▀  ▜▖▜▌▐▌▝▘█ █ ▐▛▙     ▐▌▐▌█ █  █▗    login cursor · box.cursorvm.com               switchers)
+ ▀▀▀▀▀▀▀▀▀▀▀▀   ▀▀▘▀▀  ▝▀▘ ▀▘▝▘    ▀▀▀ ▝▀▘  ▝▘    mouse: on (F6)
+╭ Bots ──────╮╭ Chat: Helper · Helper is replying ⠹ ──────────────────╮
+│ Helper     ││                                               you     │  body: command output
+│ Coder      ││                                            ╭──────╮   │  and chat transcript,
+│            ││                                            │ hi   │   │  messages on rounded
+│            ││  Helper                                    ╰──────╯   │  bubbles (reactions on
+│            ││  ╭─────────── 👍 ─╮                                   │  the top-right corner)
+│            ││  │ hello!         │                                   │
+│            ││  ╰────────────────╯                                   │
+╰────────────╯╰───────────────────────────────────────────────────────╯
+╭ /command or message ──────────────────────────────────────────────────╮  bottom input bar
+│ &gt; _                                                                   │
+└───────────────────────────────────────────────────────────────────────┘
+</code></pre>
+<ul>
+<li><strong>Header:</strong> the Grok Bot logo and title, then the account switcher (<code>@alias ▾</code>: click it or press
+  <code>F3</code> to pick an account), the theme switcher, the login (method and gateway host), the active bot and
+  the mouse state. Terminals smaller than 80 × 24 get a one-row header with the same switchers.</li>
+<li><strong>Theme:</strong> <code>‹default› ▾</code> is the theme in use. Click it or press <code>F5</code> to pick another one; the list
+  ends with <em>Edit themes…</em> (also <code>Shift-F5</code>). See <a href="/docs/themes/#themes">Themes</a>.</li>
+<li><strong>Mode:</strong> <code>dark</code>, <code>light</code> or <code>system</code> picks the theme's variant. Click one in the header, press <code>F4</code> to cycle, or run
+  <code>/theme [dark|light|system]</code>. <code>system</code> follows the terminal background (OSC 11 query at startup,
+  else <code>$COLORFGBG</code>, else dark). Saved in the global pref <code>ui.theme_mode</code> (default <code>system</code>).</li>
+<li><strong>Sidebar:</strong> the account's bots (agents flagged hidden-from-sidebar are left out unless <code>show_hidden_bots</code> is on). Click one to switch to its chat.</li>
+<li><strong>Body:</strong> each bot has its own log. Chats are restored from the local database, then kept current by polling.</li>
+<li><strong>Bottom bar:</strong> <code>/</code>-prefixed input runs a command; plain text is sent to the active bot.</li>
+</ul>
+<p>Keys: <code>Enter</code> submit · <code>Tab</code> toggle focus input/sidebar · <code>↑/↓</code> (or <code>j/k</code>) + <code>Enter</code> in sidebar to pick a bot ·
+<code>↑/↓</code>, <code>PgUp/PgDn</code>, mouse wheel scroll body · <code>Esc</code> cancel a prompt · <code>Ctrl-C</code> / <code>Ctrl-Shift-C</code> copy (the selection, else the input; never quit) ·
+<code>Ctrl-D</code> (also <code>Ctrl-Q</code>, <code>/quit</code>) quits at once (in a card it dismisses the card) ·
+<code>F1</code> help · <code>F2</code> pick a bot · <code>F3</code> pick an account · <code>F4</code> cycle dark/light/system · <code>F5</code> pick a theme ·
+<code>Shift-F5</code> theme editor · <code>F6</code> mouse capture on/off.</p>
+<h3 id="markdown-in-replies">Markdown in replies</h3>
+<p>Bot replies render as markdown (CommonMark plus GitHub tables, ~~strikethrough~~ and task
+lists): headings, <strong>bold</strong>, <em>italic</em>, <code>inline code</code>, fenced code blocks (a shaded block with
+the language label; no syntax highlighting yet), bullet and numbered lists with nesting,
+<code>☑</code>/<code>☐</code> task items, <code>│</code> blockquotes, links as <code>label &lt;url&gt;</code>, box-drawn tables (columns shrink
+and cells end in <code>…</code> when the chat is narrow) and <code>---</code> rules. Lines are wrapped before
+drawing, so scrolling and the bottom-follow stay exact. Your own messages stay plain text. Notices and errors sit in a scrollable panel under the chat, at most 7 rows (click it, then ↑↓ / PgUp / wheel). Theme parts: <code>md_heading</code>, <code>md_code</code>, <code>md_code_block</code>, <code>md_quote</code>, <code>md_link</code>,
+<code>md_list_marker</code>, <code>md_rule</code> (also link URLs), <code>md_table_border</code>.</p>
+<h3 id="links">Links</h3>
+<p>Links in the chat are clickable: markdown link labels, their <code>&lt;url&gt;</code>, and bare <code>http(s)://</code>
+URLs (styled with <code>md_link</code>). A mouse click (with mouse capture on) opens the link with the
+system opener. Each frame also wraps the links in <strong>OSC 8 hyperlinks</strong>, so Ghostty, kitty,
+WezTerm, Windows Terminal, foot, iTerm2 and Alacritty 0.13+ make them natively clickable
+(e.g. Ctrl/Cmd-click, or with <code>F6</code> mouse off). Set <code>GROKBOT_TUI_NO_HYPERLINKS=1</code> to turn
+OSC 8 off. Keyboard: <code>/open list</code> then <code>/open &lt;n&gt;</code>, or vim <code>o</code> for the newest.</p>
+<h3 id="emoji-and-reactions">Emoji and reactions</h3>
+<p>Type <code>:</code> and part of a name, then <strong>Tab</strong>, to pick an emoji (<code>:tada</code> → 🎉), using the same
+popup as slash-command completion. Complete <code>:name:</code> shortcodes are turned into emoji when you
+send. Emoji (ZWJ families, flags, skin tones, <code>❤️</code> with VS16) count as one character and two
+columns in the input and in chat wrapping. <code>/react 👍</code> (or <code>/react :thumbsup:</code>, vim <code>r</code>)
+toggles a reaction pill on the newest bot message (top-right corner of its bubble). Tab completes the emoji (already on the
+message, then recently used, then 👍 ❤️ 😂 🎉 🔥 👀 ✅…) and the message index; <code>/unreact</code> +
+Tab offers what's on the message. Every message has a <code>[☺+]</code> button (theme part
+<code>react_button</code>): click it, use bare <code>/react</code>, or vim <code>R</code> (<code>message.react_picker</code>) for a
+searchable emoji grid (by shortcode and name; recent and on-message first, then by category). <strong>Reactions are local</strong>: grokbot_api 1.1
+has no reaction endpoint and transcripts carry no reaction data, so they're kept in
+<code>context.db</code> (per account and bot) and never sent. Theme part: <code>reaction_pill</code>.</p>
+<p><strong>Blocks instead of emoji</strong> mean the terminal's font has no emoji glyphs (common over SSH
+into a terminal with a text-only font). <code>/emoji text</code> (pref <code>emoji.render = auto|glyph|text</code>,
+default <code>auto</code> = glyph) shows reactions, the react button and the picker as <code>:shortcode:</code>
+text instead; <code>/emoji glyph</code> switches back. No emoji images are bundled.</p>
+<h3 id="newlines-in-the-prompt">Newlines in the prompt</h3>
+<p>Prefer <strong>Ctrl-J</strong> for a newline (works in every terminal). <strong>Ctrl-Enter</strong> inserts a newline
+on Windows (conhost and Windows Terminal always report it) and in Linux terminals that report
+modifiers (kitty, Ghostty, foot, WezTerm; Alacritty needs a binding such as
+<code>{ key = "Enter", mods = "Control", chars = "\n" }</code>, which arrives as Ctrl-J). Shift/Alt-Enter
+work when the terminal reports modifiers. A trailing <code>\</code> then Enter also inserts a newline.
+<strong>macOS Terminal.app</strong> sends plain Enter for Shift/Ctrl-Enter; enable “Use Option as Meta
+key” for Option-Enter, or use Ctrl-J / <code>\</code>+Enter.</p>
+<h2 id="right-column-bot-header-and-attachments">Right column: bot header and attachments</h2>
+<p>The right column starts with a header for the open chat's bot: its name in bold and its
+description, wrapped (long ones are cut after 3 rows; click <strong>▾ more</strong> / <strong>▴ less</strong>). It
+follows the bot-list refresh, so renames and new descriptions show at once. The sidebar
+shows bot names only. A bot whose name has the description typed into it ("Lippy · Very
+ratatui-focused …") shows as "Lippy", with the rest as its description.</p>
+<p>Below the header, a collapsible bar on the right of each chat lists its attachments, sent and received, with
+type, name, size, sender and time. <strong>[view]</strong> opens images in the viewer, text/HTML/Markdown
+in the built-in browser and other files in the system app (with the SSH guard); <strong>[⤓]</strong> opens
+the download modal; clicking a row jumps to its message. It has a search box and
+All/Img/Vid/Aud/Doc filters, and keys j/k, Enter, v, d, /, t and Esc when focused.
+Toggle with F9, the «/» buttons, View ▸ attachments, <code>/attachments show|hide|toggle</code>
+(alias <code>/files</code>) or keymap <code>view.toggle_attachments</code>; pref <code>ui.attachments_panel</code>
+(<code>show</code>/<code>hide</code>, default <code>show</code> since 1.28.0; <code>hide</code> = 1-column strip with the count). These
+toggle the whole column, header included. Hidden when the chat body is under 70 columns.
+Theme parts: <code>attach_panel_frame</code>, <code>attach_panel_filter</code>, <code>attach_panel_count</code>,
+<code>bot_header_name</code>, <code>bot_header_desc</code>.</p>
+<p>Bot replies are laid out like your messages: the bot's name on its own row, the reply
+directly under it, the same 2/3 bubble width, on the left where yours are on the right.
+Since 1.38.0 each message's text sits on a rounded bubble (<code>╭─╮ │ … │ ╰─╯</code>), accent-
+coloured for yours and muted for the bot's, and its reaction pills ride the bubble's top
+border at the top-right corner, like the desktop app. Every panel, dialog, popup and the
+input box uses rounded corners too.</p>
+<h2 id="grok-bot-cards-questions-approvals-secrets-forms-and-drafts-1290">Grok Bot cards: questions, approvals, secrets, forms and drafts (1.29.0)</h2>
+<p>When a bot asks you something, the chat shows a card with its state (● pending, answered,
+dismissed or expired) and a button. Click the button, press <strong>F11</strong> (keymap <code>card.open</code>,
+vim normal <code>c</code>) or run <code>/card</code> to open the newest pending one:</p>
+<table>
+<thead>
+<tr>
+<th>Card</th>
+<th>Keys</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Question (single, multi-select, your own answer, multi-step)</td>
+<td><code>1</code>-<code>9</code> or <code>↑↓</code> <code>Enter</code>; <code>Space</code> toggles; <code>Tab</code> type your own; <code>x</code> dismiss</td>
+</tr>
+<tr>
+<td>Auto-review approval / local tool permission</td>
+<td><code>a</code> approve (allow once), <code>d</code> deny</td>
+</tr>
+<tr>
+<td>Secret request</td>
+<td>type (masked) and <code>Enter</code>; <code>Ctrl-D</code> dismiss</td>
+</tr>
+<tr>
+<td>Form</td>
+<td><code>Tab</code> between fields (secret fields masked), <code>Ctrl-S</code> submit, <code>Ctrl-D</code> dismiss</td>
+</tr>
+<tr>
+<td>Email / Slack / meeting draft</td>
+<td><code>s</code> send, <code>e</code> edit the body, <code>x</code> discard</td>
+</tr>
+<tr>
+<td>Agent ↔ agent or agent ↔ Cursor conversation (1.41.4)</td>
+<td>Click <strong>[view conversation]</strong> (or F11 / <code>/card</code> when it is the newest pending card); <code>↑↓</code> / mouse wheel scroll; <code>Esc</code> close</td>
+</tr>
+</tbody>
+</table>
+<p>Secrets are sent only through the gateway's <code>submitSecret</code> / <code>submitUserForm</code> calls; they
+are never logged, stored or shown and are wiped after sending or closing. When this bot
+messages another Grok Bot or a Cursor cloud agent, those turns are collapsed into a card
+in the main chat (<code>↔ agent: …</code> or <code>▣ cursor-agent: …</code>) instead of appearing as regular
+bubbles; click the card to read the side conversation in a modal. The turns come from
+transcript <code>kind: "message"</code> entries with <code>toAgent</code> / <code>fromAgent</code>, and Cursor launches
+from <code>message.type == "cursor-agent"</code> (<code>bcId</code> + <code>title</code>). Purchase approvals, connector
+grants and similar cards are shown read-only; act on them in the desktop app. Theme parts:
+<code>card_frame</code>, <code>card_pending</code>, <code>card_done</code>, <code>card_button</code>.</p>
+<h2 id="chat-sync">Chat sync</h2>
+<p>Bots come from <code>listAgents</code>. Chat text comes from <code>getAgentTranscriptTail</code> (there is no separate
+listChats/getChat API). On bot select (and on <code>/reload</code>), grokbot-tui pages that endpoint via
+<code>beforeSeq</code>/<code>nextBeforeSeq</code> up to 1000 entries, merges into SQLite, and rebuilds the body from the
+DB so messages from the desktop app show up. While a bot is active it also polls the newest page
+every few seconds (backing off to 15s when idle).</p>
+<h2 id="sending-and-delivery">Sending and delivery</h2>
+<p><code>sendPrompt</code> returns only a receipt (<code>messageId</code>). Replies are picked up by polling the transcript.
+- <strong>Accepted</strong> (receipt) → "replying" indicator until a new bot entry shows up.
+- <strong>Rejected</strong> (4xx, or a disallowed URL) → shown as not delivered, and the local copy is removed.
+- <strong>Unknown</strong> (5xx, network error, timeout, or no receipt) → grokbot-tui <strong>does not resend</strong>. It checks the transcript right away, and the message shows as confirmed if it appears there. Check before resending yourself.</p>
+<p>Your message is stored locally as pending and takes the transcript entry id once the gateway echoes it, so it is never duplicated.
+Transcript text is parsed like grok-bot-cli's <code>transcript.js</code> (<code>text</code> / <code>prompt</code> / <code>message</code> / <code>content</code> parts / <code>message.content</code> / <code>preview</code>).
+Terminal control sequences are stripped before display. Whether an entry is yours is decided from its <code>kind</code> first: known user labels (<code>user-prompt</code>, <code>user</code>, <code>human</code>, <code>prompt</code>, <code>user-message</code>) are yours; <code>send-message</code> and any other kind are the bot's — even if another field contains <code>user</code> or <code>prompt</code>, so assistant or coding-agent reports are not labelled as you. When <code>kind</code> is absent, <code>role</code>, then <code>sender</code>, then <code>type</code> are checked for those same exact labels (not substring matches).</p>
+<h2 id="selecting-text">Selecting text</h2>
+<p>With mouse capture on (the default; F6 / <code>/mouse</code> toggles and persists as <code>ui.mouse_capture</code>),
+drag in the chat to select. The selection is copied on mouse-up. Ctrl-C /
+Ctrl-Shift-C also copy a selection. Esc clears it.</p>
+<p>Since 1.30.0 a selection copies <strong>only message text</strong>: the selected cells are mapped back
+to each message's source (your text, or the bot's markdown source). Bubble padding, the
+name header, the [⧉]/[☺+] row, card and status rows, code-block headers, table borders,
+the sidebar and the right column are left out, and lines that were only soft-wrapped on
+screen join back into one line. The selection is clipped to the chat pane; a message
+selected from start to end copies whole.</p>
+<p>Copy buttons:</p>
+<ul>
+<li><strong>[⧉] on every bubble</strong> (yours and the bot's, left of [☺+]) copies that message's raw
+  text / markdown source. Also in the click-to-react popup (<strong>[⧉ copy]</strong>, Ctrl-Y, or <code>y</code>
+  in vim list mode) and keymap <code>message.copy</code> (vim normal <code>Y</code>; the last message).</li>
+<li><strong>[⧉] at the top-right of every code block</strong> copies just that block's code: no fences,
+  no wrapping, original indentation.</li>
+</ul>
+<p>Copying uses OSC 52 (works over SSH; in tmux <code>set -g set-clipboard on</code>) and, when running
+locally, also the system clipboard (<code>wl-copy</code>, <code>xclip</code>, <code>xsel</code> or <code>pbcopy</code> if installed). A
+notice says what was copied ("Copied 12 lines."). Theme part: <code>copy_button</code>.</p>
+<p>Shift-drag or Option-drag usually bypasses mouse capture so the terminal can select
+instead (that copies what's on screen, borders included).</p>
+<h2 id="prompt-history-and-completion">Prompt history and completion</h2>
+<p>Every prompt and slash command you submit is saved in <code>context.db</code> (per account, newest
+first, with the bot it went to and when), so history survives restarts. The newest
+<code>history.max_entries</code> are kept (default 10000; <code>/prefs set history.max_entries 50000</code>).
+Consecutive duplicates are stored once, and <code>/login …</code> lines are saved without their
+arguments so a pasted token never lands in history.</p>
+<ul>
+<li><strong>Up/Down</strong> in the input walk lines, then your prompt history (also prompts sent from
+  another grokbot-tui on the same data dir).</li>
+<li><strong>Ctrl-R</strong> opens a fuzzy history search (Ctrl-S reverse; Esc keeps the draft).</li>
+<li><strong>Ctrl-F</strong> searches your messages and attachments (see Searching messages).</li>
+<li><strong><code>/history [query]</code></strong> (<code>/prompts</code>) opens a scrollable browser of every saved prompt with
+  its age and bot. Type to fuzzy-filter; ↑/↓, PgUp/PgDn and the mouse wheel move; Enter or
+  clicking the selected row puts the prompt in the input (it is not sent); Esc closes. With
+  <code>ui.keys=vim</code> it opens in list mode: <code>j</code>/<code>k</code>, <code>g</code>/<code>G</code>, Ctrl-d/Ctrl-u move, <code>/</code> filters,
+  <code>q</code> closes. <code>/history clear</code> forgets the account's history after a confirmation.</li>
+</ul>
+<p>Tab after <code>/</code> fuzzy-completes slash commands and arguments; Shift-Tab cycles.</p>
+<h2 id="loading-spinner">Loading spinner</h2>
+<p>While grokbot-tui signs in, loads the bot list and opens the first chat (at startup, on
+<code>/account use &lt;name&gt;</code>, and during <code>/login gateway|cursor|desktop</code>), a centered overlay shows a
+braille spinner and the current stage: <em>Signing in to <account>…</em>, <em>Checking gateway <host>…</em>,
+<em>Exchanging Cursor token…</em> (the EnsureSandBox exchange), <em>Reading the desktop app session…</em>,
+<em>Loading bots…</em>, <em>Loading chat with <bot>…</em>. The work runs in the background, so input keeps
+working (Ctrl-D / Ctrl-Q still quit). If a step fails, the error replaces the spinner with a
+retry hint; <strong>Esc</strong> dismisses it. Pref <code>ui.spinner = off</code> shows a static glyph instead of the
+animation (reduced motion). Theme parts: <code>loading</code> (frame and message) and <code>spinner</code> (glyph).</p>
+<h2 id="layout-toggles-menus-and-alt-over-ssh">Layout toggles, menus and Alt over SSH</h2>
+<ul>
+<li><code>/header compact|full|toggle</code> (F7, the ▾/▴ button, <strong>View</strong> menu; pref <code>ui.header</code>) switches
+  to a one-row header that keeps the bot, account, login status, SSH and 🔕.</li>
+<li><code>/sidebar collapse|expand|toggle</code> (F8, the «/» buttons; pref <code>ui.sidebar_collapsed</code>) shrinks
+  the bot list to a 1-column strip; click it to expand.</li>
+<li><code>/refresh</code> (F12, the ↻ button in the sidebar header or the collapsed strip; keymap
+  <code>agents.refresh</code>) re-fetches the bot list, so a bot made in the desktop app shows up without
+  a restart. The list also refreshes on its own every <code>agents.refresh_interval_secs</code> seconds
+  (default 60, <code>0</code> = off) and after a re-login. The merge keeps the open chat, its scroll and
+  the sidebar cursor; new bots are added, deleted ones dropped (with a notice if it was the
+  open one), renames and descriptions updated. A status line says what changed, e.g.
+  "Bot list refreshed: 1 new (ratatoskn)". (<code>/bots</code> still prints the list; <code>/reload</code> still
+  reloads the open chat's transcript.)</li>
+<li>Menus are clickable (title opens, hover highlights, click runs, outside closes). Without the
+  mouse: F10, Alt-M, Alt+<underlined letter>, or <code>/menu [name]</code>.</li>
+<li>Clicking an empty part of a message bubble opens its reaction picker
+  (<code>message.click_to_react</code>, default on).</li>
+<li>Over SSH, Alt+key can arrive as a separate ESC and key. ESC then a key within
+  <code>keys.esc_alt_timeout_ms</code> (default 50 ms; 0 disables) is read as Alt+key. Windows Terminal
+  keeps a few Alt chords for itself (Alt-Enter, Alt-Space, Alt-Shift-+/-); use F10 or <code>/menu</code>.</li>
+</ul>
+<p>Images in replies and your image attachments show inline in the bubble (scaled to fit, at
+most <code>images.inline_max_rows</code> rows, default 12; <code>images.inline = off</code> turns it off). Click one
+for the full-size viewer.</p>
+<p><code>/status [extra text]</code> asks the current bot "Where are we now? Give me a brief status of your
+current tasks." (plus your text) as a normal prompt; change the text with
+<code>commands.status_prompt</code>.</p>
+<p>Theme parts: <code>collapse_button</code>, <code>sidebar_strip</code>.</p>
+<h3 id="video-gifs-and-music-1240">Video, GIFs and music (1.24.0)</h3>
+<p>Videos and animated GIFs play <strong>inside the bubble</strong>, scaled like images (capped at
+<code>images.inline_max_rows</code>), with a one-row bar under them: <strong>[▶]/[⏸]</strong> toggles playback,
+clicking the bar seeks, and the label shows elapsed/total time (GIFs: frame position).
+Clicking the picture opens the full-size player (Space play/pause, ←/→ seek 5 s, Home,
+Esc/q close). Music links and attachments get the same bar. Only one video or track plays
+at a time, and it pauses when scrolled out of view; GIFs loop on their own.</p>
+<table>
+<thead>
+<tr>
+<th>Build</th>
+<th>Decodes</th>
+<th>Download</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>standard</td>
+<td>GIF; H.264 MP4 (OpenH264, compiled in); MP3, AAC/M4A, FLAC, Vorbis, WAV. Other video codecs use a system <code>ffmpeg</code> if one is on PATH</td>
+<td><code>grokbot-tui-installer.sh/.ps1</code>, .deb/.rpm/.msi/.pkg, Homebrew, AUR</td>
+</tr>
+<tr>
+<td>-ffmpeg</td>
+<td>the above, plus FFmpeg linked in statically: nearly every codec and container, nothing to install</td>
+<td><code>grokbot-tui-ffmpeg-&lt;target&gt;.tar.xz/.zip</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>grokbot-tui-setup.sh</code> / <code>grokbot-tui-setup.ps1</code> (release assets) ask which build to
+install (<code>--variant standard|ffmpeg</code> / <code>-Variant</code> to skip the question).</p>
+<p>Prefs: <code>media.inline</code> (<code>on</code>), <code>media.fps</code> (<code>10</code>, 1–30), <code>media.decoder</code>
+(<code>auto</code>|<code>builtin</code>|<code>ffmpeg</code>|<code>system</code>), <code>media.gif_autoplay</code> (<code>on</code>). <code>/media
+pause|stop|decoders</code>. Theme part: <code>media_bar</code>. On Linux, sound needs ALSA (libasound2).</p>
+<h3 id="right-column-bot-header-and-attachments_1">Right column: bot header and attachments</h3>
+<p>The right column starts with a header for the open chat's bot: its name in bold and its
+description, wrapped (long ones are cut after 3 rows; click <strong>▾ more</strong> / <strong>▴ less</strong>). It
+follows the bot-list refresh, so renames and new descriptions show at once. The sidebar
+shows bot names only. A bot whose name has the description typed into it ("Lippy · Very
+ratatui-focused …") shows as "Lippy", with the rest as its description.</p>
+<p>Below the header, a collapsible bar on the right of each chat lists its attachments, sent and received, with
+type, name, size, sender and time. <strong>[view]</strong> opens images in the viewer, text/HTML/Markdown
+in the built-in browser and other files in the system app (with the SSH guard); <strong>[⤓]</strong> opens
+the download modal; clicking a row jumps to its message. It has a search box and
+All/Img/Vid/Aud/Doc filters, and keys j/k, Enter, v, d, /, t and Esc when focused.
+Toggle with F9, the «/» buttons, View ▸ attachments, <code>/attachments show|hide|toggle</code>
+(alias <code>/files</code>) or keymap <code>view.toggle_attachments</code>; pref <code>ui.attachments_panel</code>
+(<code>show</code>/<code>hide</code>, default <code>show</code> since 1.28.0; <code>hide</code> = 1-column strip with the count). These
+toggle the whole column, header included. Hidden when the chat body is under 70 columns.
+Theme parts: <code>attach_panel_frame</code>, <code>attach_panel_filter</code>, <code>attach_panel_count</code>,
+<code>bot_header_name</code>, <code>bot_header_desc</code>.</p>
+<p>Bot replies are laid out like your messages: the bot's name on its own row, the reply
+directly under it, the same 2/3 bubble width, on the left where yours are on the right.
+Since 1.38.0 each message's text sits on a rounded bubble (<code>╭─╮ │ … │ ╰─╯</code>), accent-
+coloured for yours and muted for the bot's, and its reaction pills ride the bubble's top
+border at the top-right corner, like the desktop app. Every panel, dialog, popup and the
+input box uses rounded corners too.</p>
+<h3 id="grok-bot-cards-questions-approvals-secrets-forms-and-drafts-1290_1">Grok Bot cards: questions, approvals, secrets, forms and drafts (1.29.0)</h3>
+<p>When a bot asks you something, the chat shows a card with its state (● pending, answered,
+dismissed or expired) and a button. Click the button, press <strong>F11</strong> (keymap <code>card.open</code>,
+vim normal <code>c</code>) or run <code>/card</code> to open the newest pending one:</p>
+<table>
+<thead>
+<tr>
+<th>Card</th>
+<th>Keys</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Question (single, multi-select, your own answer, multi-step)</td>
+<td><code>1</code>-<code>9</code> or <code>↑↓</code> <code>Enter</code>; <code>Space</code> toggles; <code>Tab</code> type your own; <code>x</code> dismiss</td>
+</tr>
+<tr>
+<td>Auto-review approval / local tool permission</td>
+<td><code>a</code> approve (allow once), <code>d</code> deny</td>
+</tr>
+<tr>
+<td>Secret request</td>
+<td>type (masked) and <code>Enter</code>; <code>Ctrl-D</code> dismiss</td>
+</tr>
+<tr>
+<td>Form</td>
+<td><code>Tab</code> between fields (secret fields masked), <code>Ctrl-S</code> submit, <code>Ctrl-D</code> dismiss</td>
+</tr>
+<tr>
+<td>Email / Slack / meeting draft</td>
+<td><code>s</code> send, <code>e</code> edit the body, <code>x</code> discard</td>
+</tr>
+<tr>
+<td>Agent ↔ agent or agent ↔ Cursor conversation (1.41.4)</td>
+<td>Click <strong>[view conversation]</strong> (or F11 / <code>/card</code> when it is the newest pending card); <code>↑↓</code> / mouse wheel scroll; <code>Esc</code> close</td>
+</tr>
+</tbody>
+</table>
+<p>Secrets are sent only through the gateway's <code>submitSecret</code> / <code>submitUserForm</code> calls; they
+are never logged, stored or shown and are wiped after sending or closing. When this bot
+messages another Grok Bot or a Cursor cloud agent, those turns are collapsed into a card
+in the main chat (<code>↔ agent: …</code> or <code>▣ cursor-agent: …</code>) instead of appearing as regular
+bubbles; click the card to read the side conversation in a modal. The turns come from
+transcript <code>kind: "message"</code> entries with <code>toAgent</code> / <code>fromAgent</code>, and Cursor launches
+from <code>message.type == "cursor-agent"</code> (<code>bcId</code> + <code>title</code>). Purchase approvals, connector
+grants and similar cards are shown read-only; act on them in the desktop app. Theme parts:
+<code>card_frame</code>, <code>card_pending</code>, <code>card_done</code>, <code>card_button</code>.</p>
+<h2 id="muting-other-devices-while-youre-here">Muting other devices while you're here</h2>
+<p>Set <code>notifications.claim_presence = true</code> (per account; <code>/mute</code>, or <strong>Notify → mute</strong>) and,
+while grokbot-tui is focused and you've used it in the last <code>notifications.idle_minutes</code>
+(default 10), it tells the Grok Bot service this install is active, the same report the desktop
+app sends, so pushes to your other devices can be held. 🔕 in the header shows a live claim;
+<code>/whoami</code> shows the lease. It's released when the terminal loses focus, you go idle, log out,
+switch accounts or quit; if the process is suspended the lease simply expires. It needs a
+Cursor session (<code>/login desktop</code> or <code>/login cursor</code>). Theme part: <code>presence_indicator</code>.</p><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/chats.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>

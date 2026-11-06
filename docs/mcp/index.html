@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP server · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="">Install and download</a></li><li><a href="/docs/login/" class="">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="">Attachments and the file picker</a></li><li><a href="/docs/images/" class="">Images and terminal graphics</a></li><li><a href="/docs/search/" class="">Searching messages</a></li><li><a href="/docs/notifications/" class="">Notifications</a></li><li><a href="/docs/browser/" class="">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="on">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="mcp-server">MCP server</h1>
+<p>Letting other agents (Claude Code, Cursor, …) talk to your Grok Bots through grokbot-tui.</p>
+<h2 id="mcp-server-1310">MCP server (1.31.0)</h2>
+<p>grokbot-tui can be an <a href="https://modelcontextprotocol.io">MCP</a> server, so other agents
+(Claude Code, Cursor, Codex, another grokbot-tui) can talk to your Grok Bots. It uses the
+signed-in account from <code>~/.grokbot-tui</code> (pick one with <code>--account ALIAS</code>; the default is
+the last one you used in the TUI).</p>
+<pre><code class="language-sh">grokbot-tui mcp serve                 # stdio (the client starts it), same as --stdio
+grokbot-tui mcp serve --http          # streamable HTTP on 127.0.0.1:8765/mcp
+grokbot-tui mcp serve --http 127.0.0.1:9000 --read-only
+grokbot-tui mcp token                 # print the HTTP bearer token (--rotate for a new one)
+grokbot-tui mcp config                # show the settings in use
+</code></pre>
+<p><strong>Tools:</strong> <code>list_bots</code>, <code>get_bot</code>, <code>send_message</code> (text plus optional local files),
+<code>read_messages</code>, <code>wait_for_reply</code> (waits for the bot's answer to a <code>send_message</code>),
+<code>list_pending_cards</code>, <code>answer_card</code>, <code>list_attachments</code>, <code>download_attachment</code>.
+<code>answer_card</code> handles every kind the TUI does: questions (<code>value</code>), approvals and local
+tool permissions (<code>action: approve|deny</code>), secret requests (<code>value</code>, never echoed back),
+forms (<code>values: {field_id: text}</code>), drafts (<code>action: send|discard</code>) and <code>action: dismiss</code>.
+<strong>Resources:</strong> <code>grokbot://bots</code> (JSON) and <code>grokbot://bots/{id}/transcript</code> (plain text).</p>
+<p><strong>HTTP</strong> listens on loopback only and every request needs
+<code>Authorization: Bearer &lt;token&gt;</code>. The token is made on first use and kept in
+<code>&lt;data dir&gt;/mcp-http-token</code> (mode 0600); only <code>grokbot-tui mcp token</code> prints it.</p>
+<p><strong>Settings</strong> go in <code>&lt;data dir&gt;/mcp.toml</code> (see <code>docs/mcp/mcp.toml.example</code>):</p>
+<pre><code class="language-toml">[mcp.server]
+allowed_bots = [&quot;Grokbot-cli&quot;]   # ids or names; empty = all bots
+read_only = false                # refuse send_message / answer_card
+http_addr = &quot;127.0.0.1:8765&quot;
+audit = true                     # ~/.cache/grokbot-tui/mcp-audit.log
+</code></pre>
+<p>The audit log has one line per call (time, transport, tool, bot id, card kind/action,
+ok/error), never message text, answers, secrets, tokens or download URLs.</p>
+<p><strong>Connecting a client.</strong> Claude Code:</p>
+<pre><code class="language-sh">claude mcp add grokbot -- grokbot-tui --account default mcp serve --stdio
+# or HTTP (start `grokbot-tui mcp serve --http` first):
+claude mcp add --transport http grokbot-http http://127.0.0.1:8765/mcp \
+  --header &quot;Authorization: Bearer $(grokbot-tui mcp token)&quot;
+</code></pre>
+<p>Cursor (<code>~/.cursor/mcp.json</code>) and Claude Code (<code>.mcp.json</code>) examples are in
+<code>docs/mcp/cursor.mcp.json</code> and <code>docs/mcp/claude-code.mcp.json</code>; the HTTP entries read the
+token from <code>GROKBOT_TUI_MCP_TOKEN</code> (<code>export GROKBOT_TUI_MCP_TOKEN=$(grokbot-tui mcp token)</code>).</p><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/mcp.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>

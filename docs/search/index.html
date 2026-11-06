@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Searching messages · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="">Install and download</a></li><li><a href="/docs/login/" class="">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="">Attachments and the file picker</a></li><li><a href="/docs/images/" class="">Images and terminal graphics</a></li><li><a href="/docs/search/" class="on">Searching messages</a></li><li><a href="/docs/notifications/" class="">Notifications</a></li><li><a href="/docs/browser/" class="">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="searching-messages">Searching messages</h1>
+<p>Local full-text search across every bot's messages and attachments.</p>
+<h2 id="searching-messages-1390">Searching messages (1.39.0)</h2>
+<p><strong>Ctrl-F</strong> or <code>/search &lt;words&gt;</code> (alias <code>/find</code>; vim keymap action <code>search.open</code>, bound to
+<code>ctrl-f</code>) searches everything cached locally for the active account, never the network:</p>
+<ul>
+<li>every bot's messages in <code>context.db</code> (team bots and groups too, once synced), via an
+  SQLite FTS5 index (<code>messages_fts</code>, kept in sync by triggers, backfilled on upgrade);</li>
+<li>attachment names and paths;</li>
+<li>the text of files you send from this computer (UTF-8, no NUL bytes, ≤ 256 KiB), cached
+  in <code>attachment_text</code> at send time. Images, binaries, larger files and files the bot sent
+  are matched by name only.</li>
+</ul>
+<p>Every word must match, case-insensitively, as a word prefix (<code>kube</code> finds Kubernetes).
+Results are newest first (up to 200), each with the bot, age and time, a highlighted
+snippet and <code>[📎 file …]</code> / <code>[📎 in …]</code> for attachment matches. ↑/↓, PgUp/PgDn and the
+wheel move; <strong>Enter</strong> or a click opens that bot's chat, scrolls to the message and flashes
+it; <strong>Ctrl-O</strong> (vim <code>o</code>) also opens the matched attachment; Esc closes (vim: <code>q</code>; <code>/</code> or
+<code>i</code> edits the words).</p>
+<p>Search never blocks the UI (1.39.1): queries run on a worker thread with their own
+SQLite connection (WAL mode), debounced while you type, and older results are dropped
+when a newer query is in flight. After an upgrade, existing messages are indexed in the
+background in small batches; until that finishes the search box shows <code>indexing… N%</code>
+and older messages appear when it is done. The backfill records its progress in
+<code>context.db</code>, so it resumes where it stopped if you quit. The text of files you send is
+read and cached on a worker thread too.</p><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/search.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>

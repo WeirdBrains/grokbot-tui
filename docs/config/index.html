@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration and environment variables · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="">Install and download</a></li><li><a href="/docs/login/" class="">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="">Attachments and the file picker</a></li><li><a href="/docs/images/" class="">Images and terminal graphics</a></li><li><a href="/docs/search/" class="">Searching messages</a></li><li><a href="/docs/notifications/" class="">Notifications</a></li><li><a href="/docs/browser/" class="">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="on">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="configuration-and-environment-variables">Configuration and environment variables</h1>
+<p>grokbot-tui keeps its settings as preferences in <code>context.db</code> (change them in the Settings
+window, with <code>/prefs</code>, or see <a href="/docs/settings/">Settings</a>). Command-line flags and environment
+variables override them for one run. The full flag list is the man page
+(<a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/man/grokbot-tui.1"><code>man/grokbot-tui.1</code></a>, <code>man ./man/grokbot-tui.1</code>), generated from
+the same definitions as <code>--help</code>.</p>
+<h2 id="command-line-flags">Command-line flags</h2>
+<table>
+<thead>
+<tr>
+<th>flag</th>
+<th>what</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--mock</code></td>
+<td>Offline mock API: fake bots and echo replies (any token except <code>bad</code> logs in)</td>
+</tr>
+<tr>
+<td><code>--account &lt;ALIAS&gt;</code></td>
+<td>Start in this account (also <code>GROKBOT_TUI_ACCOUNT</code>)</td>
+</tr>
+<tr>
+<td><code>--data-dir &lt;DIR&gt;</code></td>
+<td>Data directory holding <code>context.db</code> (default <code>~/.grokbot-tui</code>)</td>
+</tr>
+<tr>
+<td><code>--theme &lt;NAME&gt;</code></td>
+<td>Use this theme for this run only</td>
+</tr>
+<tr>
+<td><code>--list-themes</code></td>
+<td>List the theme files and exit</td>
+</tr>
+<tr>
+<td><code>mcp serve [--stdio\|--http [ADDR]]</code>, <code>mcp token</code>, <code>mcp config</code></td>
+<td>The <a href="/docs/mcp/">MCP server</a></td>
+</tr>
+<tr>
+<td><code>completions &lt;bash\|zsh\|fish\|powershell\|elvish&gt;</code></td>
+<td>Print a <a href="/docs/install/#shell-completions-1410">shell completion</a> script</td>
+</tr>
+<tr>
+<td><code>-h</code>, <code>--help</code> / <code>-V</code>, <code>--version</code></td>
+<td>Help and version</td>
+</tr>
+</tbody>
+</table>
+<h2 id="environment-variables">Environment variables</h2>
+<table>
+<thead>
+<tr>
+<th>variable</th>
+<th>what</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GROKBOT_TUI_TOKEN</code></td>
+<td>Gateway token override for the startup account (never saved).</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_GATEWAY_URL</code></td>
+<td>Gateway URL for that token (else the stored URL).</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_GATEWAY_HEADERS</code></td>
+<td>JSON object of extra gateway headers.</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_CURSOR_API_BASE_URL</code></td>
+<td>Cursor backend for the EnsureSandBox exchange (must be *.cursor.sh / *.cursor.com).</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_CURSOR_CLIENT_VERSION</code></td>
+<td>x-cursor-client-version (env &gt; pref cursor.client_version &gt; detected app &gt; 0.70.2).</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_CURSOR_CLIENT_TYPE</code></td>
+<td>x-cursor-client-type (default sand).</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_SAND_BOX_NAMESPACE</code></td>
+<td>x-sand-box-namespace (default prod).</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_ACCOUNT</code></td>
+<td>Starting account alias (same as --account).</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_ALLOW_LOCAL_GATEWAY</code></td>
+<td>Set to 1 to allow http(s) loopback gateways (development).</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_APP_DIR</code></td>
+<td>Grok Bot desktop install dir, for version detection.</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_MAX_RESPONSE_BYTES</code></td>
+<td>Cap on one gateway response body in bytes (default 64 MiB).</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_NO_THEME_DOWNLOAD</code></td>
+<td>Set to 1 to never download the default theme.</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_THEME_URL</code></td>
+<td>Download themes from here instead of the release tag (<url><name>.toml).</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_NO_HYPERLINKS</code></td>
+<td>Set (to anything) to turn off OSC 8 hyperlinks.</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_FORCE_SSH</code></td>
+<td>0 or 1: override SSH detection (links use the built-in browser over SSH).</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_FUZZBALL</code></td>
+<td>off: skip the Fuzzball capability query at startup.</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_IMAGES</code></td>
+<td>halfblocks: skip the terminal graphics query and draw images with half blocks.</td>
+</tr>
+</tbody>
+</table>
+<p>Every older <code>GB_*</code> name (for example <code>GB_GROKBOT_TOKEN</code>) still works when its
+<code>GROKBOT_TUI_*</code> name is not set; the new name wins when both are set. The library's own
+names <code>GROKBOT_ALLOW_LOCAL_GATEWAY</code> and <code>GROKBOT_APP_DIR</code> work too. The same list is in the
+app: <code>/help env</code>.</p>
+<p><code>docs/config.md</code>, <code>/help env</code> and the man page are checked against the source by
+<code>cargo test</code> (<code>envvars::tests</code>), so a new variable can't ship undocumented.</p>
+<h2 id="files">Files</h2>
+<ul>
+<li>Keymap: see <a href="/docs/keybindings/">Keybindings</a> (<code>keymap/</code> in the repo has examples).</li>
+<li>Notification rules: see <a href="/docs/notifications/">Notifications</a> (<code>notify-rules/</code> has examples).</li>
+<li>Themes: <code>&lt;data dir&gt;/themes/*.toml</code>, see <a href="/docs/themes/">Themes</a>.</li>
+</ul><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/config.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>

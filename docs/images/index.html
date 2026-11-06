@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Images and terminal graphics · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="">Install and download</a></li><li><a href="/docs/login/" class="">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="">Attachments and the file picker</a></li><li><a href="/docs/images/" class="on">Images and terminal graphics</a></li><li><a href="/docs/search/" class="">Searching messages</a></li><li><a href="/docs/notifications/" class="">Notifications</a></li><li><a href="/docs/browser/" class="">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="images-and-terminal-graphics">Images and terminal graphics</h1>
+<p>Inline images (kitty, iTerm2, sixel, halfblocks) and the Fuzzball keyboard and graphics protocol.</p>
+<h2 id="images">Images</h2>
+<p>Images attached to a transcript message (your uploads and files the bot sent) draw
+inside that chat bubble, scaled to the bubble width, using the same kitty / sixel /
+iTerm2 / halfblocks path as markdown image URLs. A <code>[🖼 name]</code> placeholder stands in
+until the image loads; click it to open the viewer.</p>
+<p>Images in replies (<code>![alt](url)</code>, bare image URLs and paths) show as a placeholder,
+<code>[🖼 alt · cat.png · 12.0 KB]</code> (size for local files), followed by the URL. <strong>Click the
+placeholder</strong> (or <code>/view</code>, vim <code>O</code>) to open the image viewer: the image as large as the
+terminal allows, aspect ratio kept, with its name, pixel size, file size and position
+(<code>2/5</code>) in the title. The graphics protocol is detected at start-up with ratatui-image (kitty,
+sixel, iTerm2; halfblocks everywhere else, e.g. the Windows console or Alacritty);
+<strong>Fuzzball (1.36.0).</strong> In <a href="https://github.com/WeirdBrains/mouser">Mouser</a>, images use the
+Fuzzball graphics protocol (<code>docs/protocol/graphics.md</code>): grokbot-tui sends one capability
+query plus DA1 at startup (no delay on other terminals; tmux gets a short extra wait), uploads
+each picture as base64 RGBA in <code>max_chunk</code> pieces and places it at its cells. tmux/screen
+passthrough wrapping is applied when <code>TMUX</code>/<code>STY</code> is set. The order is
+<code>images.protocol = auto</code> → Fuzzball, then kitty, then native (sixel / iTerm2 / halfblocks);
+set <code>fuzzball</code>, <code>kitty</code> or <code>native</code> to force a step (unavailable choices fall through with a
+notice). <code>/graphics</code> shows what answered; <code>/graphics native</code> etc. sets the pref.
+<code>GROKBOT_TUI_FUZZBALL=off</code> skips the Fuzzball query. Keyboard: <code>keys.protocol = auto |
+fuzzball | kitty | legacy</code> (<code>keys.kitty_protocol</code> still works). With <code>auto</code>/<code>fuzzball</code>,
+Fuzzball keyboard events are used when the terminal offers them (not through tmux/screen),
+then the kitty keyboard protocol, then legacy keys. Every startup query is bounded
+(<code>graphics.detect_timeout_ms</code>, clamped to 1–5 s), so a terminal that never answers still
+gets the UI, with halfblocks images and legacy keys.</p>
+<p><code>GROKBOT_TUI_IMAGES=halfblocks</code> skips the terminal query. Viewer keys: <code>Esc</code>/<code>q</code> or a click
+outside close, <code>o</code>/<code>Enter</code> open in the system viewer, <code>←</code>/<code>→</code> (<code>n</code>/<code>p</code>, <code>h</code>/<code>l</code>) step through
+the chat's images. Closing or resizing clears the screen (and deletes kitty images) so no image
+ghosts stay. Images are read from disk or downloaded (http/https, up to 25 MB) only when you
+open the viewer. <code>/open</code> opens images and links externally; <code>/open list</code> numbers them.</p>
+<p><strong>Attaching an image to a prompt isn't possible:</strong> grokbot_api 1.1's <code>sendPrompt</code> takes text
+only (agent id, prompt, nonce, reply-to) and there is no upload method. Theme parts:
+<code>image_placeholder</code>, <code>image_viewer_info</code> (the viewer uses <code>help_frame</code> / <code>help_title</code>).</p>
+<h2 id="keyboard-protocol">Keyboard protocol</h2>
+<p>On terminals with the kitty keyboard protocol (kitty, Ghostty, foot, WezTerm, recent
+Alacritty/iTerm2), grokbot-tui turns it on (disambiguate, event types and alternate keys),
+so Alt, Ctrl-Enter and Shift-Enter are reliable and Esc has no delay. Elsewhere the ESC-prefix
+Alt handling is used. Pref <code>keys.kitty_protocol = auto|on|off</code> (default <code>auto</code>);
+<code>/kitty</code> shows or changes it. The flags are popped on exit and on suspend.</p><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/images.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>
