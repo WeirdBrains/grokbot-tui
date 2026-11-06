@@ -92,6 +92,51 @@ type LoginOk = (Arc<dyn ApiClient>, Session, Vec<Bot>);
 /// Outcome of an opt-in desktop read (descriptor session or sand Cursor token).
 pub type DesktopRead = (gw::desktop::DesktopCredential, Option<String>);
 
+/// Which desktop credential file `/login desktop` used (never a secret).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopCredSource {
+    /// Decrypted `gateway-descriptor.json` → ready gateway session (preferred).
+    GatewayDescriptor,
+    /// Decrypted `sand-secrets.json` Cursor access token → EnsureSandBox.
+    SandSecrets,
+}
+
+impl DesktopCredSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::GatewayDescriptor => "gateway-descriptor",
+            Self::SandSecrets => "sand-secrets",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim() {
+            "gateway-descriptor" | "descriptor" => Some(Self::GatewayDescriptor),
+            "sand-secrets" | "sand" => Some(Self::SandSecrets),
+            _ => None,
+        }
+    }
+
+    /// Short header/whoami label suffix after `desktop`.
+    pub fn label_tag(self) -> &'static str {
+        match self {
+            Self::GatewayDescriptor => "descriptor",
+            Self::SandSecrets => "sand",
+        }
+    }
+
+    pub fn success_detail(self) -> &'static str {
+        match self {
+            Self::GatewayDescriptor => {
+                "gateway-descriptor — same Cursor session the Grok Bot desktop app stores after Sign in with Cursor"
+            }
+            Self::SandSecrets => {
+                "sand-secrets → EnsureSandBox — same desktop fallback when no gateway-descriptor"
+            }
+        }
+    }
+}
+
 /// Reads the desktop app's saved credential for an optional entry.
 /// Only invoked by `/login desktop` and the 401 re-read for desktop-method accounts.
 pub type DesktopReader =
@@ -103,11 +148,7 @@ pub type DesktopLister = Arc<dyn Fn() -> gw::Result<Vec<(String, String)>> + Sen
 
 pub fn real_desktop_lister() -> DesktopLister {
     Arc::new(|| {
-        let platform = gw::desktop::Platform::current().ok_or_else(|| gw::Error::Desktop {
-            code: "UNSUPPORTED_PLATFORM".into(),
-            message: "unsupported platform".into(),
-        })?;
-        let cfg = gw::desktop::DesktopConfig::new(platform);
+        let cfg = desktop_config_for_login()?;
         if let Ok(entries) = cfg.entries()
             && entries.len() > 1
         {
@@ -150,19 +191,101 @@ fn desktop_error_text(e: &gw::Error) -> String {
                 format!("{what} Choose one with /login desktop <name>.")
             }
         }
+        gw::Error::Desktop { code, message }
+            if code == "NOT_SIGNED_IN" || code == "APP_NOT_FOUND" =>
+        {
+            format!(
+                "{message} Sign in with your Cursor account in the Grok Bot desktop app (browser flow — there is no separate API-key login), then run /login desktop. Tip: /login desktop open launches the app when it is installed."
+            )
+        }
         _ => e.to_string(),
     }
+}
+
+/// Build a DesktopConfig, preferring Windows `%LOCALAPPDATA%\Grok Bot` when Roaming has no session files.
+fn desktop_config_for_login() -> Result<gw::desktop::DesktopConfig, gw::Error> {
+    let platform = gw::desktop::Platform::current().ok_or_else(|| gw::Error::Desktop {
+        code: "UNSUPPORTED_PLATFORM".into(),
+        message: "Reading the desktop session is supported on Linux, macOS and Windows only."
+            .into(),
+    })?;
+    let mut cfg = gw::desktop::DesktopConfig::new(platform);
+    if matches!(platform, gw::desktop::Platform::Windows)
+        && !cfg.present()
+        && !cfg.sand_present()
+        && let Ok(local) = std::env::var("LOCALAPPDATA")
+    {
+        let candidate = std::path::PathBuf::from(&local).join("Grok Bot");
+        if candidate.join("gateway-descriptor.json").exists()
+            || candidate.join("sand-secrets.json").exists()
+        {
+            let local_c = local.clone();
+            cfg.env = Box::new(move |k| {
+                if k == "APPDATA" {
+                    Some(local_c.clone())
+                } else {
+                    std::env::var(k).ok()
+                }
+            });
+        }
+    }
+    Ok(cfg)
+}
+
+/// True when gateway-descriptor.json or sand-secrets.json exists (no decrypt).
+pub fn desktop_session_files_present() -> bool {
+    desktop_config_for_login()
+        .map(|c| c.present() || c.sand_present())
+        .unwrap_or(false)
+}
+
+/// Launch the installed Grok Bot desktop app so the user can Sign in with Cursor.
+pub fn try_open_desktop_app_for_signin() -> Result<String, String> {
+    let platform = gw::desktop::Platform::current().ok_or_else(|| {
+        "Opening the desktop app is supported on Linux, macOS and Windows only.".to_string()
+    })?;
+    let env = |k: &str| std::env::var(k).ok();
+    let dir = gw::desktop::find_install_dir(platform, &env).ok_or_else(|| {
+        "Grok Bot desktop app not found. Install it from the Cursor dashboard (Download Grok Bot), sign in with Cursor in the browser, then /login desktop.".to_string()
+    })?;
+    let target = match platform {
+        gw::desktop::Platform::Macos => dir.clone(),
+        gw::desktop::Platform::Windows => {
+            let exe = dir.join("Grok Bot.exe");
+            if exe.is_file() {
+                exe
+            } else {
+                dir.clone()
+            }
+        }
+        gw::desktop::Platform::Linux => {
+            let mut found = None;
+            for name in ["grok-bot", "Grok Bot", "grokbot"] {
+                let p = dir.join(name);
+                if p.is_file() {
+                    found = Some(p);
+                    break;
+                }
+            }
+            found.unwrap_or_else(|| dir.clone())
+        }
+    };
+    crate::markdown::open_external(&target.to_string_lossy()).map_err(|e| {
+        format!(
+            "Could not open {}: {e}. Open the Grok Bot app yourself, Sign in with Cursor, then /login desktop.",
+            target.display()
+        )
+    })?;
+    Ok(format!(
+        "Opened {}. Complete Sign in with Cursor in the browser, return to the app, then run /login desktop (reuses the app's saved Cursor session — not a dashboard API key).",
+        target.display()
+    ))
 }
 
 /// The real reader: the platform's app-data dir + OS keychain (see `grokbot_api::desktop`).
 pub fn real_desktop_reader() -> DesktopReader {
     Arc::new(|entry, policy| {
-        let platform = gw::desktop::Platform::current().ok_or_else(|| gw::Error::Desktop {
-            code: "UNSUPPORTED_PLATFORM".into(),
-            message: "Reading the desktop session is supported on Linux, macOS and Windows only."
-                .into(),
-        })?;
-        let cfg = gw::desktop::DesktopConfig::new(platform);
+        let cfg = desktop_config_for_login()?;
         let cred = cfg.load_credential(entry, policy)?;
         // Prefer the stable sand account key (so a number/`prefix` choice re-reads the same account).
         let stored = match &cred {
@@ -354,6 +477,8 @@ pub enum Event {
         source: LoginSource,
         cursor_token: Option<String>,
         desktop_entry: Option<String>,
+        /// Set for `/login desktop`: descriptor vs sand-secrets path.
+        desktop_source: Option<DesktopCredSource>,
         result: std::result::Result<LoginOk, String>,
     },
     /// Results of local message search query `seq` (from a worker thread).
@@ -1200,6 +1325,7 @@ impl App {
                 source,
                 cursor_token,
                 desktop_entry,
+                desktop_source,
                 result,
             } => {
                 if epoch != self.epoch {
@@ -1209,18 +1335,33 @@ impl App {
                 match result {
                     Ok((client, session, bots)) => {
                         self.login_retry = None;
+                        if let Some(ds) = desktop_source {
+                            let _ = self
+                                .store
+                                .set_pref(crate::config::PREF_DESKTOP_SOURCE, ds.as_str());
+                        } else if method != LoginMethod::Desktop {
+                            let _ = self.store.set_pref(crate::config::PREF_DESKTOP_SOURCE, "");
+                        }
+                        let host = short_host(host_of(&session.gateway_url));
                         let label = match source {
                             LoginSource::Env => {
-                                format!(
-                                    "{TOKEN_ENV} · {}",
-                                    short_host(host_of(&session.gateway_url))
-                                )
+                                format!("{TOKEN_ENV} · {host}")
                             }
-                            _ => format!(
-                                "{} · {}",
-                                method.as_str(),
-                                short_host(host_of(&session.gateway_url))
-                            ),
+                            _ if method == LoginMethod::Desktop => {
+                                let tag = desktop_source
+                                    .or_else(|| {
+                                        self.store
+                                            .get_pref(crate::config::PREF_DESKTOP_SOURCE)
+                                            .ok()
+                                            .flatten()
+                                            .as_deref()
+                                            .and_then(DesktopCredSource::parse)
+                                    })
+                                    .map(|s| s.label_tag())
+                                    .unwrap_or("desktop");
+                                format!("desktop·{tag} · {host}")
+                            }
+                            _ => format!("{} · {host}", method.as_str()),
                         };
                         self.api = Some(client);
                         self.user_label = Some(label.clone());
@@ -1234,10 +1375,24 @@ impl App {
                         };
                         match source {
                             LoginSource::Interactive => match self.store.save_login(&login) {
-                                Ok(()) => self.info(format!(
-                                    "Logged in ({label}); credential saved for account '{}'.",
-                                    self.account().alias
-                                )),
+                                Ok(()) => {
+                                    let detail = match (method, desktop_source) {
+                                        (LoginMethod::Desktop, Some(ds)) => format!(
+                                            "Logged in via Grok Bot desktop Cursor session ({}); credential saved for account '{}'.",
+                                            ds.success_detail(),
+                                            self.account().alias
+                                        ),
+                                        (LoginMethod::Cursor, _) => format!(
+                                            "Logged in ({label}) via pasted Cursor access token → EnsureSandBox; credential saved for account '{}'. Dashboard keys (grok_/crsr_/xai-) are not used here.",
+                                            self.account().alias
+                                        ),
+                                        _ => format!(
+                                            "Logged in ({label}); credential saved for account '{}'.",
+                                            self.account().alias
+                                        ),
+                                    };
+                                    self.info(detail);
+                                }
                                 Err(e) => self.error(format!(
                                     "Logged in, but could not save credential: {e:#}"
                                 )),
@@ -2046,6 +2201,7 @@ impl App {
                 source,
                 cursor_token,
                 desktop_entry,
+                desktop_source: None,
                 result,
             }
         });
@@ -2086,10 +2242,11 @@ impl App {
             let read = joined
                 .map_err(|e| format!("desktop session reader failed: {e}"))
                 .and_then(|(r, _)| r.map_err(|e| desktop_error_text(&e)));
-            let (result, desktop_entry) = match read {
+            let (result, desktop_entry, desktop_source) = match read {
                 Ok((gw::desktop::DesktopCredential::Session(session), stored)) => (
                     login_task(mock, opts, Some(session), None, progress).await,
                     stored.or(entry),
+                    Some(DesktopCredSource::GatewayDescriptor),
                 ),
                 Ok((gw::desktop::DesktopCredential::CursorToken(tok), stored)) => (
                     {
@@ -2104,8 +2261,9 @@ impl App {
                     login_task(mock, opts, None, Some(tok), progress).await
                     },
                     stored.or(entry),
+                    Some(DesktopCredSource::SandSecrets),
                 ),
-                Err(e) => (Err(e), entry),
+                Err(e) => (Err(e), entry, None),
             };
             Event::Login {
                 epoch,
@@ -2113,6 +2271,7 @@ impl App {
                 source,
                 cursor_token: None,
                 desktop_entry,
+                desktop_source,
                 result,
             }
         });
@@ -2168,7 +2327,7 @@ impl App {
     pub fn refresh_bots(&mut self, mode: BotsFetch) {
         let Some(api) = self.api.clone() else {
             if mode != BotsFetch::Auto {
-                self.error("Not logged in. Use /login gateway or /login cursor.".into());
+                self.error("Not logged in. Prefer /login desktop (Grok Bot app Cursor session), or /login cursor / /login gateway.".into());
             }
             return;
         };
@@ -4108,7 +4267,7 @@ impl App {
     /// Send a prompt in the background. The local copy is stored as pending until the transcript confirms it.
     pub fn send_chat(&mut self, text: String) {
         let Some(api) = self.api.clone() else {
-            self.error("Not logged in. Use /login gateway or /login cursor.".into());
+            self.error("Not logged in. Prefer /login desktop (Grok Bot app Cursor session), or /login cursor / /login gateway.".into());
             return;
         };
         let Some((bot, session, team)) = self.active_bot_route() else {
@@ -5707,14 +5866,17 @@ pub mod tests {
                 && accounts.contains("/account add <alias>")
         );
         assert!(!accounts.contains("Specify which"));
-        // Other desktop errors are shown unchanged.
+        // NOT_SIGNED_IN / APP_NOT_FOUND point at desktop Cursor sign-in (not API keys).
         let other = gw::Error::Desktop {
             code: "NOT_SIGNED_IN".into(),
             message: "Sign in from the desktop app first.".into(),
         };
-        assert_eq!(
-            desktop_error_text(&other),
-            "Sign in from the desktop app first."
+        let signed = desktop_error_text(&other);
+        assert!(signed.starts_with("Sign in from the desktop app first."));
+        assert!(
+            signed.contains("Sign in with your Cursor account")
+                && signed.contains("/login desktop open"),
+            "{signed}"
         );
     }
 
@@ -5898,6 +6060,58 @@ pub mod tests {
                 .desktop_entry
                 .as_deref(),
             Some("bbbb2222key")
+        );
+    }
+
+    #[test]
+    fn desktop_login_reports_descriptor_cursor_session_path() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        let (reader, _calls) = fake_reader(|_, entry| match entry {
+            Some("work") => Ok((
+                gw::desktop::DesktopCredential::Session(Session::new(
+                    "https://box.cursorvm.com",
+                    "desk",
+                )),
+                Some("work".into()),
+            )),
+            _ => Err(gw::Error::Desktop {
+                code: "NO_SUCH_ENTRY".into(),
+                message: "no".into(),
+            }),
+        });
+        app.desktop_reader = reader;
+        type_line(&mut app, "/login desktop work");
+        settle(&mut app);
+        assert!(
+            app.user_label
+                .as_deref()
+                .is_some_and(|l| l.contains("desktop") && l.contains("descriptor")),
+            "label={:?}",
+            app.user_label
+        );
+        // Success info is pushed under the pre-bot notices key; after apply_bots the
+        // active key changes, so assert the durable pref instead of the chat log.
+        assert_eq!(
+            app.store
+                .get_pref(crate::config::PREF_DESKTOP_SOURCE)
+                .unwrap()
+                .as_deref(),
+            Some("gateway-descriptor")
+        );
+    }
+
+    #[test]
+    fn desktop_cred_source_labels() {
+        assert_eq!(DesktopCredSource::GatewayDescriptor.label_tag(), "descriptor");
+        assert_eq!(DesktopCredSource::SandSecrets.label_tag(), "sand");
+        assert_eq!(
+            DesktopCredSource::parse("gateway-descriptor"),
+            Some(DesktopCredSource::GatewayDescriptor)
+        );
+        assert_eq!(
+            DesktopCredSource::parse("sand-secrets"),
+            Some(DesktopCredSource::SandSecrets)
         );
     }
 

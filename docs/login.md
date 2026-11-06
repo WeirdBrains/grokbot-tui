@@ -1,6 +1,7 @@
 # Logging in and accounts
 
-Signing in with the Grok Bot desktop session, a Cursor token or a gateway token, and keeping several accounts apart.
+Signing in the same way the Grok Bot desktop app does: with your **Cursor account session**
+(saved under the app's data dir), not with dashboard API keys (`grok_` / `crsr_` / `xai-`).
 
 ## Authentication
 
@@ -16,11 +17,15 @@ All methods are per account and stored in SQLite (see below).
    before EnsureSandBox: they authenticate Cursor Admin/Cloud Agents or xAI inference,
    not the Grok Bot companion gateway. Prefer `/login desktop`.
 
-3. **Desktop app session (opt-in)** — `/login desktop [entry]`. grokbot-tui reads the desktop app's saved session only when
-   you run this command, mirroring grok-bot-cli's `app-session.js`. It reads `gateway-descriptor.json` from the app data dir:
+3. **Desktop app Cursor session (recommended)** — Sign in with Cursor in the Grok Bot desktop app
+   (browser), then `/login desktop [entry]` (or bare `/login` when session files exist).
+   `/login desktop open` launches the app when installed. grokbot-tui reads the desktop app's
+   saved session only when you run this command, mirroring grok-bot-cli's `app-session.js`.
+   It prefers `gateway-descriptor.json` from the app data dir:
    - Linux: `$XDG_CONFIG_HOME/Grok Bot` or `~/.config/Grok Bot`;
    - macOS: `~/Library/Application Support/Grok Bot`;
-   - Windows: `%APPDATA%\Grok Bot`.
+   - Windows: `%APPDATA%\Grok Bot` (Roaming). If that folder has no session files,
+     grokbot-tui also checks `%LOCALAPPDATA%\Grok Bot`.
 
    Both descriptor formats are supported: v1 `{version, encrypted}` and v2 `{version: 2, entries}`. When a v2 file has
    several entries, grokbot-tui lists them and you choose one with `/login desktop <entry>`. The payload is Chromium Safe Storage:
@@ -83,3 +88,11 @@ Several **strictly separate accounts** (e.g. `personal` plus work accounts). Eac
 - Start-up account: `--account <alias>`, then `GROKBOT_TUI_ACCOUNT`, then the last active account, then `default`.
 - Switch with `/account use <alias>` or click the `@alias` header.
 - Removing an account deletes all of its rows (FK `ON DELETE CASCADE`).
+
+## Send vs login
+
+`/login desktop` uses the same session class the desktop app stores (gateway-descriptor or
+EnsureSandBox from sand-secrets). If `listAgents` works but `sendPrompt` returns
+**502 A Sandbox session is not permitted on this endpoint**, that is a server-side restriction
+on that session class — repeating `/login desktop` will not mint a different kind of session.
+Check whether the desktop app can send to the same bot; see `/help troubleshooting`.

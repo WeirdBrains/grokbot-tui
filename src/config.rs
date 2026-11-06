@@ -76,6 +76,8 @@ pub const PREF_CLAIM_PRESENCE: &str = "notifications.claim_presence";
 pub const PREF_IDLE_MINUTES: &str = "notifications.idle_minutes";
 /// Per-account install id sent with presence reports (generated once).
 pub const PREF_INSTALL_ID: &str = "notifications.install_id";
+/// How the last `/login desktop` resolved: `gateway-descriptor` or `sand-secrets`.
+pub const PREF_DESKTOP_SOURCE: &str = "login.desktop_source";
 pub const DEFAULT_IDLE_MINUTES: u64 = 10;
 
 /// Esc-prefix window for Alt+key, ms (global, 0 disables, max 1000).

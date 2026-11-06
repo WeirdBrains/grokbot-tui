@@ -662,8 +662,9 @@ Only the **active bot** is polled (`getAgentTranscriptTail`, last 100 entries):
 |---|---|
 | `/help [cmd]` (`/h`, `/?`) | List commands or show one |
 | `/login gateway [url]` | Log in the active account with a gateway URL plus gateway token (token prompt is masked) |
-| `/login cursor` | Log in with a Cursor access token (masked), exchanged via EnsureSandBox |
-| `/login desktop [entry]` | Opt-in: log in with the Grok Bot desktop app's saved session (see Authentication) |
+| `/login` | When desktop session files exist: same as `/login desktop` (Cursor session, not API keys) |
+| `/login cursor` | Paste a Cursor access token (masked) → EnsureSandBox; not grok_/crsr_/xai- dashboard keys |
+| `/login desktop [entry\|open]` | Reuse the Grok Bot app's Cursor session (`gateway-descriptor` / sand-secrets). `open` launches the app for Sign in with Cursor |
 | `/logout` | Delete this account's stored credential and clear the session. Chats and memory are kept. (The gateway has no revoke call.) |
 | `/whoami` | Show the account's login details (method, gateway, header names, whether a Cursor token is stored, env override) |
 | `/search <words>` (`/find`) | Search all locally cached messages and attachments across bots (also Ctrl-F); Enter jumps to the message |
@@ -703,11 +704,11 @@ All methods are per account and stored in SQLite (see below).
    extra headers (e.g. `x-anyrun-network-token`). The Cursor token is stored too, so when the gateway answers
    **401** grokbot-tui re-exchanges once, retries, and saves the new session. Dashboard / inference API keys (`grok_…`, `crsr_…`, `xai-…`) are rejected locally before EnsureSandBox; they cannot log in for Grok Bot chat.
 
-3. **Desktop app session (opt-in)** — `/login desktop [entry]`. grokbot-tui reads the desktop app's saved session only when
+3. **Desktop app Cursor session (recommended)** — Sign in with Cursor in the Grok Bot app, then `/login desktop [entry\|open]` (or bare `/login`). grokbot-tui reads the desktop app's saved session only when
    you run this command, mirroring grok-bot-cli's `app-session.js`. It reads `gateway-descriptor.json` from the app data dir:
    - Linux: `$XDG_CONFIG_HOME/Grok Bot` or `~/.config/Grok Bot`;
    - macOS: `~/Library/Application Support/Grok Bot`;
-   - Windows: `%APPDATA%\Grok Bot`.
+   - Windows: `%APPDATA%\Grok Bot` (also checks `%LOCALAPPDATA%\Grok Bot` when Roaming has no session).
 
    Both descriptor formats are supported: v1 `{version, encrypted}` and v2 `{version: 2, entries}`. When a v2 file has
    several entries, grokbot-tui lists them and you choose one with `/login desktop <entry>`. The payload is Chromium Safe Storage:

@@ -21,7 +21,9 @@ grokbot-tui is a terminal client for Grok Bot (unofficial, uses an undocumented 
 
 Getting started
   1. Sign in to the Grok Bot desktop app once.
-  2. Run /login desktop  (recommended — no token copying).
+  2. Sign in with Cursor in the Grok Bot desktop app (browser), then /login desktop
+     (reuses the app's Cursor session — not a dashboard API key). Use
+     /login desktop open to launch the app when you still need the sign-in UI.
   3. Pick a bot in the left sidebar and type a message.
 
 Plain text is sent to the active bot. Lines starting with / are commands.
@@ -84,7 +86,10 @@ Never blocks the UI
 Each grokbot-tui account logs in once; the login is stored in ~/.grokbot-tui/context.db for that account only.
 
 Which method?
-  ★ /login desktop  RECOMMENDED. Uses the Grok Bot desktop app's saved session.
+  ★ /login desktop  RECOMMENDED. Reuses the Grok Bot app's Cursor session
+                    (gateway-descriptor, or sand-secrets → EnsureSandBox).
+  /login            Same as /login desktop when those files exist.
+  /login desktop open  Launch the desktop app so you can Sign in with Cursor.
                     Requires the app installed and signed in on this computer.
     /login cursor   Paste a Cursor access token; grokbot-tui exchanges it for a gateway session.
                     Getting this token by hand is not documented — use /login desktop.
@@ -106,12 +111,14 @@ Credentials are only sent to allowed hosts (see /help env, GROKBOT_ALLOW_LOCAL_G
         id: "login-desktop",
         title: "/login desktop (recommended)",
         body: "\
-Usage: /login desktop [entry]
+Usage: /login desktop [entry|open]
 
 Steps
   1. Install the Grok Bot desktop app and sign in once.
   2. Linux only: install secret-tool (package libsecret-tools) and keep your keyring unlocked.
-  3. Run /login desktop. grokbot-tui reads the app's saved session, checks it by listing bots,
+  3. Run /login desktop (or bare /login when the session files exist). grokbot-tui reads the
+     app's saved Cursor session — the same gateway-descriptor / sand-secrets files the app
+     writes after Sign in with Cursor — and checks it by listing bots,
      and saves it to the active grokbot-tui account.
 
 What grokbot-tui reads (only when you run this command, or on a 401 for a desktop-login account)
@@ -119,9 +126,12 @@ What grokbot-tui reads (only when you run this command, or on a 401 for a deskto
     Linux    $XDG_CONFIG_HOME/Grok Bot  or  ~/.config/Grok Bot
     macOS    ~/Library/Application Support/Grok Bot
     Windows  %APPDATA%\\Grok Bot
-  1st choice: gateway-descriptor.json (a ready gateway session).
+  1st choice: gateway-descriptor.json (ready gateway session from the app's Cursor login).
   Fallback:   sand-secrets.json → cursor-accounts → Cursor access token, exchanged via
               EnsureSandBox like /login cursor. That token is not stored by grokbot-tui.
+  Header shows desktop·descriptor or desktop·sand so you can see which path was used.
+  /login desktop open launches the app when you still need to Sign in with Cursor.
+  Dashboard API keys (grok_/crsr_/xai-) are never this path.
   Decryption uses the OS keychain: secret-tool on Linux, the Keychain item
   'Grok Bot Safe Storage' on macOS, DPAPI on Windows. Nothing is printed or logged.
 

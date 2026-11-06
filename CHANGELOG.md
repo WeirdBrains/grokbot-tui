@@ -6,20 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.41.6] - 2026-11-06
+
 ### Added
+- Login: `/login` (bare) uses the desktop Cursor session when session files
+  exist; `/login desktop open` launches the Grok Bot app for Sign in with
+  Cursor. Header/`whoami` show `desktop·descriptor` vs `desktop·sand`.
 - Login: classify pasted `/login cursor` secrets by prefix (`grok_`, `crsr_`,
-  `xai-`/`xai_`). Dashboard and xAI inference API keys are rejected locally with
-  a clear unsupported message before EnsureSandBox; they are never stored or
-  sent. Cursor access tokens (no known dashboard prefix) still exchange as
-  before. Prefer `/login desktop`.
+  `xai-`/`xai_`). Dashboard and xAI inference API keys are rejected locally
+  before EnsureSandBox. Prefer `/login desktop`.
 
 ### Fixed
+- Login: Windows also checks `%LOCALAPPDATA%\Grok Bot` when Roaming has no
+  session; clearer NOT_SIGNED_IN guidance for desktop Cursor sign-in.
 - Release: flatten GPG `.asc` files before uploading the signatures artifact so
   `gh release create artifacts/*` does not try to upload a nested `artifacts/`
   directory.
 - Send: sandbox `sendPrompt` 502 diagnosis no longer recommends re-login with
   `/login desktop` or `/login cursor` as a fix (those sessions are Sandbox-
-  oriented). Help and login docs name which key types are unsupported for chat.
+  oriented). Login alone does not mint a non-Sandbox session.
 
 ## [1.41.5] - 2026-11-06
 

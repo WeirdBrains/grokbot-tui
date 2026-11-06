@@ -404,7 +404,18 @@ fn login(app: &mut App, args: &str) -> Result<()> {
     let mut it = args.split_whitespace();
     match (it.next(), it.next(), it.next()) {
         (None, _, _) => {
-            app.open_help("login");
+            // Same path as the desktop app: reuse its Cursor session when present.
+            if crate::app::desktop_session_files_present() {
+                app.info(
+                    "Using the Grok Bot desktop app's Cursor session (gateway-descriptor or sand-secrets → EnsureSandBox — not a dashboard API key)…".into(),
+                );
+                app.start_desktop_login(None, LoginSource::Interactive);
+            } else {
+                app.open_help("login");
+                app.info(
+                    "No desktop Cursor session found. Open the Grok Bot app, Sign in with Cursor in the browser, then /login desktop — or /login desktop open to launch the app. Dashboard keys (grok_/crsr_/xai-) cannot log in for chat.".into(),
+                );
+            }
         }
         (Some("gateway"), url, None) => {
             app.mode = InputMode::GatewayUrl;
@@ -419,15 +430,25 @@ fn login(app: &mut App, args: &str) -> Result<()> {
         (Some("cursor"), None, None) => {
             app.mode = InputMode::CursorToken;
             app.info(
-                "Paste a Cursor access token (masked). Not a dashboard key: grok_/crsr_ (Cursor API Keys) or xai- (Grok/xAI inference) are unsupported for chat login. Access tokens are exchanged via EnsureSandBox and stored for re-exchange. Empty cancels. Prefer /login desktop."
+                "Paste a Cursor access token (masked) from the desktop app's Cursor session — not a dashboard key: grok_/crsr_ (Cursor API Keys) or xai- (Grok/xAI inference). Access tokens are exchanged via EnsureSandBox. Empty cancels. Prefer /login desktop (reuses the app's saved session)."
                     .into(),
             );
         }
+        (Some("desktop"), Some("open"), None) => {
+            match crate::app::try_open_desktop_app_for_signin() {
+                Ok(msg) => app.info(msg),
+                Err(e) => app.error(e),
+            }
+        }
         (Some("desktop"), entry, None) => {
-            app.info("Reading the Grok Bot desktop app's saved session…".into());
+            app.info(
+                "Reading the Grok Bot desktop app's Cursor session (same files the app uses after Sign in with Cursor)…".into(),
+            );
             app.start_desktop_login(entry.map(str::to_string), LoginSource::Interactive);
         }
-        _ => bail!("Usage: /login gateway [url]  |  /login cursor  |  /login desktop [entry]"),
+        _ => bail!(
+            "Usage: /login  |  /login desktop [entry|open]  |  /login cursor  |  /login gateway [url]"
+        ),
     }
     Ok(())
 }
@@ -472,6 +493,16 @@ fn whoami(app: &mut App, _: &str) -> Result<()> {
     }
     if let Some(l) = app.store.load_login()? {
         lines.push(format!("stored login: {:?}", l.method).to_lowercase());
+        if l.method == crate::storage::LoginMethod::Desktop {
+            let src = app
+                .store
+                .get_pref(crate::config::PREF_DESKTOP_SOURCE)?
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "unknown".into());
+            lines.push(format!(
+                "desktop source: {src} (Grok Bot app Cursor session; not a dashboard API key)"
+            ));
+        }
         lines.push(format!("gateway: {}", l.session.gateway_url));
         if !l.session.headers.is_empty() {
             lines.push(format!(
