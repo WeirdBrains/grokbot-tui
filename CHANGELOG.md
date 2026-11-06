@@ -9,6 +9,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 ## [1.41.5] - 2026-11-06
 
 ### Fixed
+- Release: `sign-artifacts.yml` and `build-arch-packages.yml` import the GPG key
+  from the job environment instead of an unindented heredoc (that broke YAML
+  parsing, so `release.yml` could not be dispatched after 1.41.0). Signing and
+  Arch `.pkg.tar.zst` publish can run when `GPG_PRIVATE_KEY` is set.
 - Send: when `sendPrompt` returns 502 "A Sand box session is not permitted on this
   endpoint", treat it as a server-side session restriction (EnsureSandBox / Sandbox
   logins cannot use that endpoint), not an uncertain delivery. Show a diagnosis with

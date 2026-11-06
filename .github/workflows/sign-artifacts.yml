@@ -42,11 +42,10 @@ jobs:
         run: |
           set -euo pipefail
           echo "::notice::Importing GPG private key from repository secret GPG_PRIVATE_KEY"
-          # Import armored key; do not echo contents.
-          cat > "$RUNNER_TEMP/release.key" <<'EOF'
-${{ secrets.GPG_PRIVATE_KEY }}
-EOF
+          # Import armored key from the job env (mapped from the secret); do not echo contents.
+          printf '%s\n' "$GPG_PRIVATE_KEY" > "$RUNNER_TEMP/release.key"
           gpg --batch --import "$RUNNER_TEMP/release.key"
+          rm -f "$RUNNER_TEMP/release.key"
           # List keys without fingerprints to confirm presence (non-secret).
           gpg --list-secret-keys || true
           # Configure loopback pinentry in case a passphrase is set.
