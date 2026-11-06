@@ -4,6 +4,11 @@ Inline images (kitty, iTerm2, sixel, halfblocks) and the Fuzzball keyboard and g
 
 ## Images
 
+Images attached to a transcript message (your uploads and files the bot sent) draw
+inside that chat bubble, scaled to the bubble width, using the same kitty / sixel /
+iTerm2 / halfblocks path as markdown image URLs. A `[🖼 name]` placeholder stands in
+until the image loads; click it to open the viewer.
+
 Images in replies (`![alt](url)`, bare image URLs and paths) show as a placeholder,
 `[🖼 alt · cat.png · 12.0 KB]` (size for local files), followed by the URL. **Click the
 placeholder** (or `/view`, vim `O`) to open the image viewer: the image as large as the

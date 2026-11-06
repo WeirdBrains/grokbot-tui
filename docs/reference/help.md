@@ -767,7 +767,7 @@ Bots come from the gateway's listAgents. Messages come from getAgentTranscriptTa
     when idle, and every 1 s right after you send.
   • The chat you see is always rebuilt from that database. Your sent message is saved
     there first (as pending) and shows immediately; notices and errors appear in a
-    separate section below the chat and are not saved.
+    separate scrollable panel (at most 7 rows) below the chat and are not saved.
   • /bots refreshes the bot list.
 ```
 
@@ -823,6 +823,17 @@ Chat looks out of date — /reload reloads the full transcript.
 Team bot in the list but empty chat / send fails — re-login with /login cursor
   or /login desktop (needs a Cursor token) so shared agents get a viewer sessionId.
 No bots — create one in the desktop app, then /bots.
+A deleted bot still in the sidebar — /refresh rebuilds from listAgents (deleted /
+  archived agents and profile.isHiddenFromSidebar are dropped). If it still appears,
+  the gateway is still listing it.
+'sendPrompt failed: 502 A Sand box session is not permitted on this endpoint'
+  The gateway refused this login for sending. listAgents may still work. This is a
+  server-side session-type restriction on EnsureSandBox / Sandbox sessions, not a
+  local TUI bug. Re-login with /login desktop (recommended) or /login cursor, then
+  resend. grokbot-tui will not treat it as 'Delivery unknown'.
+Notices flooding the chat — they live in a scrollable panel of at most 7 rows
+  under the chat (click it, then ↑↓ / PgUp / PgDn / wheel). They never push the
+  transcript off the screen.
 Running gb prints git errors — gb is often a git alias; the command is grokbot-tui.
 ```
 

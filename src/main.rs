@@ -1044,6 +1044,39 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 app.attpanel_key(k);
                 return true;
             }
+            if app.notices_focused && !app.notices().is_empty() {
+                match k.code {
+                    KeyCode::PageUp => {
+                        app.scroll_notices(-10);
+                        return true;
+                    }
+                    KeyCode::PageDown => {
+                        app.scroll_notices(10);
+                        return true;
+                    }
+                    KeyCode::Up => {
+                        app.scroll_notices(-1);
+                        return true;
+                    }
+                    KeyCode::Down => {
+                        app.scroll_notices(1);
+                        return true;
+                    }
+                    KeyCode::Home => {
+                        app.notices_goto_top();
+                        return true;
+                    }
+                    KeyCode::End => {
+                        app.notices_goto_bottom();
+                        return true;
+                    }
+                    KeyCode::Esc => {
+                        app.notices_focused = false;
+                        return true;
+                    }
+                    _ => {}
+                }
+            }
             match k.code {
                 KeyCode::Tab
                     if !(app.focus == Focus::Input
@@ -1256,6 +1289,20 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
             MouseEventKind::ScrollDown if app.help.is_some() => app.help_scroll(3),
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
                 if app.attpanel_wheel(m.column, m.row, m.kind == MouseEventKind::ScrollDown) => {}
+            MouseEventKind::ScrollUp
+                if app
+                    .notices_area
+                    .contains(ratatui::layout::Position::new(m.column, m.row)) =>
+            {
+                app.scroll_notices(-3);
+            }
+            MouseEventKind::ScrollDown
+                if app
+                    .notices_area
+                    .contains(ratatui::layout::Position::new(m.column, m.row)) =>
+            {
+                app.scroll_notices(3);
+            }
             MouseEventKind::ScrollUp => app.scroll_up(3),
             MouseEventKind::ScrollDown => app.scroll_down(3),
             _ => {}

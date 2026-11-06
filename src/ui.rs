@@ -369,67 +369,65 @@ fn draw_header(f: &mut Frame, app: &mut App, area: Rect, kind: HeaderKind) {
     }
 }
 
-/// Reserve feed lines for an inline image: one placeholder line while it loads (or failed),
-/// else as many rows as the scaled image needs.
 #[allow(clippy::too_many_arguments)]
-fn inline_slot(
+fn push_image_into(
     app: &App,
-    lines: &mut Vec<Line<'static>>,
-    buttons: &mut Vec<Option<String>>,
-    slots: &mut Vec<crate::inline::Slot>,
+    body: &mut Vec<Line<'static>>,
+    pending: &mut Vec<(usize, crate::inline::Slot)>,
     wants: &mut Vec<String>,
     key: String,
     url: String,
     label: &str,
-    bubble: usize,
+    max_cols: usize,
     right: bool,
+    require_row: bool,
 ) {
     let size = app.inline.size_of(
         &key,
-        bubble.min(u16::MAX as usize) as u16,
+        max_cols.min(u16::MAX as usize) as u16,
         app.config.inline_max_rows,
         &app.image_picker,
     );
     if !app.inline.states.contains_key(&key) {
         wants.push(key.clone());
     }
-    let Some((cols, rows)) = size else {
-        return; // the [🖼 …] placeholder in the text stands in
+    let (cols, rows) = match size {
+        Some(s) => s,
+        None if require_row => (max_cols.min(u16::MAX as usize) as u16, 1),
+        None => return,
     };
     let mut first = Line::from(theme::image_placeholder().span(format!("[🖼 {label}]")));
     if right {
         first = first.alignment(Alignment::Right);
     }
-    slots.push(crate::inline::Slot {
-        key,
-        url,
-        line: lines.len(),
-        rows,
-        cols,
-        right,
-        media: None,
-    });
-    lines.push(first);
-    buttons.push(None);
+    pending.push((
+        body.len(),
+        crate::inline::Slot {
+            key,
+            url,
+            line: 0,
+            rows,
+            cols,
+            right,
+            media: None,
+        },
+    ));
+    body.push(first);
     for _ in 1..rows {
-        lines.push(Line::default());
-        buttons.push(None);
+        body.push(Line::default());
     }
 }
 
-/// A video, GIF or music slot: the picture (videos/GIFs, once the first frame is in) and a
-/// one-row player bar under it. Loads lazily like images.
 #[allow(clippy::too_many_arguments)]
-fn media_slot(
+fn push_media_into(
     app: &App,
-    lines: &mut Vec<Line<'static>>,
-    buttons: &mut Vec<Option<String>>,
-    slots: &mut Vec<crate::inline::Slot>,
+    body: &mut Vec<Line<'static>>,
+    pending: &mut Vec<(usize, crate::inline::Slot)>,
     media_wants: &mut Vec<(String, crate::media::Kind, String)>,
     target: &str,
     label: &str,
     kind: crate::media::Kind,
-    bubble: usize,
+    max_cols: usize,
     right: bool,
 ) {
     let key = format!("{}{target}", crate::media::PREFIX);
@@ -441,26 +439,29 @@ fn media_slot(
     } else {
         app.inline.size_of(
             &key,
-            bubble.min(u16::MAX as usize) as u16,
+            max_cols.min(u16::MAX as usize) as u16,
             app.config.inline_max_rows,
             &app.image_picker,
         )
     };
-    let (cols, rows) = size.unwrap_or(((bubble.min(60)) as u16, 0));
+    let (cols, rows) = size.unwrap_or(((max_cols.min(60)) as u16, 0));
     let icon = match kind {
         crate::media::Kind::Audio => "🎵",
         crate::media::Kind::Gif => "🖼",
         crate::media::Kind::Video => "🎞",
     };
-    slots.push(crate::inline::Slot {
-        key,
-        url: target.to_string(),
-        line: lines.len(),
-        rows,
-        cols,
-        right,
-        media: Some(kind),
-    });
+    pending.push((
+        body.len(),
+        crate::inline::Slot {
+            key,
+            url: target.to_string(),
+            line: 0,
+            rows,
+            cols,
+            right,
+            media: Some(kind),
+        },
+    ));
     for i in 0..=rows {
         let mut l = if i == 0 {
             Line::from(theme::image_placeholder().span(format!("[{icon} {label}]")))
@@ -470,8 +471,7 @@ fn media_slot(
         if right {
             l = l.alignment(Alignment::Right);
         }
-        lines.push(l);
-        buttons.push(None);
+        body.push(l);
     }
 }
 
@@ -896,6 +896,112 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                 .filter(|(mk, _)| *mk == k)
                 .map(|(_, em)| em.as_str())
                 .collect();
+            // Attachments and markdown media go into `body` before the bubble is
+            // wrapped, so they render inside it (alongside the text).
+            let mut pending_slots: Vec<(usize, crate::inline::Slot)> = vec![];
+            let mut pending_chips: Vec<(usize, Vec<ColHit>)> = vec![];
+            if chat {
+                let atts = app.entry_attachments(&k);
+                if !atts.is_empty() {
+                    let (l, hits) = crate::attach::sent_line(&atts, cwidth);
+                    let chip_at = body.len();
+                    body.push(l);
+                    if !hits.is_empty() {
+                        pending_chips.push((chip_at, hits));
+                    }
+                    if app.config.media_inline {
+                        for a in atts.iter() {
+                            let Some(kind) = crate::media::kind_of(&a.name) else {
+                                continue;
+                            };
+                            push_media_into(
+                                app,
+                                &mut body,
+                                &mut pending_slots,
+                                &mut media_wants,
+                                &format!("{}{}", crate::attach::SCHEME, a.path),
+                                &a.name,
+                                kind,
+                                cwidth,
+                                mine_side,
+                            );
+                        }
+                    }
+                    if app.config.images_inline {
+                        for a in atts.iter().filter(|a| {
+                            a.is_image()
+                                && !(app.config.media_inline
+                                    && crate::media::kind_of(&a.name).is_some())
+                        }) {
+                            let key = format!("{}{}", crate::attach::SCHEME, a.path);
+                            let url = app
+                                .fresh_read(&a.path)
+                                .map(|r| r.url.clone())
+                                .unwrap_or_default();
+                            push_image_into(
+                                app,
+                                &mut body,
+                                &mut pending_slots,
+                                &mut wants,
+                                key,
+                                url,
+                                &a.name,
+                                cwidth,
+                                mine_side,
+                                true,
+                            );
+                        }
+                    }
+                }
+                if e.kind == EntryKind::Bot && app.config.media_inline {
+                    for o in crate::markdown::openables(&e.text) {
+                        let Some(kind) = crate::media::kind_of(&o.url) else {
+                            continue;
+                        };
+                        if atts.iter().any(|a| a.path == o.url || a.name == o.label) {
+                            continue;
+                        }
+                        let label = if o.label.trim().is_empty() || o.label == o.url {
+                            crate::download::save_name(&o.url)
+                        } else {
+                            o.label.clone()
+                        };
+                        push_media_into(
+                            app,
+                            &mut body,
+                            &mut pending_slots,
+                            &mut media_wants,
+                            &o.url,
+                            &label,
+                            kind,
+                            cwidth,
+                            false,
+                        );
+                    }
+                }
+                if e.kind == EntryKind::Bot && app.config.images_inline {
+                    for o in crate::markdown::openables(&e.text).into_iter().filter(|o| {
+                        o.image
+                            && !(app.config.media_inline && crate::media::kind_of(&o.url).is_some())
+                    }) {
+                        if atts.iter().any(|a| a.path == o.url || a.name == o.label) {
+                            continue;
+                        }
+                        push_image_into(
+                            app,
+                            &mut body,
+                            &mut pending_slots,
+                            &mut wants,
+                            o.url.clone(),
+                            o.url,
+                            &o.label,
+                            cwidth,
+                            false,
+                            false,
+                        );
+                    }
+                }
+            }
             let wrapped = chat && body.len() > 1;
             if wrapped {
                 // Reactions ride the bubble's top border, at its top-right corner.
@@ -906,6 +1012,14 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                 for h in heads.iter_mut() {
                     h.0 += 1;
                 }
+            }
+            let shift = usize::from(wrapped); // top border inserted at index 1
+            for (idx, mut slot) in pending_slots {
+                slot.line = lines.len() + idx + shift;
+                slots.push(slot);
+            }
+            for (idx, hits) in pending_chips {
+                dl.push((lines.len() + idx + shift, hits));
             }
             for (hi, hits) in code_dl {
                 let (row, sh) = if wrapped {
@@ -942,102 +1056,6 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
                         lines.push(l);
                         buttons.push(None);
                     }
-                }
-            }
-            if e.kind == EntryKind::User {
-                let k = crate::emoji::message_key(e.kind as u8, &e.text);
-                let atts = app.entry_attachments(&k);
-                if !atts.is_empty() {
-                    let (l, hits) = crate::attach::sent_line(&atts, inner_w);
-                    dl.push((lines.len(), hits));
-                    lines.push(l);
-                    buttons.push(None);
-                    if app.config.media_inline {
-                        for a in atts.iter() {
-                            let Some(kind) = crate::media::kind_of(&a.name) else {
-                                continue;
-                            };
-                            media_slot(
-                                app,
-                                &mut lines,
-                                &mut buttons,
-                                &mut slots,
-                                &mut media_wants,
-                                &format!("{}{}", crate::attach::SCHEME, a.path),
-                                &a.name,
-                                kind,
-                                bubble,
-                                true,
-                            );
-                        }
-                    }
-                    if app.config.images_inline {
-                        for a in atts.iter().filter(|a| {
-                            a.is_image()
-                                && !(app.config.media_inline
-                                    && crate::media::kind_of(&a.name).is_some())
-                        }) {
-                            let key = format!("{}{}", crate::attach::SCHEME, a.path);
-                            let url = app
-                                .fresh_read(&a.path)
-                                .map(|r| r.url.clone())
-                                .unwrap_or_default();
-                            inline_slot(
-                                app,
-                                &mut lines,
-                                &mut buttons,
-                                &mut slots,
-                                &mut wants,
-                                key,
-                                url,
-                                &a.name,
-                                bubble,
-                                true,
-                            );
-                        }
-                    }
-                }
-            }
-            if e.kind == EntryKind::Bot && app.config.media_inline {
-                for o in crate::markdown::openables(&e.text) {
-                    let Some(kind) = crate::media::kind_of(&o.url) else {
-                        continue;
-                    };
-                    let label = if o.label.trim().is_empty() || o.label == o.url {
-                        crate::download::save_name(&o.url)
-                    } else {
-                        o.label.clone()
-                    };
-                    media_slot(
-                        app,
-                        &mut lines,
-                        &mut buttons,
-                        &mut slots,
-                        &mut media_wants,
-                        &o.url,
-                        &label,
-                        kind,
-                        bubble,
-                        false,
-                    );
-                }
-            }
-            if e.kind == EntryKind::Bot && app.config.images_inline {
-                for o in crate::markdown::openables(&e.text).into_iter().filter(|o| {
-                    o.image && !(app.config.media_inline && crate::media::kind_of(&o.url).is_some())
-                }) {
-                    inline_slot(
-                        app,
-                        &mut lines,
-                        &mut buttons,
-                        &mut slots,
-                        &mut wants,
-                        o.url.clone(),
-                        o.url,
-                        &o.label,
-                        bubble,
-                        false,
-                    );
                 }
             }
             if e.kind == EntryKind::Bot {
@@ -1097,37 +1115,39 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
             app.media_want(&k, kind, &label);
         }
     }
-    let mut extra: Vec<Line<'static>> = vec![];
     let cache_empty = app.feed_cache.as_ref().is_some_and(|c| c.lines.is_empty());
     let cache_rows_sum: usize = app
         .feed_cache
         .as_ref()
         .map(|c| c.rows.iter().sum())
         .unwrap_or(0);
-    if !app.notices().is_empty() {
-        if !cache_empty {
-            extra.push(Line::default());
-            extra.push(theme::muted().line("── notices (not saved) ──"));
-        }
-        extra.extend(
-            app.notices()
-                .iter()
-                .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref(), None)),
-        );
-    }
-    if cache_empty && extra.is_empty() {
+    let mut extra: Vec<Line<'static>> = vec![];
+    if cache_empty && app.notices().is_empty() {
         extra = empty_state(app)
             .into_iter()
             .map(|t| theme::muted().line(t))
             .collect();
     }
     let extra_rows = row_counts(&extra, inner_w);
-    // Exact wrapped height (word wrap can need more rows than width/cols), so
-    // "scrolled to bottom" really shows the newest line.
-    let total = cache_rows_sum + extra_rows.iter().sum::<usize>();
+    let extra_sum: usize = extra_rows.iter().sum();
+
+    let mut notice_lines: Vec<Line<'static>> = vec![];
+    if !app.notices().is_empty() {
+        notice_lines.extend(
+            app.notices()
+                .iter()
+                .flat_map(|e| entry_lines(e.kind, &e.text, bot_name.as_deref(), None)),
+        );
+    }
+    let notice_row_counts = row_counts(&notice_lines, inner_w);
+    let notice_total = notice_row_counts.iter().copied().sum::<usize>() as u16;
+    let panel_h = notices_panel_height(notice_total, inner_h);
+    let feed_h = inner_h.saturating_sub(panel_h);
+    // Exact wrapped height of the chat feed only (notices have their own panel).
+    let total = cache_rows_sum + extra_sum;
     let total_u = total.min(u16::MAX as usize) as u16;
-    app.apply_body_layout(total_u, inner_h);
-    let max_off = total_u.saturating_sub(inner_h);
+    app.apply_body_layout(total_u, feed_h);
+    let max_off = total_u.saturating_sub(feed_h);
     if let Some(i) = app.pending_jump.take() {
         let cache = app.feed_cache.as_ref().expect("built above");
         if let Some(&line) = cache.starts.get(i) {
@@ -1144,10 +1164,15 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         cache.lines.iter().chain(&extra),
         cache.rows.iter().chain(&extra_rows).copied(),
         off as usize,
-        inner_h as usize,
+        feed_h as usize,
     );
     app.body_plain = crate::select::plain_text(app.feed());
-    app.body_inner = inner;
+    app.body_inner = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: feed_h,
+    };
     app.body_row_off = off as usize;
     let title = match &bot_name {
         Some(n) if app.is_typing() => {
@@ -1164,14 +1189,56 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         Some(n) => format!(" Chat: {n} "),
         None => " Output ".into(),
     };
+    f.render_widget(chat_block.title(title), body);
     f.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
-            .scroll((skip as u16, 0))
-            .block(chat_block.title(title)),
-        body,
+            .scroll((skip as u16, 0)),
+        app.body_inner,
     );
     app.scroll = scroll;
+    if panel_h > 0 {
+        let header = theme::muted().line("── notices (not saved) ──");
+        let header_h = 1u16;
+        let view_h = panel_h.saturating_sub(header_h);
+        let max_n = notice_total.saturating_sub(view_h);
+        if app.notices_follow {
+            app.notices_scroll = max_n;
+        }
+        app.notices_scroll = app.notices_scroll.min(max_n);
+        let (nlines, nskip) = visible_lines(
+            notice_lines.iter(),
+            notice_row_counts.iter().copied(),
+            app.notices_scroll as usize,
+            view_h as usize,
+        );
+        let nrect = Rect {
+            x: inner.x,
+            y: inner.y.saturating_add(feed_h),
+            width: inner.width,
+            height: panel_h,
+        };
+        app.notices_area = nrect;
+        f.render_widget(
+            Paragraph::new(header),
+            Rect {
+                height: header_h,
+                ..nrect
+            },
+        );
+        f.render_widget(
+            Paragraph::new(nlines)
+                .wrap(Wrap { trim: false })
+                .scroll((nskip as u16, 0)),
+            Rect {
+                y: nrect.y.saturating_add(header_h),
+                height: view_h,
+                ..nrect
+            },
+        );
+    } else {
+        app.notices_area = Rect::default();
+    }
     // Selection highlight: only the selected cells of message text (1.30.0).
     if let Some(sel) = app.body_sel.clone().filter(|s| !s.is_empty())
         && let Some(cache) = app.feed_cache.as_ref()
@@ -2044,6 +2111,21 @@ pub fn bubble_block(text: &str, max: usize) -> Vec<String> {
 /// Widest a chat message's text may be: 2/3 of the chat body's inner width.
 pub fn bubble_width(inner_w: usize) -> usize {
     (inner_w * 2 / 3).max(1)
+}
+
+/// Maximum height of the chat notices panel, including the header row.
+pub const NOTICES_PANEL_MAX_ROWS: u16 = 7;
+
+/// Rows reserved for the notices panel: 0 when empty, otherwise header + content
+/// capped at [`NOTICES_PANEL_MAX_ROWS`], and never so tall that the chat vanishes.
+pub fn notices_panel_height(content_rows: u16, inner_h: u16) -> u16 {
+    if content_rows == 0 {
+        return 0;
+    }
+    let wanted = content_rows.saturating_add(1); // + "── notices ──" header
+    wanted
+        .min(NOTICES_PANEL_MAX_ROWS)
+        .min(inner_h.saturating_sub(2).max(1))
 }
 
 /// Word-wrap `text` to `width` display columns (long words are split). Keeps blank lines.
@@ -3198,6 +3280,19 @@ pub(crate) mod tests {
 
 #[cfg(test)]
 mod copy_tests {
+
+    #[test]
+    fn notices_panel_height_caps_at_seven_and_leaves_chat_room() {
+        assert_eq!(super::notices_panel_height(0, 40), 0);
+        assert_eq!(super::notices_panel_height(1, 40), 2);
+        assert_eq!(
+            super::notices_panel_height(20, 40),
+            super::NOTICES_PANEL_MAX_ROWS
+        );
+        assert_eq!(super::notices_panel_height(20, 5), 3);
+        assert_eq!(super::notices_panel_height(3, 2), 1);
+    }
+
     use crate::app::{App, Entry, EntryKind};
     use ratatui::{Terminal, backend::TestBackend};
 

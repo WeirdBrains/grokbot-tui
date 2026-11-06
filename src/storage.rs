@@ -777,8 +777,12 @@ impl Store {
 
     /// Upsert the bot list for the active account (removed bots are kept so history survives).
     pub fn save_bots(&self, bots: &[Bot]) -> Result<()> {
+        // Upsert the live list, then delete rows the gateway no longer has. A
+        // delete-all-then-insert would CASCADE-wipe messages (and memory) for
+        // bots that are still present.
+        let tx = self.conn.unchecked_transaction()?;
         for b in bots {
-            self.conn.execute(
+            tx.execute(
                 "INSERT INTO bots(account_id, bot_id, name, description, hidden, is_group, team, viewer_session_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(account_id, bot_id) DO UPDATE SET name = excluded.name, description = excluded.description,
@@ -796,6 +800,26 @@ impl Store {
                 ],
             )?;
         }
+        if bots.is_empty() {
+            tx.execute(
+                "DELETE FROM bots WHERE account_id = ?1",
+                params![self.account.id],
+            )?;
+        } else {
+            let placeholders = (2..=bots.len() + 1)
+                .map(|i| format!("?{i}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "DELETE FROM bots WHERE account_id = ?1 AND bot_id NOT IN ({placeholders})"
+            );
+            let mut stmt = tx.prepare(&sql)?;
+            let mut vals: Vec<&dyn rusqlite::ToSql> = vec![&self.account.id];
+            let ids: Vec<&str> = bots.iter().map(|b| b.id.as_str()).collect();
+            vals.extend(ids.iter().map(|s| s as &dyn rusqlite::ToSql));
+            stmt.execute(vals.as_slice())?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1857,6 +1881,40 @@ mod tests {
         s.clear_messages("a").unwrap();
         assert!(s.messages("a").unwrap().is_empty());
         assert!(s.set_pref("active_account", "x").is_err());
+    }
+
+    #[test]
+    fn save_bots_replaces_the_account_set_and_drops_removed_ids() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Store::open(d.path(), None).unwrap();
+        s.save_bots(&[
+            Bot {
+                id: "keep".into(),
+                name: "Keep".into(),
+                ..Default::default()
+            },
+            Bot {
+                id: "gone".into(),
+                name: "Grokbot-cli".into(),
+                ..Default::default()
+            },
+        ])
+        .unwrap();
+        assert_eq!(s.bots().unwrap().len(), 2);
+        s.save_bots(&[Bot {
+            id: "keep".into(),
+            name: "Keep".into(),
+            ..Default::default()
+        }])
+        .unwrap();
+        let left = s.bots().unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].id, "keep");
+        assert!(
+            !left
+                .iter()
+                .any(|b| b.id == "gone" || b.name == "Grokbot-cli")
+        );
     }
 
     fn texts(s: &Store, bot: &str) -> Vec<String> {

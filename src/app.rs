@@ -532,6 +532,14 @@ pub struct App {
     /// bot id ("" when no bot is active). Never stored, never mixed into the feed;
     /// rendered in their own section below it.
     pub notices: HashMap<String, Vec<Entry>>,
+    /// Scroll offset (from the top) of the capped notices panel.
+    pub notices_scroll: u16,
+    /// Stick the notices panel to the newest line when new notices arrive.
+    pub notices_follow: bool,
+    /// True after a click in the notices panel (arrow/page keys scroll it).
+    pub notices_focused: bool,
+    /// Hit area of the notices panel (set by the renderer).
+    pub notices_area: Rect,
     pub input: String,
     /// Byte offset of the cursor in `input`.
     pub input_cursor: usize,
@@ -894,6 +902,10 @@ impl App {
             logs: HashMap::new(),
             reaction_cache: None,
             notices: HashMap::new(),
+            notices_scroll: 0,
+            notices_follow: true,
+            notices_focused: false,
+            notices_area: Rect::default(),
             input: String::new(),
             input_cursor: 0,
             input_scroll: 0,
@@ -1605,6 +1617,19 @@ impl App {
                             },
                         );
                     }
+                    // Sandbox-session 502: the gateway refused this login for sendPrompt.
+                    // That is not an uncertain delivery — do not poll promptAcceptanceStatus.
+                    Err(e) if crate::api::sandbox_send_blocked(&e) => {
+                        self.push_to(
+                            &bot,
+                            Entry {
+                                kind: EntryKind::Error,
+                                text: format!(
+                                    "Send failed: {e} This is a server-side restriction on the current session (EnsureSandBox / Sandbox logins are not permitted on sendPrompt), not a local TUI bug. Re-login with /login desktop (recommended) or /login cursor, then resend. The message was not accepted."
+                                ),
+                            },
+                        );
+                    }
                     // Network / 5xx / team-session errors: show the error, then ask whether it landed.
                     Err(e) => {
                         self.push_to(
@@ -1712,7 +1737,10 @@ impl App {
         {
             l.session = s;
             if self.store.save_login(&l).is_ok() {
-                self.info("Gateway session refreshed via Cursor token.".into());
+                const MSG: &str = "Gateway session refreshed via Cursor token.";
+                if !self.notices().iter().any(|e| e.text == MSG) {
+                    self.info(MSG.into());
+                }
             }
         }
     }
@@ -1789,6 +1817,9 @@ impl App {
         self.sidebar_cursor = 0;
         self.logs.clear();
         self.notices.clear();
+        self.notices_scroll = 0;
+        self.notices_follow = true;
+        self.notices_focused = false;
         self.awaiting.clear();
         self.follow_bottom();
         self.poll = PollState {
@@ -2718,6 +2749,7 @@ impl App {
         if n.len() > MAX_NOTICES {
             n.drain(..n.len() - MAX_NOTICES);
         }
+        self.notices_follow = true;
         if key == self.key() && !self.follow {
             self.unread = self.unread.saturating_add(1);
         }
@@ -4212,6 +4244,14 @@ impl App {
             self.follow_bottom();
             return;
         }
+        if self.notices_area.contains(at) && self.help.is_none() && self.shell.is_none() {
+            self.notices_focused = true;
+            self.body_sel = None;
+            return;
+        }
+        if self.body_area.contains(at) {
+            self.notices_focused = false;
+        }
         if self.body_area.contains(at) && self.help.is_none() && self.shell.is_none() {
             if crate::select::inside(self.body_inner, col, row)
                 && let Some(off) =
@@ -4300,6 +4340,28 @@ impl App {
         if self.scroll == 0 {
             self.follow_bottom();
         }
+    }
+
+    /// Scroll the capped notices panel. Positive `delta` moves toward newer lines
+    /// (the bottom); negative toward older ones.
+    pub fn scroll_notices(&mut self, delta: i32) {
+        self.notices_follow = false;
+        if delta > 0 {
+            self.notices_scroll = self.notices_scroll.saturating_add(delta as u16);
+        } else {
+            self.notices_scroll = self
+                .notices_scroll
+                .saturating_sub(delta.unsigned_abs() as u16);
+        }
+    }
+
+    pub fn notices_goto_top(&mut self) {
+        self.notices_follow = false;
+        self.notices_scroll = 0;
+    }
+
+    pub fn notices_goto_bottom(&mut self) {
+        self.notices_follow = true;
     }
 
     /// Jump to the newest content and resume sticking to the bottom.
@@ -6075,6 +6137,51 @@ pub mod tests {
             msgs[0].remote_id.as_deref(),
             Some("e1"),
             "transcript confirmed it landed"
+        );
+    }
+
+    #[test]
+    fn sandbox_session_502_is_not_unknown_delivery() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let server = rt.block_on(MockServer::start());
+        rt.block_on(async {
+            Mock::given(path("/api/listAgents"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(json!([{"id": "a1", "name": "A"}])),
+                )
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/sendPrompt"))
+                .respond_with(ResponseTemplate::new(502).set_body_json(json!({
+                    "error": "A Sand box session is not permitted on this endpoint."
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/getAgentTranscriptTail"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"entries": []})))
+                .mount(&server)
+                .await;
+        });
+        let (mut app, _d) = real_app(&rt, &server);
+        type_line(&mut app, &format!("/login gateway {}", server.uri()));
+        type_line(&mut app, "gw");
+        settle(&mut app);
+        type_line(&mut app, "hello there");
+        settle(&mut app);
+        let t = texts(&app).join("\n");
+        assert!(t.contains("Send failed"), "{t}");
+        assert!(
+            t.contains("not permitted") || t.contains("server-side"),
+            "{t}"
+        );
+        assert!(
+            !t.contains("Delivery unknown"),
+            "sandbox 502 must not look like an uncertain send: {t}"
+        );
+        assert!(
+            t.contains("/login desktop") || t.contains("Re-login"),
+            "{t}"
         );
     }
 }

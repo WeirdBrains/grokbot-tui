@@ -63,8 +63,94 @@ pub type Progress = std::sync::Arc<AtomicU64>;
 
 /// Attachments recorded on a raw transcript entry. The key is undocumented, so this
 /// accepts `attachmentPaths` + `attachmentNames`, or an `attachments` array of strings
-/// or objects (`path`/`alias`, `name`/`fileName`, `sizeBytes`, `contentType`).
+/// or objects (`path`/`alias`, `name`/`fileName`, `sizeBytes`, `contentType`). Also
+/// `files`/`images`/`media`, a nested `message`, and `content` parts (`type: image` etc.).
 pub fn attachments_from_raw(raw: &serde_json::Value) -> Vec<Attachment> {
+    let mut out = attachments_from_obj(raw);
+    if let Some(msg) = raw.get("message") {
+        extend_atts(&mut out, attachments_from_obj(msg));
+        extend_atts(&mut out, attachments_from_content(msg.get("content")));
+    }
+    extend_atts(&mut out, attachments_from_content(raw.get("content")));
+    out
+}
+
+fn extend_atts(out: &mut Vec<Attachment>, extra: Vec<Attachment>) {
+    for a in extra {
+        if !out.iter().any(|o| o.path == a.path && o.name == a.name) {
+            out.push(a);
+        }
+    }
+}
+
+fn file_base(p: &str) -> String {
+    p.rsplit(['/', '\\']).next().unwrap_or(p).to_string()
+}
+
+fn obj_str(v: &serde_json::Value, ks: &[&str]) -> Option<String> {
+    ks.iter()
+        .find_map(|k| {
+            v.get(*k)
+                .and_then(serde_json::Value::as_str)
+                .filter(|s| !s.is_empty())
+        })
+        .map(str::to_string)
+}
+
+fn attachment_from_obj(a: &serde_json::Value) -> Option<Attachment> {
+    use serde_json::Value;
+    match a {
+        Value::String(p) if !p.is_empty() => Some(Attachment {
+            name: file_base(p),
+            path: p.clone(),
+            ..Default::default()
+        }),
+        Value::Object(_) => {
+            let path = obj_str(
+                a,
+                &[
+                    "path",
+                    "alias",
+                    "attachmentPath",
+                    "storePath",
+                    "url",
+                    "src",
+                    "href",
+                    "imageUrl",
+                    "fileUrl",
+                ],
+            )
+            .or_else(|| {
+                a.get("image_url").and_then(|u| {
+                    obj_str(u, &["url", "src"]).or_else(|| u.as_str().map(str::to_string))
+                })
+            })?;
+            Some(Attachment {
+                name: obj_str(
+                    a,
+                    &[
+                        "name",
+                        "fileName",
+                        "filename",
+                        "displayName",
+                        "alt",
+                        "title",
+                    ],
+                )
+                .unwrap_or_else(|| file_base(&path)),
+                size: a
+                    .get("sizeBytes")
+                    .or_else(|| a.get("size"))
+                    .and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok())),
+                content_type: obj_str(a, &["contentType", "mimeType", "mime", "type"]),
+                path,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn attachments_from_obj(raw: &serde_json::Value) -> Vec<Attachment> {
     use serde_json::Value;
     let strs = |v: Option<&Value>| -> Vec<String> {
         v.and_then(Value::as_array)
@@ -75,7 +161,6 @@ pub fn attachments_from_raw(raw: &serde_json::Value) -> Vec<Attachment> {
             })
             .unwrap_or_default()
     };
-    let base = |p: &str| p.rsplit(['/', '\\']).next().unwrap_or(p).to_string();
     for (pk, nk) in [
         ("attachmentPaths", "attachmentNames"),
         ("attachment_paths", "attachment_names"),
@@ -87,42 +172,136 @@ pub fn attachments_from_raw(raw: &serde_json::Value) -> Vec<Attachment> {
                 .into_iter()
                 .enumerate()
                 .map(|(i, p)| Attachment {
-                    name: names.get(i).cloned().unwrap_or_else(|| base(&p)),
+                    name: names.get(i).cloned().unwrap_or_else(|| file_base(&p)),
                     path: p,
                     ..Default::default()
                 })
                 .collect();
         }
     }
-    let Some(arr) = raw.get("attachments").and_then(Value::as_array) else {
+    let mut out = vec![];
+    for key in ["attachments", "files", "images", "media"] {
+        if let Some(arr) = raw.get(key).and_then(Value::as_array) {
+            out.extend(arr.iter().filter_map(attachment_from_obj));
+        }
+    }
+    out
+}
+
+fn attachments_from_content(content: Option<&serde_json::Value>) -> Vec<Attachment> {
+    let Some(arr) = content.and_then(serde_json::Value::as_array) else {
         return vec![];
     };
-    let s = |v: &Value, ks: &[&str]| {
-        ks.iter()
-            .find_map(|k| v.get(*k).and_then(Value::as_str).filter(|s| !s.is_empty()))
-            .map(str::to_string)
-    };
     arr.iter()
-        .filter_map(|a| match a {
-            Value::String(p) => Some(Attachment {
-                name: base(p),
-                path: p.clone(),
-                ..Default::default()
-            }),
-            Value::Object(_) => {
-                let path = s(a, &["path", "alias", "attachmentPath", "storePath", "url"])?;
-                Some(Attachment {
-                    name: s(a, &["name", "fileName", "filename", "displayName"])
-                        .unwrap_or_else(|| base(&path)),
-                    size: a
-                        .get("sizeBytes")
-                        .or_else(|| a.get("size"))
-                        .and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok())),
-                    content_type: s(a, &["contentType", "mimeType", "mime"]),
-                    path,
-                })
-            }
+        .filter(|p| {
+            let kind = obj_str(p, &["type", "kind", "contentType", "mimeType"])
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            kind.contains("image")
+                || kind.contains("video")
+                || kind.contains("audio")
+                || kind.contains("gif")
+                || kind == "file"
+                || kind == "attachment"
+                || kind == "media"
+                || kind == "photo"
+                || p.get("url").is_some() && kind.is_empty() && attachment_from_obj(p).is_some()
+        })
+        .filter_map(attachment_from_obj)
+        .collect()
+}
+
+/// A 502 (or similar) whose body says a Sandbox session cannot call `sendPrompt`.
+/// That is a server-side session-type restriction, not an uncertain delivery.
+pub fn sandbox_send_blocked(err: &gw::Error) -> bool {
+    let msg = err.to_string().to_ascii_lowercase();
+    (msg.contains("sand box session") || msg.contains("sandbox session"))
+        && msg.contains("not permitted")
+}
+
+fn as_truthy(v: &serde_json::Value) -> Option<bool> {
+    match v {
+        serde_json::Value::Bool(b) => Some(*b),
+        serde_json::Value::Number(n) => n.as_u64().map(|n| n != 0),
+        serde_json::Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" => Some(true),
+            "false" | "0" | "no" | "" => Some(false),
             _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn flag_in(raw: &serde_json::Value, keys: &[&str]) -> Option<bool> {
+    let look = |v: &serde_json::Value| keys.iter().find_map(|k| v.get(*k).and_then(as_truthy));
+    look(raw).or_else(|| raw.get("profile").and_then(look))
+}
+
+/// True when listAgents (or its `profile`) marks the agent deleted/archived.
+pub fn agent_is_gone(raw: &serde_json::Value) -> bool {
+    if flag_in(
+        raw,
+        &[
+            "isDeleted",
+            "deleted",
+            "isArchived",
+            "archived",
+            "isRemoved",
+            "removed",
+        ],
+    ) == Some(true)
+    {
+        return true;
+    }
+    let stamp = raw
+        .get("deletedAt")
+        .or_else(|| raw.get("deleted_at"))
+        .or_else(|| raw.get("profile").and_then(|p| p.get("deletedAt")));
+    if stamp.is_some_and(|v| !v.is_null() && v.as_str() != Some("")) {
+        return true;
+    }
+    let status = raw
+        .get("status")
+        .or_else(|| raw.get("state"))
+        .or_else(|| raw.get("visibility"))
+        .or_else(|| raw.get("profile").and_then(|p| p.get("status")))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    status.contains("deleted")
+        || status.contains("archived")
+        || status.contains("removed")
+        || status.contains("trashed")
+}
+
+/// Extra hidden-from-sidebar keys, including nested `profile` (desktop hide).
+pub fn agent_marked_hidden(raw: &serde_json::Value) -> bool {
+    flag_in(
+        raw,
+        &[
+            "isHiddenFromSidebar",
+            "hiddenFromSidebar",
+            "isHidden",
+            "hidden",
+            "hideFromSidebar",
+            "removedFromSidebar",
+        ],
+    ) == Some(true)
+}
+
+/// Own-box agents from a raw `listAgents` body, dropping deleted/archived ones
+/// and honouring hidden flags on the agent or its `profile`.
+pub fn bots_from_agents_raw(raw: &serde_json::Value) -> Vec<Bot> {
+    raw_agents(raw)
+        .iter()
+        .filter(|v| !agent_is_gone(v))
+        .filter_map(|v| {
+            let a = gw::Agent::from_value(v)?;
+            let mut b = bot_from_agent(&a);
+            if agent_marked_hidden(v) {
+                b.hidden = true;
+            }
+            Some(b)
         })
         .collect()
 }
@@ -692,7 +871,8 @@ pub fn messages_from_entries(entries: &[gw::Entry]) -> Vec<Message> {
             Some(c) => c.summary(),
             None => gw::sanitize_text(&e.text),
         };
-        if text.trim().is_empty() {
+        let attachments = attachments_from_raw(&e.raw);
+        if text.trim().is_empty() && attachments.is_empty() {
             continue;
         }
         out.push(Message {
@@ -703,7 +883,7 @@ pub fn messages_from_entries(entries: &[gw::Entry]) -> Vec<Message> {
             },
             text,
             remote_id: e.id.clone(),
-            attachments: attachments_from_raw(&e.raw),
+            attachments,
         });
     }
     out
@@ -763,11 +943,7 @@ impl ApiClient for GatewayApi {
             .call_raw("listAgents", serde_json::json!({}))
             .await?;
         *self.signals.lock().unwrap() = signals_from_raw(&raw);
-        let own: Vec<Bot> = raw_agents(&raw)
-            .iter()
-            .filter_map(gw::Agent::from_value)
-            .map(|a| bot_from_agent(&a))
-            .collect();
+        let own = bots_from_agents_raw(&raw);
         match self.client.list_team_agents().await {
             Ok(Some(team)) => {
                 let bots = merge_team_bots(own, &team);
@@ -1717,6 +1893,73 @@ mod tests {
             diff_bots(&old[..1], &[b("a", "A"), b("r", "ratatoskn")]).notice(),
             "Bot list refreshed: 1 new (ratatoskn)"
         );
+    }
+
+    #[test]
+    fn attachments_from_raw_reads_content_parts_and_nested_message() {
+        let raw = json!({
+            "kind": "send-message",
+            "content": [
+                {"type": "text", "text": "see this"},
+                {"type": "image", "url": "https://example.test/cat.png", "name": "cat.png"}
+            ]
+        });
+        let a = attachments_from_raw(&raw);
+        assert_eq!(a.len(), 1);
+        assert_eq!(a[0].name, "cat.png");
+        assert_eq!(a[0].path, "https://example.test/cat.png");
+
+        let raw = json!({
+            "message": {
+                "attachments": [{"alias": "store/1", "fileName": "shot.jpg", "contentType": "image/jpeg"}]
+            }
+        });
+        let a = attachments_from_raw(&raw);
+        assert_eq!(a[0].path, "store/1");
+        assert_eq!(a[0].name, "shot.jpg");
+        assert!(a[0].is_image());
+    }
+
+    #[test]
+    fn attachment_only_transcript_entries_are_kept() {
+        let msgs = messages_from_entries(&[gw::Entry::from_value(&json!({
+            "id": "img",
+            "kind": "user-prompt",
+            "content": [{"type": "image", "url": "https://example.test/x.png", "name": "x.png"}]
+        }))]);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].attachments.len(), 1);
+        assert_eq!(msgs[0].attachments[0].name, "x.png");
+    }
+
+    #[test]
+    fn bots_from_agents_raw_drops_deleted_and_hides_profile_hidden() {
+        let raw = json!({"agents": [
+            {"id": "keep", "name": "Keep"},
+            {"id": "gone", "name": "Gone", "isDeleted": true},
+            {"id": "arch", "name": "Arch", "status": "archived"},
+            {"id": "hid", "name": "Hidden", "profile": {"isHiddenFromSidebar": true}},
+            {"id": "stamp", "name": "Stamp", "deletedAt": "2026-11-01T00:00:00Z"}
+        ]});
+        let bots = bots_from_agents_raw(&raw);
+        let names: Vec<_> = bots.iter().map(|b| (b.name.as_str(), b.hidden)).collect();
+        assert_eq!(names, vec![("Keep", false), ("Hidden", true)]);
+    }
+
+    #[test]
+    fn sandbox_send_blocked_detects_gateway_wording() {
+        let e = gw::Error::Http {
+            method: "sendPrompt".into(),
+            status: 502,
+            message: "A Sand box session is not permitted on this endpoint.".into(),
+        };
+        assert!(sandbox_send_blocked(&e));
+        let ok = gw::Error::Http {
+            method: "sendPrompt".into(),
+            status: 502,
+            message: "bad gateway".into(),
+        };
+        assert!(!sandbox_send_blocked(&ok));
     }
 
     #[test]

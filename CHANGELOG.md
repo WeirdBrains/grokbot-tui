@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.41.5] - 2026-11-06
+
+### Fixed
+- Send: when `sendPrompt` returns 502 "A Sand box session is not permitted on this
+  endpoint", treat it as a server-side session restriction (EnsureSandBox / Sandbox
+  logins cannot use that endpoint), not an uncertain delivery. Show a diagnosis with
+  a `/login desktop` (or `/login cursor`) re-login path, and do not follow up with
+  "Delivery unknown". Other 5xx sends are unchanged.
+- Sidebar: deleted/archived agents are dropped on refresh (`isDeleted`, `deletedAt`,
+  `status: archived/removed`, including nested `profile` flags). Hidden-from-sidebar
+  flags on the agent or its `profile` are honoured. The local bot cache now replaces
+  the account's set on save, so a removed bot cannot reappear from stale SQLite rows.
+- Chat: images and other media attached to a message (including attachment-only
+  transcript entries and bot attachments, not just markdown URLs) render inside the
+  bubble, using the existing kitty/sixel/iTerm2/halfblock inline path.
+
+### Changed
+- Notices under the chat live in their own scrollable panel capped at 7 rows
+  (header plus up to 6 lines of text). Wheel over the panel, or click it and use
+  ↑↓ / PgUp / PgDn / Home / End. They no longer grow into the transcript or push
+  chat off the screen. Repeated "Gateway session refreshed via Cursor token."
+  notices are shown once per view until they are cleared.
+
 ## [1.41.4] - 2026-11-06
 
 ### Added

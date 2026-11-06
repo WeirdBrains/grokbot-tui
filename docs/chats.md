@@ -48,8 +48,7 @@ lists): headings, **bold**, *italic*, `inline code`, fenced code blocks (a shade
 the language label; no syntax highlighting yet), bullet and numbered lists with nesting,
 `☑`/`☐` task items, `│` blockquotes, links as `label <url>`, box-drawn tables (columns shrink
 and cells end in `…` when the chat is narrow) and `---` rules. Lines are wrapped before
-drawing, so scrolling and the bottom-follow stay exact. Your own messages and notices stay
-plain text. Theme parts: `md_heading`, `md_code`, `md_code_block`, `md_quote`, `md_link`,
+drawing, so scrolling and the bottom-follow stay exact. Your own messages stay plain text. Notices and errors sit in a scrollable panel under the chat, at most 7 rows (click it, then ↑↓ / PgUp / wheel). Theme parts: `md_heading`, `md_code`, `md_code_block`, `md_quote`, `md_link`,
 `md_list_marker`, `md_rule` (also link URLs), `md_table_border`.
 
 ### Links
