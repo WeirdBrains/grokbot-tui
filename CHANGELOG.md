@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Fixed
+- Release: flatten GPG `.asc` files before uploading the signatures artifact so
+  `gh release create artifacts/*` does not try to upload a nested `artifacts/`
+  directory.
+
 ## [1.41.5] - 2026-11-06
 
 ### Fixed

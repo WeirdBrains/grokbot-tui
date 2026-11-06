@@ -99,11 +99,20 @@ jobs:
           echo "GPG signing is not configured for this repository; skipping."
           echo "Set repo secrets GPG_PRIVATE_KEY (armored private key) and optionally GPG_PASSPHRASE to enable artifact signatures." > SIGNING_NOT_CONFIGURED.txt
 
+      - name: Flatten signatures for upload
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p signatures-out
+          find artifacts -name '*.asc' -type f -exec cp {} signatures-out/ \;
+          if [ -f SIGNING_NOT_CONFIGURED.txt ]; then
+            cp SIGNING_NOT_CONFIGURED.txt signatures-out/
+          fi
+          ls -l signatures-out || true
+
       - name: Upload signatures (and note if unsigned)
         uses: actions/upload-artifact@v7
         with:
           name: artifacts-signatures
-          path: |
-            artifacts/**/*.asc
-            SIGNING_NOT_CONFIGURED.txt
+          path: signatures-out/*
           if-no-files-found: warn
