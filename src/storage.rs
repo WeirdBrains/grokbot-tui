@@ -1082,12 +1082,18 @@ impl Store {
                     &[&id, &bot_id, &role, &m.text],
                 )?
             };
-            if let Some((rowid, _)) = found
-                && !m.attachments.is_empty()
-            {
+            if let Some((rowid, _)) = found {
+                if !m.attachments.is_empty() {
+                    self.conn.execute(
+                        "UPDATE messages SET attachments = ?2 WHERE id = ?1",
+                        params![rowid, attachments_json(&m.attachments)],
+                    )?;
+                }
+                // Re-classify stored role from the latest transcript mapping so a
+                // previously mis-attributed "you" row (e.g. an agent report) is repaired.
                 self.conn.execute(
-                    "UPDATE messages SET attachments = ?2 WHERE id = ?1",
-                    params![rowid, attachments_json(&m.attachments)],
+                    "UPDATE messages SET role = ?2 WHERE id = ?1 AND role != ?2",
+                    params![rowid, role],
                 )?;
             }
             let entry = match found {
@@ -1949,6 +1955,22 @@ mod tests {
             .collect();
         s.merge_remote("b", &full, true).unwrap();
         assert_eq!(texts(&s, "b"), ["q1", "a1", "desk", "a2", "mine", "a3"]);
+    }
+
+    #[test]
+    fn merge_remote_repairs_stored_role_for_same_id() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Store::open(d.path().join("gb"), None).unwrap();
+        // Previously ingested as "you" (old substring heuristic).
+        s.merge_remote("b", &[rmsg(Role::User, "agent report", "e-report")], false)
+            .unwrap();
+        assert_eq!(s.messages("b").unwrap()[0].role, Role::User);
+        s.merge_remote("b", &[rmsg(Role::Bot, "agent report", "e-report")], false)
+            .unwrap();
+        let msgs = s.messages("b").unwrap();
+        assert_eq!(msgs.len(), 1, "same remote id is not duplicated");
+        assert_eq!(msgs[0].role, Role::Bot);
+        assert_eq!(msgs[0].text, "agent report");
     }
 
     #[test]

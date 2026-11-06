@@ -574,6 +574,52 @@ pub fn mock_card(kind: &str, id: &str) -> serde_json::Value {
     json!({"id": id, "kind": "send-message", "message": message})
 }
 
+/// Letters-and-digits only, lowercased: "user-prompt" and "userPrompt" both become "userprompt".
+fn norm_label(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+/// Exact user-attribution labels (not substring matches). "prompt-response" and
+/// "user-visible" must not count as the human.
+fn is_user_label(s: &str) -> bool {
+    matches!(
+        norm_label(s).as_str(),
+        "user" | "human" | "prompt" | "userprompt" | "usermessage" | "humanmessage" | "humanprompt"
+    )
+}
+
+/// Whether a transcript entry is a real user/human prompt.
+///
+/// The crate heuristic (`is_from_user`) treats any role/kind/sender/type that
+/// *contains* "user", "human" or "prompt" as yours, and it reads `role` before
+/// `kind`. That mis-labels bot/agent reports when a sibling field mentions those
+/// words (e.g. `kind: "send-message"` plus `role: "user"`, or `kind: "prompt-response"`).
+/// Prefer `kind` when present; only known user labels count as you.
+pub fn entry_is_from_user(e: &gw::Entry) -> bool {
+    if let Some(k) = e
+        .raw
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        return is_user_label(k);
+    }
+    for key in ["role", "sender", "type"] {
+        if let Some(v) = e
+            .raw
+            .get(key)
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            return is_user_label(v);
+        }
+    }
+    false
+}
+
 pub fn messages_from_entries(entries: &[gw::Entry]) -> Vec<Message> {
     entries
         .iter()
@@ -587,7 +633,7 @@ pub fn messages_from_entries(entries: &[gw::Entry]) -> Vec<Message> {
                 return None;
             }
             Some(Message {
-                role: if e.is_from_user() {
+                role: if entry_is_from_user(e) {
                     Role::User
                 } else {
                     Role::Bot
@@ -1456,6 +1502,88 @@ mod tests {
         assert_eq!(m.len(), 2);
         assert_eq!(m[0].role, Role::User);
         assert_eq!((m[1].role, m[1].text.as_str()), (Role::Bot, "red"));
+    }
+
+    fn roles_of(entries: &[serde_json::Value]) -> Vec<(Role, String)> {
+        messages_from_entries(
+            &entries
+                .iter()
+                .map(gw::Entry::from_value)
+                .collect::<Vec<_>>(),
+        )
+        .into_iter()
+        .map(|m| (m.role, m.text))
+        .collect()
+    }
+
+    #[test]
+    fn entries_attribution_only_known_user_kinds_are_you() {
+        // Documented user shapes stay yours, including Human / type: prompt.
+        assert_eq!(
+            roles_of(&[
+                json!({"id": "1", "kind": "user-prompt", "prompt": "typed"}),
+                json!({"id": "2", "role": "Human", "text": "from-role"}),
+                json!({"id": "3", "type": "prompt", "text": "from-type"}),
+            ]),
+            vec![
+                (Role::User, "typed".into()),
+                (Role::User, "from-role".into()),
+                (Role::User, "from-type".into()),
+            ]
+        );
+        // send-message is the bot even if a sibling field says "user" or "prompt"
+        // (the crate heuristic reads role before kind and uses substring match).
+        let report = "Rounder chat bubbles\nCommits on main";
+        assert_eq!(
+            roles_of(&[json!({
+                "id": "a1",
+                "role": "user",
+                "kind": "send-message",
+                "message": {"type": "text", "content": report}
+            })]),
+            vec![(Role::Bot, report.into())]
+        );
+        assert_eq!(
+            roles_of(&[json!({
+                "id": "a2",
+                "kind": "prompt-response",
+                "text": report
+            })]),
+            vec![(Role::Bot, report.into())]
+        );
+        assert_eq!(
+            roles_of(&[json!({
+                "id": "a3",
+                "kind": "user-visible",
+                "text": report
+            })]),
+            vec![(Role::Bot, report.into())]
+        );
+        assert_eq!(
+            roles_of(&[json!({
+                "id": "a4",
+                "type": "prompt-response",
+                "text": report
+            })]),
+            vec![(Role::Bot, report.into())]
+        );
+        assert!(!entry_is_from_user(&gw::Entry::from_value(
+            &json!({"kind": "send-message"})
+        )));
+        assert!(entry_is_from_user(&gw::Entry::from_value(
+            &json!({"kind": "user-prompt", "prompt": "x"})
+        )));
+        // The crate heuristic would call these "you"; we must not.
+        assert!(gw::Entry::from_value(&json!({"kind": "prompt-response"})).is_from_user());
+        assert!(!entry_is_from_user(&gw::Entry::from_value(
+            &json!({"kind": "prompt-response"})
+        )));
+        assert!(
+            gw::Entry::from_value(&json!({"role": "user", "kind": "send-message"})).is_from_user()
+        );
+        assert!(!entry_is_from_user(&gw::Entry::from_value(
+            &json!({"role": "user", "kind": "send-message"})
+        )));
     }
 
     #[test]

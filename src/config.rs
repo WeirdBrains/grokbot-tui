@@ -534,7 +534,10 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_IDLE_MINUTES, c.idle_minutes.to_string()),
         (PREF_UI_SPINNER, "on".to_string()),
         (PREF_TOAST_TIMEOUT, c.toast_timeout_secs.to_string()),
-        (PREF_CHAT_TIMESTAMP_MINS, c.timestamp_interval_mins.to_string()),
+        (
+            PREF_CHAT_TIMESTAMP_MINS,
+            c.timestamp_interval_mins.to_string(),
+        ),
         (PREF_IMAGES_INLINE, "on".to_string()),
         (PREF_IMAGES_INLINE_MAX_ROWS, c.inline_max_rows.to_string()),
         (PREF_MEDIA_INLINE, "on".to_string()),

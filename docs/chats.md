@@ -153,7 +153,7 @@ every few seconds (backing off to 15s when idle).
 
 Your message is stored locally as pending and takes the transcript entry id once the gateway echoes it, so it is never duplicated.
 Transcript text is parsed like grok-bot-cli's `transcript.js` (`text` / `prompt` / `message` / `content` parts / `message.content` / `preview`).
-Terminal control sequences are stripped before display. Whether an entry is yours is a heuristic: its role/kind contains `user`, `human` or `prompt`.
+Terminal control sequences are stripped before display. Whether an entry is yours is decided from its `kind` first: known user labels (`user-prompt`, `user`, `human`, `prompt`, `user-message`) are yours; `send-message` and any other kind are the bot's — even if another field contains `user` or `prompt`, so assistant or coding-agent reports are not labelled as you. When `kind` is absent, `role`, then `sender`, then `type` are checked for those same exact labels (not substring matches).
 
 ## Selecting text
 

@@ -820,26 +820,25 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         let threshold = (app.config.timestamp_interval_mins.saturating_mul(60)) as i64;
         for (i, e) in app.feed().iter().enumerate() {
             // Timestamp line before this message, when due.
-            if matches!(e.kind, EntryKind::User | EntryKind::Bot) {
-                if let (Some(es), Some(ss)) = (epoch, timestr) {
-                    if let (Some(&ts), Some(label)) = (es.get(i), ss.get(i)) {
-                        let show = match last_shown_ts {
-                            None => true,
-                            Some(prev) => ts.saturating_sub(prev) >= threshold,
-                        };
-                        if show && !label.is_empty() {
-                            // Centered timestamp label in muted style.
-                            lines.push(
-                                Line::from(vec![theme::muted().span(format!(" {label} "))])
-                                    .alignment(Alignment::Center),
-                            );
-                            // Keep vectors aligned with one placeholder per injected line.
-                            buttons.push(None);
-                            entries.push(None);
-                            owners.push(None);
-                            last_shown_ts = Some(ts);
-                        }
-                    }
+            if matches!(e.kind, EntryKind::User | EntryKind::Bot)
+                && let (Some(es), Some(ss)) = (epoch, timestr)
+                && let (Some(&ts), Some(label)) = (es.get(i), ss.get(i))
+            {
+                let show = match last_shown_ts {
+                    None => true,
+                    Some(prev) => ts.saturating_sub(prev) >= threshold,
+                };
+                if show && !label.is_empty() {
+                    // Centered timestamp label in muted style.
+                    lines.push(
+                        Line::from(vec![theme::muted().span(format!(" {label} "))])
+                            .alignment(Alignment::Center),
+                    );
+                    // Keep vectors aligned with one placeholder per injected line.
+                    buttons.push(None);
+                    entries.push(None);
+                    owners.push(None);
+                    last_shown_ts = Some(ts);
                 }
             }
             if i > 0 {
@@ -2230,8 +2229,8 @@ pub(crate) mod tests {
                 .iter()
                 .all(|l| l.alignment == Some(Alignment::Right))
         );
-        assert_eq!(plain(&out[1]), "╭────╮");
-        assert_eq!(plain(&out[2]), "│ hi │");
+        assert_eq!(plain(&out[1]), "╭──────╮");
+        assert_eq!(plain(&out[2]), "│  hi  │");
         assert_eq!(bubble_content_width(30), 26);
     }
 
@@ -2301,13 +2300,14 @@ pub(crate) mod tests {
         let row = |y: u16| (0..w).map(|x| buf[(x, y)].symbol()).collect::<Vec<_>>();
         let at = |y: u16, x: u16, t: &str| row(y)[x as usize..].concat().starts_with(t);
         assert!(
-            at(by - 2, bx - 2, &name) && at(by - 1, bx - 2, "╭"),
+            at(by - 2, bx - BUBBLE_PAD as u16, &name) && at(by - 1, bx - BUBBLE_PAD as u16, "╭"),
             "bot bubble (top border, then body) directly under the bot name"
         );
         let (ux, uy) = find("USERBODY");
         // "you" ends where your body ends (right-aligned on the row above).
         assert!(
-            at(uy - 2, ux + 8 + 2 - 3, "you") && at(uy - 1, ux + 8 + 1, "╮"),
+            at(uy - 2, ux + 8 + BUBBLE_PAD as u16 - 3, "you")
+                && at(uy - 1, ux + 8 + BUBBLE_PAD as u16 - 1, "╮"),
             "your body right edge under 'you'"
         );
         if std::env::var("GBT_DUMP").is_ok() {
@@ -2970,6 +2970,7 @@ pub(crate) mod tests {
                 && f > inner_w / 4
                 && !row.contains("you")
                 && !row.contains("[☺+]")
+                && (row.contains('│') || row.contains('╭') || row.contains('╰'))
             {
                 user_starts.push(f);
             }
@@ -3186,8 +3187,9 @@ pub(crate) mod tests {
         // Left padding: two spaces between the chat border and the text.
         let line: String = (0..100u16).map(|x| buf[(x, a)].symbol()).collect();
         let pre = &line[..line.find("FIRST-MSG").unwrap()];
-        assert!(pre.ends_with("│ "), "bubble side, one space: {line:?}");
-        let pre = &pre[..pre.len() - "│ ".len()];
+        let side = format!("│{}", " ".repeat(BUBBLE_PAD.saturating_sub(1)));
+        assert!(pre.ends_with(&side), "bubble side, inner pad: {line:?}");
+        let pre = &pre[..pre.len() - side.len()];
         let border = pre.rfind('│').unwrap();
         let after_border = &pre[border + '│'.len_utf8()..];
         assert!(after_border.starts_with("  "), "{line:?}");

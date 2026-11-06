@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.41.3] - 2026-11-06
+
+### Fixed
+- Chat attribution: only real user/human prompts are labelled as you. Bot and coding-agent reports are no longer shown in a "you" bubble when a transcript entry's `role` or `type` contained `user` or `prompt` (the old substring heuristic, which also preferred `role` over `kind`). Stored roles are repaired on the next transcript merge.
+
 ## [1.41.2] - 2026-11-06
 
 ### Changed
