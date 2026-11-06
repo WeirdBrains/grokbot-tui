@@ -6,10 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added
+- Login: classify pasted `/login cursor` secrets by prefix (`grok_`, `crsr_`,
+  `xai-`/`xai_`). Dashboard and xAI inference API keys are rejected locally with
+  a clear unsupported message before EnsureSandBox; they are never stored or
+  sent. Cursor access tokens (no known dashboard prefix) still exchange as
+  before. Prefer `/login desktop`.
+
 ### Fixed
 - Release: flatten GPG `.asc` files before uploading the signatures artifact so
   `gh release create artifacts/*` does not try to upload a nested `artifacts/`
   directory.
+- Send: sandbox `sendPrompt` 502 diagnosis no longer recommends re-login with
+  `/login desktop` or `/login cursor` as a fix (those sessions are Sandbox-
+  oriented). Help and login docs name which key types are unsupported for chat.
 
 ## [1.41.5] - 2026-11-06
 

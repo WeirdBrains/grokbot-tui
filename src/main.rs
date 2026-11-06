@@ -12,6 +12,7 @@ mod clipboard;
 mod commands;
 mod complete;
 mod config;
+mod cred_kind;
 mod datadir;
 mod download;
 mod emoji;

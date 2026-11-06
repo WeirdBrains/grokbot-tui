@@ -11,7 +11,10 @@ All methods are per account and stored in SQLite (see below).
 2. **Cursor access token** — `/login cursor`, then paste the token. grokbot-tui calls
    `POST https://api2.cursor.sh/aiserver.v1.GrokBotService/EnsureSandBox` to get a gateway URL, token and
    extra headers (e.g. `x-anyrun-network-token`). The Cursor token is stored too, so when the gateway answers
-   **401** grokbot-tui re-exchanges once, retries, and saves the new session. A Cursor dashboard API key does not work here.
+   **401** grokbot-tui re-exchanges once, retries, and saves the new session.
+   Dashboard / inference API keys (`grok_…`, `crsr_…`, `xai-…`) are rejected locally
+   before EnsureSandBox: they authenticate Cursor Admin/Cloud Agents or xAI inference,
+   not the Grok Bot companion gateway. Prefer `/login desktop`.
 
 3. **Desktop app session (opt-in)** — `/login desktop [entry]`. grokbot-tui reads the desktop app's saved session only when
    you run this command, mirroring grok-bot-cli's `app-session.js`. It reads `gateway-descriptor.json` from the app data dir:

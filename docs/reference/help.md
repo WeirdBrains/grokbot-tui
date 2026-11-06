@@ -161,12 +161,17 @@ What it does
 Getting a Cursor access token
   Not documented — use /login desktop. The desktop app keeps this token encrypted in
   sand-secrets.json; /login desktop reads and exchanges it for you automatically.
-  A Cursor dashboard API key does NOT work here.
+
+Dashboard / inference API keys are unsupported here (rejected before EnsureSandBox):
+  grok_… / crsr_…  Cursor dashboard API Keys (Admin / Cloud Agents at api.cursor.com).
+  xai-…            xAI Grok inference API (https://api.x.ai). Not Grok Bot chat.
+  There is no documented exchange from these keys to a Grok Bot gateway session.
 
 Headers sent: x-cursor-client-type (sand), x-cursor-client-version (detected app version),
 x-sand-box-namespace (prod). Override with GROKBOT_TUI_CURSOR_CLIENT_* / prefs (see /help env).
 
 Errors
+  Dashboard key pasted → clear unsupported message; nothing is sent or stored.
   401 'version no longer supported' → update the desktop app or set GROKBOT_TUI_CURSOR_CLIENT_VERSION.
   417 (empty body) → the gateway session expired; grokbot-tui re-authenticates like a 401
     (desktop re-read / Cursor re-exchange). If it persists, run /login desktop.
@@ -827,10 +832,11 @@ A deleted bot still in the sidebar — /refresh rebuilds from listAgents (delete
   archived agents and profile.isHiddenFromSidebar are dropped). If it still appears,
   the gateway is still listing it.
 'sendPrompt failed: 502 A Sand box session is not permitted on this endpoint'
-  The gateway refused this login for sending. listAgents may still work. This is a
-  server-side session-type restriction on EnsureSandBox / Sandbox sessions, not a
-  local TUI bug. Re-login with /login desktop (recommended) or /login cursor, then
-  resend. grokbot-tui will not treat it as 'Delivery unknown'.
+  The gateway refused sendPrompt for a Sandbox-typed session. listAgents may still
+  work. /login desktop and /login cursor both produce Sandbox-oriented sessions, so
+  repeating them usually will not fix send. Check whether the Grok Bot desktop app
+  can send to the same bot. grokbot-tui will not treat it as 'Delivery unknown'.
+  Dashboard API keys (grok_/crsr_/xai-) cannot log in for chat — see /help login-cursor.
 Notices flooding the chat — they live in a scrollable panel of at most 7 rows
   under the chat (click it, then ↑↓ / PgUp / PgDn / wheel). They never push the
   transcript off the screen.

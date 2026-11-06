@@ -1625,7 +1625,7 @@ impl App {
                             Entry {
                                 kind: EntryKind::Error,
                                 text: format!(
-                                    "Send failed: {e} This is a server-side restriction on the current session (EnsureSandBox / Sandbox logins are not permitted on sendPrompt), not a local TUI bug. Re-login with /login desktop (recommended) or /login cursor, then resend. The message was not accepted."
+                                    "Send failed: {e} The gateway classified this session as Sandbox and refused sendPrompt (listAgents can still work). /login desktop and /login cursor both produce Sandbox-oriented sessions, so repeating them usually will not help. Prefer checking whether the Grok Bot desktop app can send to this bot; see /help troubleshooting. The message was not accepted."
                                 ),
                             },
                         );
@@ -4035,12 +4035,24 @@ impl App {
             }
             InputMode::CursorToken => {
                 self.mode = InputMode::Normal;
-                self.info("Exchanging Cursor token (EnsureSandBox)…".into());
+                let secret = crate::cred_kind::normalize_pasted_secret(&trimmed);
+                let kind = crate::cred_kind::classify_pasted_secret(&secret);
+                if kind.unsupported_for_grokbot_gateway() {
+                    // Do not call EnsureSandBox or persist dashboard / inference keys.
+                    let _ = crate::cred_kind::redact_secret_for_display(&secret);
+                    self.error(format!(
+                        "Login rejected ({}): {}",
+                        kind.as_str(),
+                        crate::cred_kind::unsupported_gateway_login_message(kind)
+                    ));
+                    return;
+                }
+                self.info("Exchanging Cursor access token (EnsureSandBox)…".into());
                 self.start_login(
                     LoginMethod::Cursor,
                     LoginSource::Interactive,
                     None,
-                    Some(trimmed),
+                    Some(secret),
                 );
                 return;
             }
@@ -6180,9 +6192,59 @@ pub mod tests {
             "sandbox 502 must not look like an uncertain send: {t}"
         );
         assert!(
-            t.contains("/login desktop") || t.contains("Re-login"),
+            t.contains("Sandbox") || t.contains("sandbox") || t.contains("/login desktop"),
             "{t}"
         );
+        assert!(
+            !t.contains("Re-login with /login desktop (recommended)"),
+            "must not recommend desktop re-login as the sandbox-502 fix: {t}"
+        );
+    }
+
+    #[test]
+    fn cursor_login_rejects_dashboard_keys_without_ensure_sandbox() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let server = rt.block_on(async {
+            let server = wiremock::MockServer::start().await;
+            wiremock::Mock::given(wiremock::matchers::path(
+                "/aiserver.v1.GrokBotService/EnsureSandBox",
+            ))
+            .respond_with(wiremock::ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&server)
+            .await;
+            server
+        });
+        let (mut app, _d) = real_app(&rt, &server);
+        type_line(&mut app, "/login cursor");
+        settle(&mut app);
+        type_line(&mut app, "grok_fake_dashboard_key_for_test_only");
+        settle(&mut app);
+        let t = texts(&app).join("\n");
+        assert!(
+            t.contains("Login rejected")
+                || t.contains("fine-grained")
+                || t.contains("dashboard")
+                || t.contains("unsupported"),
+            "{t}"
+        );
+        assert!(
+            !t.contains("grok_fake_dashboard_key_for_test_only"),
+            "secret must not appear in UI text: {t}"
+        );
+        assert!(
+            app.store.load_login().unwrap().is_none(),
+            "dashboard key must not be persisted"
+        );
+        assert!(app.api.is_none(), "must not create a client from a dashboard key");
+
+        type_line(&mut app, "/login cursor");
+        settle(&mut app);
+        type_line(&mut app, "xai-fake_inference_key_for_test_only");
+        settle(&mut app);
+        let t = texts(&app).join("\n");
+        assert!(t.contains("api.x.ai") || t.contains("inference"), "{t}");
+        assert!(app.store.load_login().unwrap().is_none());
     }
 }
 

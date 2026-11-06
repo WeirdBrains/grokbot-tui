@@ -419,7 +419,7 @@ fn login(app: &mut App, args: &str) -> Result<()> {
         (Some("cursor"), None, None) => {
             app.mode = InputMode::CursorToken;
             app.info(
-                "Paste your Cursor access token (masked; not a dashboard API key). It is exchanged via EnsureSandBox and stored so grokbot-tui can re-exchange when the gateway token expires. Empty cancels."
+                "Paste a Cursor access token (masked). Not a dashboard key: grok_/crsr_ (Cursor API Keys) or xai- (Grok/xAI inference) are unsupported for chat login. Access tokens are exchanged via EnsureSandBox and stored for re-exchange. Empty cancels. Prefer /login desktop."
                     .into(),
             );
         }
