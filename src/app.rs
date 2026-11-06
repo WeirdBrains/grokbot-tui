@@ -571,6 +571,8 @@ pub struct App {
     pub pending_jump: Option<usize>,
     /// Per bot: each message's stored time ("MM-DD HH:MM"), aligned with the log.
     pub msg_times: HashMap<String, Vec<String>>,
+    /// Per bot: each message's Unix epoch seconds, aligned with the log.
+    pub msg_epoch: HashMap<String, Vec<i64>>,
     /// The emoji picker modal.
     pub react_picker: Option<crate::emojipicker::EmojiPicker>,
     /// The download modal (`[⤓]`, `/download`, vim `d`).
@@ -914,6 +916,7 @@ impl App {
             attpanel: Default::default(),
             pending_jump: None,
             msg_times: HashMap::new(),
+            msg_epoch: HashMap::new(),
             react_picker: None,
             download: None,
             download_hits: vec![],
@@ -2365,6 +2368,12 @@ impl App {
             self.msg_times.insert(bot_id.to_string(), times);
         } else {
             self.msg_times.remove(bot_id);
+        }
+        let epochs = self.store.message_epoch_secs(bot_id).unwrap_or_default();
+        if epochs.len() == msgs.len() {
+            self.msg_epoch.insert(bot_id.to_string(), epochs);
+        } else {
+            self.msg_epoch.remove(bot_id);
         }
         let entries: Vec<Entry> = msgs.iter().map(entry_from_msg).collect();
         let new_len = entries.len();

@@ -212,6 +212,8 @@ pub const DEFAULT_STATUS_PROMPT: &str =
 pub const PREF_UI_SPINNER: &str = "ui.spinner";
 /// Grok Bot notification toasts close after N seconds (global, 1..=600; 1.34.0).
 pub const PREF_TOAST_TIMEOUT: &str = "notifications.toast_timeout_secs";
+/// Minutes between periodic chat timestamps (global; shown inline above a message).
+pub const PREF_CHAT_TIMESTAMP_MINS: &str = "chat.timestamp_interval_mins";
 /// Draw images inline in chat bubbles (global).
 pub const PREF_IMAGES_INLINE: &str = "images.inline";
 /// Height cap for inline images, in rows (global, 2..=60).
@@ -416,6 +418,8 @@ pub struct Config {
     pub spinner: bool,
     /// `notifications.toast_timeout_secs`.
     pub toast_timeout_secs: u64,
+    /// `chat.timestamp_interval_mins` (default 10).
+    pub timestamp_interval_mins: u64,
     /// `images.inline`.
     pub images_inline: bool,
     /// `images.inline_max_rows`.
@@ -482,6 +486,7 @@ impl Default for Config {
             idle_minutes: DEFAULT_IDLE_MINUTES,
             spinner: true,
             toast_timeout_secs: crate::inbox::DEFAULT_TOAST_SECS,
+            timestamp_interval_mins: 10,
             images_inline: true,
             inline_max_rows: 12,
             media_inline: true,
@@ -529,6 +534,7 @@ pub fn default_prefs() -> Vec<(&'static str, String)> {
         (PREF_IDLE_MINUTES, c.idle_minutes.to_string()),
         (PREF_UI_SPINNER, "on".to_string()),
         (PREF_TOAST_TIMEOUT, c.toast_timeout_secs.to_string()),
+        (PREF_CHAT_TIMESTAMP_MINS, c.timestamp_interval_mins.to_string()),
         (PREF_IMAGES_INLINE, "on".to_string()),
         (PREF_IMAGES_INLINE_MAX_ROWS, c.inline_max_rows.to_string()),
         (PREF_MEDIA_INLINE, "on".to_string()),
@@ -634,6 +640,10 @@ impl Config {
                 .and_then(|v| v.trim().parse().ok())
                 .filter(|n| (1..=600).contains(n))
                 .unwrap_or(d.toast_timeout_secs),
+            timestamp_interval_mins: o(PREF_CHAT_TIMESTAMP_MINS)
+                .and_then(|v| v.trim().parse().ok())
+                .filter(|n| (1..=240).contains(n))
+                .unwrap_or(d.timestamp_interval_mins),
             spinner: o(PREF_UI_SPINNER)
                 .map(|v| !matches!(v.trim(), "off" | "false" | "0" | "no"))
                 .unwrap_or(d.spinner),

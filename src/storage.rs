@@ -988,6 +988,16 @@ impl Store {
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
+    /// Each message's Unix time (seconds), in `messages` order.
+    pub fn message_epoch_secs(&self, bot_id: &str) -> Result<Vec<i64>> {
+        let mut st = self.conn.prepare(
+            "SELECT CAST(strftime('%s', created_at) AS INTEGER) FROM messages WHERE account_id = ?1 AND bot_id = ?2 ORDER BY ord IS NULL, ord, id",
+        )?;
+        let rows = st.query_map(params![self.account.id, bot_id], |r| {
+            Ok(r.get::<_, Option<i64>>(0)?.unwrap_or(0))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
 
     pub fn messages(&self, bot_id: &str) -> Result<Vec<Message>> {
         let mut st = self.conn.prepare(

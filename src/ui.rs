@@ -813,7 +813,35 @@ pub fn draw_main(f: &mut Frame, app: &mut App) -> Option<Position> {
         // Per line: the feed entry whose text it shows (selection → source text).
         let mut entries: Vec<Option<usize>> = vec![];
         let mut copy_targets: std::collections::HashMap<String, String> = Default::default();
+        // Periodic timestamps: show when enough minutes passed since the last shown one.
+        let epoch = app.msg_epoch.get(&app.key());
+        let timestr = app.msg_times.get(&app.key());
+        let mut last_shown_ts: Option<i64> = None;
+        let threshold = (app.config.timestamp_interval_mins.saturating_mul(60)) as i64;
         for (i, e) in app.feed().iter().enumerate() {
+            // Timestamp line before this message, when due.
+            if matches!(e.kind, EntryKind::User | EntryKind::Bot) {
+                if let (Some(es), Some(ss)) = (epoch, timestr) {
+                    if let (Some(&ts), Some(label)) = (es.get(i), ss.get(i)) {
+                        let show = match last_shown_ts {
+                            None => true,
+                            Some(prev) => ts.saturating_sub(prev) >= threshold,
+                        };
+                        if show && !label.is_empty() {
+                            // Centered timestamp label in muted style.
+                            lines.push(
+                                Line::from(vec![theme::muted().span(format!(" {label} "))])
+                                    .alignment(Alignment::Center),
+                            );
+                            // Keep vectors aligned with one placeholder per injected line.
+                            buttons.push(None);
+                            entries.push(None);
+                            owners.push(None);
+                            last_shown_ts = Some(ts);
+                        }
+                    }
+                }
+            }
             if i > 0 {
                 match pending.take() {
                     Some((k, mine)) => {
@@ -1925,12 +1953,14 @@ fn draw_help(f: &mut Frame, app: &mut App) {
     );
 }
 
-/// Columns a chat bubble's sides take before the text ("│ ").
-pub const BUBBLE_PAD: usize = 2;
+/// Columns a chat bubble's sides take before the text.
+/// BUBBLE_PAD = 3 draws "│  <text>  │" (two inner spaces per side), which looks rounder.
+pub const BUBBLE_PAD: usize = 3;
 
 /// Text width inside a bubble at most `bubble` columns wide (sides take 4 columns).
 pub fn bubble_content_width(bubble: usize) -> usize {
-    bubble.saturating_sub(2 * BUBBLE_PAD).max(1)
+    let inner = BUBBLE_PAD.saturating_sub(1) * 2;
+    bubble.saturating_sub(inner).max(1)
 }
 
 /// Draw `body[from..]` on a rounded bubble (1.38.0): a `╭─╮` top border, `│ text │`
@@ -1949,6 +1979,7 @@ pub fn bubble_wrap(
     } else {
         theme::muted()
     };
+    let pad_in = BUBBLE_PAD.saturating_sub(1);
     let pw: usize = pills.iter().map(|s| s.width()).sum();
     let cw = body[from..]
         .iter()
@@ -1965,7 +1996,7 @@ pub fn bubble_wrap(
     };
     let mut out: Vec<Line<'static>> = body[..from].to_vec();
     let mut top = vec![frame.span("╭")];
-    let dashes = cw + 2;
+    let dashes = cw + 2 * pad_in;
     if pw > 0 {
         top.push(frame.span("─".repeat(dashes.saturating_sub(pw + 1))));
         top.extend(pills);
@@ -1978,17 +2009,17 @@ pub fn bubble_wrap(
     for l in body.into_iter().skip(from) {
         let pad = cw - l.width().min(cw);
         let a = l.alignment.filter(|a| *a != Alignment::Right);
-        let mut spans = vec![frame.span("│ ")];
+        let mut spans = vec![frame.span(format!("│{}", " ".repeat(pad_in)))];
         spans.extend(l.spans);
         spans.push(Span::raw(" ".repeat(pad)));
-        spans.push(frame.span(" │"));
+        spans.push(frame.span(format!("{}│", " ".repeat(pad_in))));
         let mut nl = Line::from(spans).style(l.style);
         nl.alignment = a;
         out.push(align(nl));
     }
     out.push(align(Line::from(vec![
         frame.span("╰"),
-        frame.span("─".repeat(cw + 2)),
+        frame.span("─".repeat(cw + 2 * pad_in)),
         frame.span("╯"),
     ])));
     out

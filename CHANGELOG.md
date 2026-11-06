@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.41.2] - 2026-11-06
+
+### Changed
+- Chat bubbles: increased side padding (BUBBLE_PAD 2 → 3) for a rounder, softer look that matches the desktop app. Layout, wrapping and reaction placement are unchanged.
+
+### Added
+- Periodic timestamps in the chat UI: a centered timestamp label is shown above a message when at least 10 minutes have elapsed since the last shown timestamp (configurable with `chat.timestamp_interval_mins`). Shown for both your messages and bot replies; not on every message.
+
 ## [1.41.1] - 2026-11-05
 
 ### Security
