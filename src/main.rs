@@ -652,15 +652,16 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
     }
     match ev {
         Event::Mouse(m) if app.menu_mouse(m) => {}
-        Event::Mouse(m)
-            if app.completion.is_some()
-                && matches!(
-                    m.kind,
-                    MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-                ) =>
-        {
-            crate::complete::wheel(app, m.kind == MouseEventKind::ScrollDown);
-        }
+        Event::Mouse(m) if app.completion.is_some() => match m.kind {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                crate::complete::wheel(app, m.kind == MouseEventKind::ScrollDown);
+            }
+            MouseEventKind::Moved => crate::complete::hover(app, m.column, m.row),
+            MouseEventKind::Down(MouseButton::Left) => {
+                crate::complete::click(app, m.column, m.row);
+            }
+            _ => {}
+        },
         Event::Mouse(m) if m.kind == MouseEventKind::Moved => {
             app.mouse_pos = Some((m.column, m.row));
             if app.picker.is_some() {
@@ -1221,11 +1222,14 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
                 app.settings_click(m.column, m.row);
             }
         }
-        Event::Mouse(m) if app.card_modal.is_some() => {
-            if let MouseEventKind::Down(MouseButton::Left) = m.kind {
+        Event::Mouse(m) if app.card_modal.is_some() => match m.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
                 app.card_modal_click(m.column, m.row);
             }
-        }
+            MouseEventKind::ScrollUp => app.card_modal_scroll(false),
+            MouseEventKind::ScrollDown => app.card_modal_scroll(true),
+            _ => {}
+        },
         Event::Mouse(m) if app.msg_search.is_some() => app.msg_search_mouse(m),
         Event::Mouse(m) if app.history_search.is_some() => app.history_search_mouse(m),
         Event::Mouse(m) if app.react_picker.is_some() => app.react_picker_mouse(m),

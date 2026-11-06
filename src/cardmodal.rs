@@ -48,6 +48,8 @@ pub struct CardModal {
     pub error: Option<String>,
     pub hits: Vec<(Rect, Act)>,
     pub area: Rect,
+    /// First visible line when the modal content is taller than the pane.
+    pub scroll: u16,
 }
 
 impl Drop for CardModal {
@@ -432,6 +434,15 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') if n_opts > 0 => {
                 m.cursor = (m.cursor + 1).min(n_opts - 1)
             }
+            KeyCode::Up | KeyCode::Char('k') => {
+                m.scroll = m.scroll.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                m.scroll = m.scroll.saturating_add(1);
+            }
+            KeyCode::PageUp => m.scroll = m.scroll.saturating_sub(8),
+            KeyCode::PageDown => m.scroll = m.scroll.saturating_add(8),
+            KeyCode::Home => m.scroll = 0,
             KeyCode::Char(c @ '1'..='9') if n_opts > 0 => {
                 self.card_act(Act::Opt(c as usize - '1' as usize))
             }
@@ -447,6 +458,16 @@ impl App {
             KeyCode::Char('s') => self.card_act(Act::Send),
             KeyCode::Char('e') => self.card_act(Act::Edit),
             _ => {}
+        }
+    }
+
+    pub fn card_modal_scroll(&mut self, down: bool) {
+        if let Some(m) = self.card_modal.as_mut() {
+            if down {
+                m.scroll = m.scroll.saturating_add(3);
+            } else {
+                m.scroll = m.scroll.saturating_sub(3);
+            }
         }
     }
 
@@ -471,10 +492,20 @@ pub fn bubble_lines(card: &Card, key: &str) -> Vec<(Line<'static>, Vec<ColHit>)>
     } else {
         theme::card_done()
     };
-    let mut out = vec![(
-        Line::from(sp(st, format!("● {}", card.state.label()))),
-        vec![],
-    )];
+    let state_l = match &card.body {
+        Body::SideChat { messages, .. } => {
+            let n = messages.len();
+            if n == 0 {
+                format!("● {}", card.state.label())
+            } else if n == 1 {
+                "● 1 message".into()
+            } else {
+                format!("● {n} messages")
+            }
+        }
+        _ => format!("● {}", card.state.label()),
+    };
+    let mut out = vec![(Line::from(sp(st, state_l)), vec![])];
     for l in card.bubble_lines() {
         out.push((Line::from(sp(theme::card_frame(), l)), vec![]));
     }
@@ -785,6 +816,88 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             )));
             "Esc close".into()
         }
+        Body::SideChat {
+            peer_kind,
+            peer_name,
+            title,
+            messages,
+            ..
+        } => {
+            let heading = if peer_kind == "cloud-agent" {
+                if title.is_empty() && peer_name.is_empty() {
+                    "Conversation with a Cursor agent".into()
+                } else {
+                    format!(
+                        "Conversation with Cursor agent “{}”",
+                        if title.is_empty() { peer_name } else { title }
+                    )
+                }
+            } else if peer_name.is_empty() {
+                "Conversation with another agent".into()
+            } else {
+                format!("Conversation with {peer_name}")
+            };
+            lines.push(Line::from(sp(theme::bot_header_name(), heading)));
+            let kind_l = if peer_kind == "cloud-agent" {
+                "agent ↔ Cursor"
+            } else {
+                "agent ↔ agent"
+            };
+            lines.push(Line::from(sp(
+                theme::muted(),
+                format!(
+                    "{kind_l} · {} {}",
+                    messages.len(),
+                    if messages.len() == 1 {
+                        "message"
+                    } else {
+                        "messages"
+                    }
+                ),
+            )));
+            if messages.is_empty() {
+                lines.push(Line::default());
+                lines.push(Line::from(sp(
+                    theme::muted(),
+                    "No messages for this conversation have arrived yet.".to_string(),
+                )));
+            } else {
+                for msg in messages {
+                    lines.push(Line::default());
+                    let who = if msg.outgoing {
+                        if msg.label.is_empty() {
+                            "this bot".into()
+                        } else {
+                            msg.label.clone()
+                        }
+                    } else if msg.label.is_empty() {
+                        peer_name.clone()
+                    } else {
+                        msg.label.clone()
+                    };
+                    let head = if msg.outgoing {
+                        format!("→ {who}")
+                    } else {
+                        format!("← {who}")
+                    };
+                    let st = if msg.outgoing {
+                        theme::entry(EntryKind::User)
+                    } else {
+                        theme::bot_header_name()
+                    };
+                    lines.push(Line::from(sp(st, head)));
+                    for l in msg.text.lines() {
+                        lines.push(Line::from(sp(theme::card_frame(), l.to_string())));
+                    }
+                }
+            }
+            lines.push(Line::default());
+            lines.push(Line::from(sp(
+                theme::muted(),
+                "Click the card in chat to reopen · Esc close".to_string(),
+            )));
+            "↑↓ / mouse wheel scroll · Esc close".into()
+        }
     };
     if m.busy {
         lines.push(Line::from(sp(theme::muted(), "Sending…".to_string())));
@@ -822,7 +935,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         .filter(|(l, ..)| (*l as u16) < inner.height)
         .map(|(l, x, w, a)| (Rect::new(inner.x + x, inner.y + l as u16, w, 1), a))
         .collect();
-    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+    let vis = inner.height as usize;
+    let max_scroll = lines.len().saturating_sub(vis.max(1));
+    m.scroll = m.scroll.min(max_scroll as u16);
+    f.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((m.scroll, 0)),
+        inner,
+    );
 }
 
 fn sp(s: ratatui_lipgloss::Style, t: impl Into<String>) -> Span<'static> {
@@ -1090,5 +1211,38 @@ mod tests {
         }
         settle(&mut app);
         assert_eq!(state(&app), State::Pending);
+    }
+
+    #[test]
+    fn cursor_agent_modal_shows_the_side_conversation() {
+        let (_rt, mut app, _d) = post("cursor-agent");
+        assert!(app.open_card(None));
+        let mut term = Terminal::new(TestBackend::new(110, 34)).unwrap();
+        let s = screen(&mut term, &mut app);
+        assert!(s.contains("Cursor agent"), "{s}");
+        assert!(
+            s.contains("agent ↔ Cursor") || s.contains("Conversation"),
+            "{s}"
+        );
+        assert!(
+            s.contains("Please implement") || s.contains("All set") || s.contains("message"),
+            "{s}"
+        );
+        key(&mut app, KeyCode::Esc);
+        assert!(app.card_modal.is_none());
+    }
+
+    #[test]
+    fn agent_chat_modal_shows_agent_to_agent_turns() {
+        let (_rt, mut app, _d) = post("agent");
+        let key = app.cards.keys().next().expect("agent-chat card").clone();
+        assert!(app.open_card(Some(&key)), "expected agent-chat card");
+        let mut term = Terminal::new(TestBackend::new(110, 34)).unwrap();
+        let s = screen(&mut term, &mut app);
+        assert!(s.contains("Rocky") || s.contains("agent"), "{s}");
+        assert!(
+            s.contains("Looks good") || s.contains("take a look") || s.contains("message"),
+            "{s}"
+        );
     }
 }

@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.41.4] - 2026-11-06
+
+### Added
+- Side conversations in chat: when this bot messages another Grok Bot or a Cursor cloud
+  agent, the main feed shows a card (`↔ agent: …` or `▣ cursor-agent: …`) instead of
+  dumping those turns as regular bubbles. Click **[view conversation]** (or F11 / `/card`
+  when it is pending) to read the messages in a modal, with ↑↓ / mouse-wheel scrolling.
+  Built from existing transcript data: `kind: "message"` entries with `toAgent` /
+  `fromAgent`, and `message.type == "cursor-agent"` cards (`bcId` + `title`). Mock:
+  `card cursor-agent` and `card agent`.
+- Mouse support on slash-command Tab completion: hover highlights a row (and applies it,
+  like ↑/↓), click accepts it (like Enter), click outside the popup restores what you
+  typed (like Esc). Wheel and keyboard cycling are unchanged.
+
 ## [1.41.3] - 2026-11-06
 
 ### Fixed

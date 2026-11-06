@@ -1095,6 +1095,12 @@ impl Store {
                     "UPDATE messages SET role = ?2 WHERE id = ?1 AND role != ?2",
                     params![rowid, role],
                 )?;
+                // Transcript text is authoritative: a side-conversation dump rewritten as a
+                // stub ("↔ agent: …") replaces the stored body on the next merge.
+                self.conn.execute(
+                    "UPDATE messages SET text = ?2 WHERE id = ?1 AND text != ?2",
+                    params![rowid, m.text],
+                )?;
             }
             let entry = match found {
                 Some(r) => r,
@@ -1114,6 +1120,18 @@ impl Store {
             self.place_window(bot_id, &window)?;
         }
         Ok(added)
+    }
+
+    /// Drop stored rows whose `remote_id` is a side-conversation turn now shown in a card.
+    pub fn forget_remote_ids(&self, bot_id: &str, ids: &[String]) -> Result<usize> {
+        let mut n = 0;
+        for rid in ids {
+            n += self.conn.execute(
+                "DELETE FROM messages WHERE account_id = ?1 AND bot_id = ?2 AND remote_id = ?3",
+                params![self.account.id, bot_id, rid],
+            )?;
+        }
+        Ok(n)
     }
 
     /// Give rows without a known position an `ord` between their window neighbours.

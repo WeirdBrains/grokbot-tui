@@ -228,7 +228,9 @@ Ctrl-C / Ctrl-Shift-C copy, in order: (1) a selection in the input or the chat; 
 text in the focused input; otherwise a hint (nothing to copy). Ctrl-C never quits,
 cancels or clears: Ctrl-D / Ctrl-Q quit, Esc cancels. With ui.keys = vim, global
 ctrl-c / ctrl-d / ctrl-q in your keymap.toml override these.
-  Tab                          After `/`: fuzzy-complete a command or argument (Shift-Tab cycles).
+  Tab                          After `/`: fuzzy-complete a command or argument (Shift-Tab
+                               cycles; click a row to pick it, click outside to keep what
+                               you typed).
                                Otherwise switch focus between input and sidebar
   Ctrl-R                       Fuzzy search prompt history (Ctrl-S reverse; Esc keeps the draft)
   /history [query]             Browse all past prompts (persisted; newest first, age + bot)
@@ -270,7 +272,9 @@ ctrl-c / ctrl-d / ctrl-q in your keymap.toml override these.
   Inline images                Replies' images and your image attachments draw in the bubble
                                (images.inline = on|off, images.inline_max_rows = 12); click
                                one for the viewer. Shown once fully on screen.
-  Tab completion               Lists scroll (PgUp/PgDn, wheel, n/total shown). Paths with
+  Tab completion               Lists scroll (PgUp/PgDn, wheel, n/total shown); click a row
+                               to select it (same as Enter), click outside to cancel.
+                               Paths with
                                spaces: quotes or backslash escapes; completions insert
                                backslash-escaped names.
   /view [n]                    Image viewer: the image nearest the bottom of the chat (or the
@@ -379,12 +383,15 @@ Input focused (multi-line)
                             local prefs. ←/→ or 1-7 tab, ↑/↓ row, Enter change/open,
                             r reload, Esc back. App-only rows open in Grok Bot through
                             links.open_with; destructive ones ask y/n first
-  F11 / /card               Open a Grok Bot card (question, approval, secret, form or
-                            draft); also click its button in the chat (keymap card.open,
-                            vim c). Widgets: 1-9/↑↓ Enter, Space toggles, Tab your own,
+  F11 / /card               Open a Grok Bot card (question, approval, secret, form,
+                            draft, or an agent↔agent / agent↔Cursor conversation); also
+                            click its button in the chat (keymap card.open, vim c).
+                            Widgets: 1-9/↑↓ Enter, Space toggles, Tab your own,
                             x dismiss. Approvals: a / d. Secrets and forms: typed masked,
                             Enter/Ctrl-S submit, Ctrl-D dismiss. Drafts: s send, e edit,
-                            x discard. Purchase and grant cards are read-only here
+                            x discard. Side conversations: [view conversation] opens the
+                            messages between those parties (↑↓ / wheel to scroll).
+                            Purchase and grant cards are read-only here
   Video, GIFs, music        Play inline in the bubble: [▶]/[⏸] toggles, click the bar to
                             seek, click the picture for the full-size player (Space,
                             ←/→ 5 s, Home, Esc). One video/track plays at a time and
@@ -1399,7 +1406,7 @@ Related: [overview](#overview)
 ```text
 Usage: /card
 
-Open the newest pending card in this chat (question, approval, secret, form or draft); also F11 or click its button
+Open the newest pending card in this chat (question, approval, secret, form, draft or side conversation); also F11 or click its button
 
 Aliases: /cards, /answer
 ```

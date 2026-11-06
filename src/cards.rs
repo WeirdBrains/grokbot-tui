@@ -1,5 +1,5 @@
 //! Interactive Grok Bot cards in a chat (1.29.0): question widgets, approval cards,
-//! secret requests, forms and message drafts. Parsed from the transcript entry
+//! secret requests, forms, message drafts, and side conversations (1.41.4). Parsed from the transcript entry
 //! (`kind: "send-message"`, `message.type`), shown in the bubble with their state, and
 //! answered from a modal with the same gateway calls the desktop app makes:
 //! `respondToWidget`, `dismissWidget`, `resolveAutoReviewApproval`,
@@ -79,6 +79,29 @@ pub enum Body {
         title: String,
         lines: Vec<String>,
     },
+    /// A side conversation: this bot talking to another Grok Bot (`agent`) or to a
+    /// Cursor cloud agent (`cloud-agent`). The transcript carries each turn as a
+    /// `kind: "message"` entry with `toAgent` / `fromAgent`; Cursor launches also
+    /// post a `message.type == "cursor-agent"` card (`bcId` + `title`).
+    SideChat {
+        /// `"agent"` or `"cloud-agent"`.
+        peer_kind: String,
+        peer_name: String,
+        peer_id: String,
+        /// Cursor-agent card title, when one was posted.
+        title: String,
+        messages: Vec<SideMsg>,
+    },
+}
+
+/// One turn in a [`Body::SideChat`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SideMsg {
+    /// `true` when this bot sent it (`toAgent`); `false` when the peer sent it (`fromAgent`).
+    pub outgoing: bool,
+    pub label: String,
+    pub text: String,
+    pub entry_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -380,6 +403,23 @@ pub fn parse(e: &Value) -> Option<Card> {
                 state,
             )
         }
+        "cursor-agent" => {
+            let bc = s(msg, "bcId");
+            let title = s(msg, "title");
+            if bc.is_empty() && title.is_empty() {
+                return None;
+            }
+            (
+                Body::SideChat {
+                    peer_kind: "cloud-agent".into(),
+                    peer_name: title.clone(),
+                    peer_id: bc,
+                    title,
+                    messages: vec![],
+                },
+                status_state(&s(msg, "status")),
+            )
+        }
         _ => {
             let sub = msg
                 .as_object()
@@ -479,12 +519,18 @@ impl Card {
                     format!("▣ {kind}: {title}")
                 }
             }
+            Body::SideChat {
+                peer_kind,
+                peer_name,
+                title,
+                ..
+            } => side_summary(peer_kind, peer_name, title),
         }
     }
 
     /// Whether the TUI can act on this card.
     pub fn actionable(&self) -> bool {
-        !matches!(self.body, Body::Info { .. })
+        !matches!(self.body, Body::Info { .. } | Body::SideChat { .. })
     }
 
     /// Lines shown in the bubble under the summary (no secret values).
@@ -543,6 +589,33 @@ impl Card {
             Body::Info { lines, .. } => {
                 out.extend(lines.iter().map(|l| format!("  {l}")));
             }
+            Body::SideChat {
+                peer_kind,
+                peer_name,
+                messages,
+                ..
+            } => {
+                let who = if peer_kind == "cloud-agent" {
+                    if peer_name.is_empty() {
+                        "a Cursor agent".into()
+                    } else {
+                        format!("Cursor agent “{peer_name}”")
+                    }
+                } else if peer_name.is_empty() {
+                    "another agent".into()
+                } else {
+                    peer_name.clone()
+                };
+                let n = messages.len();
+                out.push(format!(
+                    "  {} with {who}",
+                    if n == 1 {
+                        "1 message".into()
+                    } else {
+                        format!("{n} messages")
+                    }
+                ));
+            }
         }
         out
     }
@@ -557,8 +630,13 @@ impl Card {
                 Body::Form { .. } => "[fill in]",
                 Body::Draft { .. } => "[review draft]",
                 Body::Info { .. } => "[view]",
+                Body::SideChat { .. } => "[view conversation]",
             },
+            (State::Pending, false) if matches!(self.body, Body::SideChat { .. }) => {
+                "[view conversation]"
+            }
             (State::Pending, false) => "[view · act in the desktop app]",
+            (_, _) if matches!(self.body, Body::SideChat { .. }) => "[view conversation]",
             _ => "[view]",
         }
     }
@@ -713,6 +791,195 @@ pub fn send_draft(c: &Card, body: Option<&str>) -> Option<Call> {
     })
 }
 
+fn side_summary(peer_kind: &str, peer_name: &str, title: &str) -> String {
+    if peer_kind == "cloud-agent" {
+        let t = if title.is_empty() { peer_name } else { title };
+        if t.is_empty() {
+            "▣ cursor-agent".into()
+        } else {
+            format!("▣ cursor-agent: {t}")
+        }
+    } else if peer_name.is_empty() {
+        "↔ agent chat".into()
+    } else {
+        format!("↔ agent: {peer_name}")
+    }
+}
+
+/// A `kind: "message"` turn between this bot and another agent (`toAgent` / `fromAgent`).
+pub fn is_side_message(raw: &Value) -> bool {
+    raw.get("kind").and_then(Value::as_str) == Some("message")
+        && (raw.get("toAgent").is_some_and(|v| v.is_object())
+            || raw.get("fromAgent").is_some_and(|v| v.is_object()))
+}
+
+fn peer_obj(raw: &Value) -> Option<(&Value, bool)> {
+    if let Some(v) = raw.get("toAgent").filter(|v| v.is_object()) {
+        return Some((v, true));
+    }
+    raw.get("fromAgent")
+        .filter(|v| v.is_object())
+        .map(|v| (v, false))
+}
+
+/// Attach `toAgent` / `fromAgent` turns to cursor-agent cards, and mint a card for
+/// agent-to-agent threads that have no `cursor-agent` send-message.
+pub fn enrich_cards(mut cards: Vec<Card>, raws: &[Value]) -> Vec<Card> {
+    #[derive(Default)]
+    struct Acc {
+        peer_kind: String,
+        peer_name: String,
+        title: String,
+        messages: Vec<SideMsg>,
+    }
+    let mut by_id: std::collections::BTreeMap<String, Acc> = std::collections::BTreeMap::new();
+    for raw in raws {
+        if let Some(c) = parse(raw)
+            && let Body::SideChat {
+                peer_id,
+                peer_kind,
+                peer_name,
+                title,
+                ..
+            } = &c.body
+            && !peer_id.is_empty()
+        {
+            let acc = by_id.entry(peer_id.clone()).or_default();
+            if acc.peer_kind.is_empty() {
+                acc.peer_kind = peer_kind.clone();
+            }
+            if acc.title.is_empty() {
+                acc.title = title.clone();
+            }
+            if acc.peer_name.is_empty() {
+                acc.peer_name = peer_name.clone();
+            }
+        }
+        let Some((peer, outgoing)) = peer_obj(raw) else {
+            continue;
+        };
+        let id = s(peer, "id");
+        if id.is_empty() {
+            continue;
+        }
+        let acc = by_id.entry(id).or_default();
+        let kind = s(peer, "kind");
+        if acc.peer_kind.is_empty() {
+            acc.peer_kind = if kind.is_empty() {
+                "agent".into()
+            } else {
+                kind
+            };
+        }
+        let name = s(peer, "name");
+        if acc.peer_name.is_empty() {
+            acc.peer_name = name.clone();
+        }
+        let text = grokbot_api::sanitize_text(
+            raw.get("content")
+                .and_then(Value::as_str)
+                .or_else(|| raw.get("text").and_then(Value::as_str))
+                .unwrap_or(""),
+        );
+        if text.trim().is_empty() {
+            continue;
+        }
+        let label = if outgoing {
+            if acc.peer_name.is_empty() {
+                "this bot".into()
+            } else {
+                format!("this bot → {}", acc.peer_name)
+            }
+        } else if name.is_empty() {
+            acc.peer_name.clone()
+        } else {
+            name
+        };
+        acc.messages.push(SideMsg {
+            outgoing,
+            label,
+            text,
+            entry_id: raw
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        });
+    }
+    for c in &mut cards {
+        if let Body::SideChat {
+            peer_id,
+            peer_kind,
+            peer_name,
+            title,
+            messages,
+        } = &mut c.body
+            && let Some(acc) = by_id.remove(peer_id)
+        {
+            if peer_kind.is_empty() {
+                *peer_kind = acc.peer_kind;
+            }
+            if peer_name.is_empty() {
+                *peer_name = acc.peer_name;
+            }
+            if title.is_empty() {
+                *title = acc.title;
+            }
+            *messages = acc.messages;
+        }
+    }
+    for (peer_id, acc) in by_id {
+        if acc.messages.is_empty() {
+            continue;
+        }
+        let entry_id = acc
+            .messages
+            .iter()
+            .find(|m| !m.entry_id.is_empty())
+            .map(|m| m.entry_id.clone())
+            .unwrap_or_else(|| peer_id.clone());
+        let peer_kind = if acc.peer_kind.is_empty() {
+            "agent".into()
+        } else {
+            acc.peer_kind
+        };
+        let n = acc.messages.len();
+        cards.push(Card {
+            entry_id,
+            kind: if peer_kind == "cloud-agent" {
+                "cursor-agent".into()
+            } else {
+                "agent-chat".into()
+            },
+            body: Body::SideChat {
+                peer_kind,
+                peer_name: acc.peer_name,
+                peer_id,
+                title: acc.title,
+                messages: acc.messages,
+            },
+            state: State::Done(format!("{n} messages")),
+        });
+    }
+    cards
+}
+
+/// Remote ids of side-conversation turns that should not stay in the main feed
+/// (everything except the card / stub's own `entry_id`).
+pub fn hidden_side_ids(cards: &[Card]) -> Vec<String> {
+    let mut out = vec![];
+    for c in cards {
+        if let Body::SideChat { messages, .. } = &c.body {
+            for m in messages {
+                if !m.entry_id.is_empty() && m.entry_id != c.entry_id {
+                    out.push(m.entry_id.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -841,5 +1108,71 @@ mod tests {
         let l = v.bubble_lines().join("\n");
         assert!(l.contains("Sockco") && !l.contains("zz"));
         assert!(approve(&v, true).is_none() && dismiss(&v).is_none());
+    }
+
+    #[test]
+    fn cursor_agent_card_and_side_messages_group_into_a_conversation() {
+        let card = parse(&json!({"id": "c1", "kind": "send-message",
+            "message": {"type": "cursor-agent", "bcId": "bc-abc", "title": "Patch bump"}}))
+        .unwrap();
+        assert!(!card.actionable());
+        assert_eq!(card.summary(), "▣ cursor-agent: Patch bump");
+        assert_eq!(card.button(), "[view conversation]");
+        let raws = [
+            json!({"id": "c1", "kind": "send-message",
+                "message": {"type": "cursor-agent", "bcId": "bc-abc", "title": "Patch bump"}}),
+            json!({"id": "m1", "kind": "message", "role": "assistant", "content": "Please patch it",
+                "toAgent": {"id": "bc-abc", "kind": "cloud-agent", "name": "Patch bump"}}),
+            json!({"id": "m2", "kind": "message", "role": "user", "content": "Done.\nCommits on main",
+                "fromAgent": {"id": "bc-abc", "kind": "cloud-agent", "name": "Patch bump"}}),
+        ];
+        let cards = enrich_cards(vec![card], &raws);
+        let Body::SideChat {
+            peer_id,
+            messages,
+            title,
+            ..
+        } = &cards[0].body
+        else {
+            panic!()
+        };
+        assert_eq!(peer_id, "bc-abc");
+        assert_eq!(title, "Patch bump");
+        assert_eq!(messages.len(), 2);
+        assert!(messages[0].outgoing && messages[0].text.contains("Please patch"));
+        assert!(!messages[1].outgoing && messages[1].text.contains("Commits on main"));
+        assert_eq!(
+            hidden_side_ids(&cards),
+            vec!["m1".to_string(), "m2".to_string()]
+        );
+    }
+
+    #[test]
+    fn agent_to_agent_messages_mint_a_clickable_card() {
+        let raws = [
+            json!({"id": "a1", "kind": "message", "content": "Can you review this?",
+                "toAgent": {"id": "11111111-1111-1111-1111-111111111111", "kind": "agent", "name": "Rocky"}}),
+            json!({"id": "a2", "kind": "message", "content": "Looks good.",
+                "fromAgent": {"id": "11111111-1111-1111-1111-111111111111", "name": "Rocky"}}),
+        ];
+        let cards = enrich_cards(vec![], &raws);
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].summary(), "↔ agent: Rocky");
+        assert_eq!(cards[0].button(), "[view conversation]");
+        let Body::SideChat {
+            messages,
+            peer_kind,
+            ..
+        } = &cards[0].body
+        else {
+            panic!()
+        };
+        assert_eq!(peer_kind, "agent");
+        assert_eq!(messages.len(), 2);
+        assert_eq!(hidden_side_ids(&cards), vec!["a2".to_string()]);
+        assert!(is_side_message(&raws[0]) && is_side_message(&raws[1]));
+        assert!(!is_side_message(
+            &json!({"kind": "message", "role": "user", "content": "hi"})
+        ));
     }
 }

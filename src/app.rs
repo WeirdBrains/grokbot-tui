@@ -1531,7 +1531,17 @@ impl App {
                         self.reload_bot_log(&bot);
                         if let Some(api) = self.api.clone() {
                             let cards = api.take_cards(&bot);
+                            let hidden = crate::cards::hidden_side_ids(&cards);
                             self.absorb_cards(&bot, cards);
+                            if !hidden.is_empty() {
+                                match self.store.forget_remote_ids(&bot, &hidden) {
+                                    Ok(0) => {}
+                                    Ok(_) => self.reload_bot_log(&bot),
+                                    Err(e) => {
+                                        self.error(format!("Could not tidy side chats: {e:#}"))
+                                    }
+                                }
+                            }
                             let notices = api.take_notices(&bot);
                             self.inbox_reload();
                             self.inbox_notices(&bot, notices);

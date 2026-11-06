@@ -130,11 +130,17 @@ vim normal `c`) or run `/card` to open the newest pending one:
 | Secret request | type (masked) and `Enter`; `Ctrl-D` dismiss |
 | Form | `Tab` between fields (secret fields masked), `Ctrl-S` submit, `Ctrl-D` dismiss |
 | Email / Slack / meeting draft | `s` send, `e` edit the body, `x` discard |
+| Agent ↔ agent or agent ↔ Cursor conversation (1.41.4) | Click **[view conversation]** (or F11 / `/card` when it is the newest pending card); `↑↓` / mouse wheel scroll; `Esc` close |
 
 Secrets are sent only through the gateway's `submitSecret` / `submitUserForm` calls; they
-are never logged, stored or shown and are wiped after sending or closing. Purchase
-approvals, connector grants and similar cards are shown read-only; act on them in the
-desktop app. Theme parts: `card_frame`, `card_pending`, `card_done`, `card_button`.
+are never logged, stored or shown and are wiped after sending or closing. When this bot
+messages another Grok Bot or a Cursor cloud agent, those turns are collapsed into a card
+in the main chat (`↔ agent: …` or `▣ cursor-agent: …`) instead of appearing as regular
+bubbles; click the card to read the side conversation in a modal. The turns come from
+transcript `kind: "message"` entries with `toAgent` / `fromAgent`, and Cursor launches
+from `message.type == "cursor-agent"` (`bcId` + `title`). Purchase approvals, connector
+grants and similar cards are shown read-only; act on them in the desktop app. Theme parts:
+`card_frame`, `card_pending`, `card_done`, `card_button`.
 
 ## Chat sync
 
@@ -307,11 +313,17 @@ vim normal `c`) or run `/card` to open the newest pending one:
 | Secret request | type (masked) and `Enter`; `Ctrl-D` dismiss |
 | Form | `Tab` between fields (secret fields masked), `Ctrl-S` submit, `Ctrl-D` dismiss |
 | Email / Slack / meeting draft | `s` send, `e` edit the body, `x` discard |
+| Agent ↔ agent or agent ↔ Cursor conversation (1.41.4) | Click **[view conversation]** (or F11 / `/card` when it is the newest pending card); `↑↓` / mouse wheel scroll; `Esc` close |
 
 Secrets are sent only through the gateway's `submitSecret` / `submitUserForm` calls; they
-are never logged, stored or shown and are wiped after sending or closing. Purchase
-approvals, connector grants and similar cards are shown read-only; act on them in the
-desktop app. Theme parts: `card_frame`, `card_pending`, `card_done`, `card_button`.
+are never logged, stored or shown and are wiped after sending or closing. When this bot
+messages another Grok Bot or a Cursor cloud agent, those turns are collapsed into a card
+in the main chat (`↔ agent: …` or `▣ cursor-agent: …`) instead of appearing as regular
+bubbles; click the card to read the side conversation in a modal. The turns come from
+transcript `kind: "message"` entries with `toAgent` / `fromAgent`, and Cursor launches
+from `message.type == "cursor-agent"` (`bcId` + `title`). Purchase approvals, connector
+grants and similar cards are shown read-only; act on them in the desktop app. Theme parts:
+`card_frame`, `card_pending`, `card_done`, `card_button`.
 
 ## Muting other devices while you're here
 

@@ -265,7 +265,7 @@ pub fn registry() -> Registry {
                 name: "card",
                 aliases: &["cards", "answer"],
                 usage: "/card",
-                help: "Open the newest pending card in this chat (question, approval, secret, form or draft); also F11 or click its button",
+                help: "Open the newest pending card in this chat (question, approval, secret, form, draft or side conversation); also F11 or click its button",
                 complete: no_complete,
                 run: card,
             },

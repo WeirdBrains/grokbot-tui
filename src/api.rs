@@ -326,6 +326,8 @@ impl GatewayApi {
             .iter()
             .filter_map(|e| crate::cards::parse(&e.raw))
             .collect();
+        let raws: Vec<_> = entries.iter().map(|e| e.raw.clone()).collect();
+        let c = crate::cards::enrich_cards(c, &raws);
         self.cards.lock().unwrap().insert(bot_id.into(), c);
     }
 }
@@ -568,10 +570,41 @@ pub fn mock_card(kind: &str, id: &str) -> serde_json::Value {
             "to": ["you@example.com"], "subject": "Hello", "body": "Hi there,\nSee you soon."}}),
         "purchase" => json!({"type": "virtual-card-approval", "request": {"status": "pending",
             "title": "Buy socks", "merchant": "Sockco", "amount": "12.00"}}),
+        "cursor-agent" => json!({"type": "cursor-agent", "bcId": format!("bc-mock-{id}"),
+            "title": "Mock coding task"}),
         _ => json!({"type": "widget", "widget": {"prompt": "Pick a color",
             "options": [{"label": "Red"}, {"label": "Green"}, {"label": "Blue"}]}}),
     };
     json!({"id": id, "kind": "send-message", "message": message})
+}
+
+/// Extra transcript rows for mock `card cursor-agent` / `card agent` so the conversation modal has turns.
+fn mock_side_entries(kind: &str, id: &str) -> Vec<serde_json::Value> {
+    use serde_json::json;
+    match kind {
+        "cursor-agent" => {
+            let bc = format!("bc-mock-{id}");
+            vec![
+                mock_card(kind, id),
+                json!({"id": format!("{id}-out"), "kind": "message", "role": "assistant",
+                    "content": "Please implement the mock coding task.",
+                    "toAgent": {"id": bc, "kind": "cloud-agent", "name": "Mock coding task"}}),
+                json!({"id": format!("{id}-in"), "kind": "message", "role": "user",
+                    "content": "All set.\nCommits on main\n- deadbeef: mock change",
+                    "fromAgent": {"id": format!("bc-mock-{id}"), "kind": "cloud-agent", "name": "Mock coding task"}}),
+            ]
+        }
+        "agent" => {
+            let pid = format!("aaaaaaaa-aaaa-aaaa-aaaa-{id:0<12}");
+            vec![
+                json!({"id": format!("{id}-out"), "kind": "message", "content": "Can you take a look?",
+                    "toAgent": {"id": pid, "kind": "agent", "name": "Rocky"}}),
+                json!({"id": format!("{id}-in"), "kind": "message", "content": "Looks good to me.",
+                    "fromAgent": {"id": format!("aaaaaaaa-aaaa-aaaa-aaaa-{id:0<12}"), "name": "Rocky"}}),
+            ]
+        }
+        _ => vec![mock_card(kind, id)],
+    }
 }
 
 /// Letters-and-digits only, lowercased: "user-prompt" and "userPrompt" both become "userprompt".
@@ -621,29 +654,59 @@ pub fn entry_is_from_user(e: &gw::Entry) -> bool {
 }
 
 pub fn messages_from_entries(entries: &[gw::Entry]) -> Vec<Message> {
-    entries
-        .iter()
-        .filter_map(|e| {
-            // Interactive cards (1.29.0) are stored as their one-line summary.
-            let text = match crate::cards::parse(&e.raw) {
-                Some(c) => c.summary(),
-                None => gw::sanitize_text(&e.text),
-            };
-            if text.trim().is_empty() {
-                return None;
+    let raws: Vec<_> = entries.iter().map(|e| e.raw.clone()).collect();
+    let side_cards = crate::cards::enrich_cards(vec![], &raws);
+    let stub_for = |raw: &serde_json::Value| -> Option<String> {
+        side_cards.iter().find_map(|c| match &c.body {
+            crate::cards::Body::SideChat { peer_id, .. } => {
+                let id = raw
+                    .get("toAgent")
+                    .or_else(|| raw.get("fromAgent"))
+                    .and_then(|p| p.get("id"))
+                    .and_then(|v| v.as_str())?;
+                (id == peer_id && c.kind == "agent-chat").then(|| c.summary())
             }
-            Some(Message {
-                role: if entry_is_from_user(e) {
-                    Role::User
-                } else {
-                    Role::Bot
-                },
-                text,
-                remote_id: e.id.clone(),
-                attachments: attachments_from_raw(&e.raw),
-            })
+            _ => None,
         })
-        .collect()
+    };
+    let mut seen_stub = std::collections::HashSet::new();
+    let mut out = vec![];
+    for e in entries {
+        if crate::cards::is_side_message(&e.raw) {
+            // Collapse agent↔agent turns into one stub; cursor-agent threads already
+            // have a `cursor-agent` card in the feed.
+            if let Some(summary) = stub_for(&e.raw)
+                && seen_stub.insert(summary.clone())
+            {
+                out.push(Message {
+                    role: Role::Bot,
+                    text: summary,
+                    remote_id: e.id.clone(),
+                    attachments: vec![],
+                });
+            }
+            continue;
+        }
+        // Interactive cards (1.29.0) are stored as their one-line summary.
+        let text = match crate::cards::parse(&e.raw) {
+            Some(c) => c.summary(),
+            None => gw::sanitize_text(&e.text),
+        };
+        if text.trim().is_empty() {
+            continue;
+        }
+        out.push(Message {
+            role: if entry_is_from_user(e) {
+                Role::User
+            } else {
+                Role::Bot
+            },
+            text,
+            remote_id: e.id.clone(),
+            attachments: attachments_from_raw(&e.raw),
+        });
+    }
+    out
 }
 
 #[async_trait]
@@ -1068,7 +1131,10 @@ impl ApiClient for MockClient {
             .lock()
             .unwrap()
             .get(bot_id)
-            .map(|v| v.iter().filter_map(crate::cards::parse).collect())
+            .map(|v| {
+                let parsed: Vec<_> = v.iter().filter_map(crate::cards::parse).collect();
+                crate::cards::enrich_cards(parsed, v)
+            })
             .unwrap_or_default()
     }
     async fn card_call(
@@ -1281,16 +1347,31 @@ impl ApiClient for MockClient {
                 });
         }
         if let Some(kind) = text.strip_prefix("card ") {
-            // Mock: `card widget|multi|approval|secret|form|draft|purchase` posts that card.
+            // Mock: `card widget|multi|approval|secret|form|draft|purchase|cursor-agent|agent`.
             let id = self.id();
-            let raw = mock_card(kind.trim(), &id);
-            let card = crate::cards::parse(&raw).expect("mock card parses");
+            let kind = kind.trim();
+            let raws = mock_side_entries(kind, &id);
+            let raw = if kind == "agent" {
+                raws.first()
+                    .cloned()
+                    .unwrap_or_else(|| mock_card("widget", &id))
+            } else {
+                mock_card(kind, &id)
+            };
+            let parsed = crate::cards::parse(&raw);
+            let cards = crate::cards::enrich_cards(parsed.into_iter().collect(), &raws);
             self.cards
                 .lock()
                 .unwrap()
                 .entry(bot_id.into())
                 .or_default()
-                .push(raw);
+                .extend(raws);
+            let summary = cards.first().map(|c| c.summary()).unwrap_or_else(|| {
+                crate::cards::parse(&raw)
+                    .map(|c| c.summary())
+                    .unwrap_or_default()
+            });
+            let stub_id = cards.first().map(|c| c.entry_id.clone()).unwrap_or(id);
             let mut c = self.chats.lock().unwrap();
             let h = c.entry(bot_id.into()).or_default();
             h.push((
@@ -1305,8 +1386,8 @@ impl ApiClient for MockClient {
             h.push((
                 Message {
                     role: Role::Bot,
-                    text: card.summary(),
-                    remote_id: Some(id),
+                    text: summary,
+                    remote_id: Some(stub_id),
                     attachments: vec![],
                 },
                 now,
@@ -1584,6 +1665,33 @@ mod tests {
         assert!(!entry_is_from_user(&gw::Entry::from_value(
             &json!({"role": "user", "kind": "send-message"})
         )));
+    }
+
+    #[test]
+    fn side_conversations_collapse_to_a_stub_and_keep_user_text() {
+        let msgs = messages_from_entries(&[
+            gw::Entry::from_value(&json!({"id": "u", "kind": "user-prompt", "prompt": "hi"})),
+            gw::Entry::from_value(&json!({"id": "c1", "kind": "send-message",
+                    "message": {"type": "cursor-agent", "bcId": "bc-1", "title": "Do the work"}})),
+            gw::Entry::from_value(&json!({"id": "m1", "kind": "message", "role": "user",
+                    "content": "agent report dump",
+                    "fromAgent": {"id": "bc-1", "kind": "cloud-agent", "name": "Do the work"}})),
+            gw::Entry::from_value(&json!({"id": "a1", "kind": "message", "content": "ping",
+                    "toAgent": {"id": "22222222-2222-2222-2222-222222222222", "kind": "agent", "name": "Rocky"}})),
+            gw::Entry::from_value(&json!({"id": "a2", "kind": "message", "content": "pong",
+                    "fromAgent": {"id": "22222222-2222-2222-2222-222222222222", "name": "Rocky"}})),
+        ]);
+        let texts: Vec<_> = msgs.iter().map(|m| (m.role, m.text.as_str())).collect();
+        assert_eq!(
+            texts,
+            vec![
+                (Role::User, "hi"),
+                (Role::Bot, "▣ cursor-agent: Do the work"),
+                (Role::Bot, "↔ agent: Rocky"),
+            ]
+        );
+        assert!(!msgs.iter().any(|m| m.text.contains("agent report dump")));
+        assert!(!msgs.iter().any(|m| m.text == "ping" || m.text == "pong"));
     }
 
     #[test]

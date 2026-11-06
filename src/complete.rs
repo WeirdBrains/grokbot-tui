@@ -30,6 +30,8 @@ pub struct Popup {
     /// The token as typed when the cycle started (cursor == items.len() restores it).
     pub query: String,
     pub list_area: Rect,
+    /// The whole popup (title + list), for click-outside-to-cancel.
+    pub area: Rect,
     /// The token's span in `draft`.
     pub orig_range: (usize, usize),
     /// First visible item (the list scrolls to keep the selection visible).
@@ -111,6 +113,7 @@ pub fn tab(app: &mut App, back: bool) {
         draft_cursor: app.input_cursor,
         query,
         list_area: Rect::default(),
+        area: Rect::default(),
         orig_range: range,
         scroll: 0,
     };
@@ -196,6 +199,58 @@ fn page(app: &App) -> i32 {
 /// Mouse wheel over the open popup: step the selection.
 pub fn wheel(app: &mut App, down: bool) {
     cycle(app, if down { 3 } else { -3 });
+}
+
+/// Result list row under a screen cell, if any.
+pub fn hit_at(p: &Popup, col: u16, row: u16) -> Option<usize> {
+    let a = p.list_area;
+    if col < a.x || col >= a.x + a.width || row < a.y || row >= a.y + a.height {
+        return None;
+    }
+    let i = p.scroll + (row - a.y) as usize;
+    (i < p.items.len()).then_some(i)
+}
+
+/// Hover: highlight the row under the pointer and apply it, like ↑/↓.
+pub fn hover(app: &mut App, col: u16, row: u16) {
+    let Some(p) = app.completion.as_mut() else {
+        return;
+    };
+    let Some(i) = hit_at(p, col, row) else {
+        return;
+    };
+    if p.cursor == i {
+        return;
+    }
+    p.cursor = i;
+    p.apply_current(&mut app.input, &mut app.input_cursor);
+    app.input_anchor = None;
+}
+
+/// Click: pick the row (accept, like Enter); click outside the popup cancels (like Esc).
+pub fn click(app: &mut App, col: u16, row: u16) -> bool {
+    let Some(p) = app.completion.as_ref() else {
+        return false;
+    };
+    let at = ratatui::layout::Position::new(col, row);
+    if let Some(i) = hit_at(p, col, row) {
+        let Some(mut p) = app.completion.take() else {
+            return true;
+        };
+        p.cursor = i;
+        p.apply_current(&mut app.input, &mut app.input_cursor);
+        app.input_anchor = None;
+        return true;
+    }
+    if p.area.contains(at) {
+        return true;
+    }
+    // Outside: keep the original token, same as Esc.
+    if let Some(p) = app.completion.take() {
+        app.input = p.draft;
+        app.input_cursor = p.draft_cursor.min(app.input.len());
+    }
+    true
 }
 
 /// Keep `cursor` inside the `h`-row window starting at `scroll`.
@@ -371,8 +426,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else {
         format!("–/{n}")
     };
+    p.area = r;
     let block = theme::block(&theme::panel(true)).title(format!(
-        " Completions {pos} · Tab cycles · PgUp/PgDn · Esc keeps "
+        " Completions {pos} · Tab or click · PgUp/PgDn · Esc keeps "
     ));
     let inner = block.inner(r);
     f.render_widget(block, r);
@@ -458,5 +514,40 @@ mod tests {
         let c = names(["use", "user", "export"]);
         let r = rank("use", &c);
         assert_eq!(r[0].replace, "use");
+    }
+
+    #[test]
+    fn click_picks_a_row_and_outside_restores_the_draft() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        app.input = "/s".into();
+        app.input_cursor = app.input.len();
+        tab(&mut app, false);
+        let mut p = app.completion.take().expect("popup");
+        assert!(
+            p.items.len() >= 2,
+            "expected several /s… commands, got {:?}",
+            p.items.iter().map(|c| c.label.as_str()).collect::<Vec<_>>()
+        );
+        let draft = p.draft.clone();
+        p.list_area = Rect::new(0, 1, 40, 4);
+        p.area = Rect::new(0, 0, 40, 6);
+        p.scroll = 0;
+        app.completion = Some(p);
+        hover(&mut app, 2, 2); // y=1 first row, y=2 second
+        assert_eq!(app.completion.as_ref().unwrap().cursor, 1);
+        assert!(click(&mut app, 2, 2));
+        assert!(app.completion.is_none());
+        assert!(app.input.starts_with('/'), "{}", app.input);
+        app.input = "/s".into();
+        app.input_cursor = app.input.len();
+        tab(&mut app, false);
+        let mut p = app.completion.take().unwrap();
+        p.list_area = Rect::new(0, 1, 40, 4);
+        p.area = Rect::new(0, 0, 40, 6);
+        app.completion = Some(p);
+        assert!(click(&mut app, 80, 20), "outside cancels");
+        assert!(app.completion.is_none());
+        assert_eq!(app.input, draft);
     }
 }

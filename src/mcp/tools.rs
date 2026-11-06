@@ -219,6 +219,24 @@ pub fn card_json(c: &Card) -> Value {
             "info",
             json!({"info_kind": kind, "title": title, "lines": lines, "note": "Not answerable here; use the Grok Bot app."}),
         ),
+        Body::SideChat {
+            peer_kind,
+            peer_name,
+            peer_id,
+            title,
+            messages,
+        } => (
+            "side-chat",
+            json!({
+                "peer_kind": peer_kind,
+                "peer_name": peer_name,
+                "peer_id": peer_id,
+                "title": title,
+                "messages": messages.iter().map(|m| json!({
+                    "outgoing": m.outgoing, "label": m.label, "text": m.text
+                })).collect::<Vec<_>>()
+            }),
+        ),
     };
     json!({"card_id": c.entry_id, "type": kind, "message_type": c.kind,
         "state": c.state.label(), "summary": c.summary(), "details": details})
@@ -232,6 +250,7 @@ fn kind_of(c: &Card) -> &'static str {
         Body::Form { .. } => "form",
         Body::Draft { .. } => "draft",
         Body::Info { .. } => "info",
+        Body::SideChat { .. } => "side-chat",
     }
 }
 
@@ -242,7 +261,7 @@ pub fn card_call_for(c: &Card, a: &Value) -> Result<cards::Call, ToolError> {
     let value = arg(a, "value").map(str::to_string);
     let bad = |what: &str| ToolError(format!("a {} card takes {what}", kind_of(c)));
     let call = match (&c.body, action) {
-        (Body::Info { .. }, _) => {
+        (Body::Info { .. } | Body::SideChat { .. }, _) => {
             return Err(ToolError(
                 "this card can't be answered over MCP; use the Grok Bot app".into(),
             ));
