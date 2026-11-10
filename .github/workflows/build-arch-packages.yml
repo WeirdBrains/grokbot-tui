@@ -6,12 +6,46 @@ on:
       plan:
         required: true
         type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build Arch packages for (e.g. v1.41.6)
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
+  # workflow_dispatch has no cargo-dist plan; synthesize the two fields the
+  # package job reads. workflow_call keeps using inputs.plan directly so the
+  # large dist manifest is never stuffed through a job output.
+  prepare-plan:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    outputs:
+      plan: ${{ steps.set.outputs.plan }}
+    steps:
+      - id: set
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [[ ! "$TAG" =~ ^v[0-9] ]]; then
+            echo "tag must look like v1.2.3, got: $TAG" >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          delimiter="PLAN_$(openssl rand -hex 8)"
+          {
+            echo "plan<<$delimiter"
+            jq -nc --arg tag "$TAG" --arg version "$VERSION" \
+              '{announcement_tag:$tag, releases:[{app_name:"grokbot-tui", app_version:$version}]}'
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+
   arch-packages:
+    needs: [prepare-plan]
+    if: ${{ always() && !cancelled() && (github.event_name != 'workflow_dispatch' || needs.prepare-plan.result == 'success') }}
     strategy:
       fail-fast: false
       matrix:
@@ -20,19 +54,31 @@ jobs:
             runner: ubuntu-22.04
             container: archlinux:base-devel
           - arch: aarch64
+            # Official archlinux images are amd64-only. archlinuxarm/archlinuxarm
+            # is not publicly pullable (denied on GH-hosted ARM runners).
+            # menci/archlinuxarm is a maintained multi-arch image (daily builds,
+            # including linux/arm64) with a base-devel tag matching official Arch.
             runner: ubuntu-22.04-arm
-            container: archlinuxarm/archlinuxarm:latest
+            container: menci/archlinuxarm:base-devel
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      PLAN: ${{ inputs.plan }}
+      PLAN: ${{ github.event_name == 'workflow_dispatch' && needs.prepare-plan.outputs.plan || inputs.plan }}
       GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+
+      # archlinux:base-devel (and the ARM image) do not ship jq. Install tooling
+      # before any step that parses the dist plan.
+      - name: Install tooling (pacman)
+        shell: bash
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed git curl jq binutils fakeroot base-devel namcap gnupg github-cli
 
       - name: Read tag and version from the dist plan
         id: plan
@@ -43,12 +89,6 @@ jobs:
           [[ -n $tag && $tag != null && -n $version && $version != null ]]
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - name: Install tooling (pacman)
-        shell: bash
-        run: |
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm --needed git curl jq binutils fakeroot base-devel namcap gnupg github-cli
 
       - name: Download checksums and source tarball from the release
         env:
@@ -81,6 +121,9 @@ jobs:
           pacman -S --noconfirm --needed glibc gcc-libs alsa-lib
           su builder -c 'makepkg --clean --force --noconfirm'
           ls -l *.pkg.tar.zst
+          for f in *.pkg.tar.zst; do
+            sha256sum "$f" > "$f.sha256"
+          done
 
       - name: Import GPG key (if configured)
         id: import
@@ -117,7 +160,13 @@ jobs:
         working-directory: out/aur/grokbot-tui-bin
         shell: bash
         run: |
-          files=(*.pkg.tar.zst *.pkg.tar.zst.asc)
+          shopt -s nullglob
+          files=(*.pkg.tar.zst *.pkg.tar.zst.sha256 *.pkg.tar.zst.asc)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no Arch packages to upload" >&2
+            exit 1
+          fi
+          # --clobber replaces only these filenames; other release assets are left alone.
           gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
 
       - name: Upload as workflow artifacts too

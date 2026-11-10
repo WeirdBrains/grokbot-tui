@@ -48,7 +48,12 @@ fingerprint in a pinned location (e.g. a pinned GitHub Release and docs).
 
 Native `.pkg.tar.zst` packages are built from the AUR `grokbot-tui-bin` template using
 the real release checksums (no external repo is published). They are attached to the
-GitHub Release for x86_64 and aarch64. Users install with:
+GitHub Release for x86_64 and aarch64. To rebuild and attach those packages to
+an existing release without re-running the full Release workflow, run
+**Build Arch packages** from Actions with the release tag (for example
+`v1.41.6`). The job uploads only the `.pkg.tar.zst` files and any matching
+`.sha256` / `.asc` signatures, using `--clobber` so a retry replaces just those
+assets. Users install with:
 
 ```sh
 sudo pacman -U ./grokbot-tui-bin-<ver>-1-<arch>.pkg.tar.zst
