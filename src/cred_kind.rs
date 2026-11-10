@@ -146,10 +146,7 @@ mod tests {
             classify_pasted_secret("\"xai-deadbeef\""),
             CredKind::XaiGrokApiKey
         );
-        assert_eq!(
-            classify_pasted_secret("xai_also"),
-            CredKind::XaiGrokApiKey
-        );
+        assert_eq!(classify_pasted_secret("xai_also"), CredKind::XaiGrokApiKey);
         assert_eq!(
             classify_pasted_secret("Bearer grok_teamkey"),
             CredKind::CursorFineGrainedKey

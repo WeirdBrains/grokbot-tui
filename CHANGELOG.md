@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
-## [1.41.6] - 2026-11-06
+## [1.41.6] - 2026-11-09
 
 ### Added
 - Login: `/login` (bare) uses the desktop Cursor session when session files
@@ -38,6 +38,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
   tooltip. The hover delay is 900 ms (was 400 ms) so tips no longer flash while the
   pointer passes over controls, and the `tooltip` style is muted (`@subtle` text on
   `@header`, `@muted` border) in the built-in and shipped themes.
+- Tests: the `/login` help test no longer reads the real desktop app's session
+  files (it started a real desktop login on a machine with Grok Bot signed in), and
+  `cargo fmt` is clean again so the auto-release CI gate passes.
 - Send: sandbox `sendPrompt` 502 diagnosis no longer recommends re-login with
   `/login desktop` or `/login cursor` as a fix (those sessions are Sandbox-
   oriented). Login alone does not mint a non-Sandbox session.

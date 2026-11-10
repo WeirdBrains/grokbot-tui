@@ -265,10 +265,18 @@ fn desktop_config_for_login() -> Result<gw::desktop::DesktopConfig, gw::Error> {
 }
 
 /// True when gateway-descriptor.json or sand-secrets.json exists (no decrypt).
+#[cfg(not(test))]
 pub fn desktop_session_files_present() -> bool {
     desktop_config_for_login()
         .map(|c| c.present() || c.sand_present())
         .unwrap_or(false)
+}
+
+/// Tests never look at the real desktop app files (a dev machine with the app signed in
+/// would otherwise start a real desktop login from `/login`).
+#[cfg(test)]
+pub fn desktop_session_files_present() -> bool {
+    false
 }
 
 /// Launch the installed Grok Bot desktop app so the user can Sign in with Cursor.
