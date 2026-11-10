@@ -88,7 +88,7 @@ jobs:
             printf '\nDisableSandbox\n' >> /etc/pacman.conf
           fi
           pacman --disable-sandbox -Syu --noconfirm
-          pacman --disable-sandbox -S --noconfirm --needed git curl jq binutils fakeroot base-devel namcap gnupg github-cli
+          pacman --disable-sandbox -S --noconfirm --needed git curl jq binutils fakeroot base-devel namcap gnupg github-cli zstd
 
       - name: Read tag and version from the dist plan
         id: plan
@@ -131,12 +131,20 @@ jobs:
           chown -R builder .
           # Preinstall runtime deps to avoid makepkg needing sudo
           pacman -S --noconfirm --needed glibc gcc-libs alsa-lib
-          # Some images set PKGDEST in makepkg.conf, so the package would land
-          # outside this directory (aarch64 then failed on `ls *.pkg.tar.zst`
-          # after a successful build). Keep the output here.
-          su builder -c 'PKGDEST="$PWD" makepkg --clean --force --noconfirm'
-          ls -l *.pkg.tar.zst
-          for f in *.pkg.tar.zst; do
+          # The ARM image's makepkg.conf uses PKGEXT=.pkg.tar.xz, so a
+          # successful build produced no *.pkg.tar.zst for the upload step.
+          # Force zstd (matches official Arch and PACKAGING.md) and write
+          # into this directory even if su changes cwd or PKGDEST is set.
+          dest="$PWD"
+          su builder -c "cd $(printf '%q' "$dest") && PKGDEST=$(printf '%q' "$dest") PKGEXT='.pkg.tar.zst' makepkg --clean --force --noconfirm"
+          ls -l
+          shopt -s nullglob
+          pkgs=(*.pkg.tar.zst)
+          if [ ${#pkgs[@]} -eq 0 ]; then
+            echo "expected *.pkg.tar.zst in $dest after makepkg" >&2
+            exit 1
+          fi
+          for f in "${pkgs[@]}"; do
             sha256sum "$f" > "$f.sha256"
           done
 
