@@ -131,7 +131,10 @@ jobs:
           chown -R builder .
           # Preinstall runtime deps to avoid makepkg needing sudo
           pacman -S --noconfirm --needed glibc gcc-libs alsa-lib
-          su builder -c 'makepkg --clean --force --noconfirm'
+          # Some images set PKGDEST in makepkg.conf, so the package would land
+          # outside this directory (aarch64 then failed on `ls *.pkg.tar.zst`
+          # after a successful build). Keep the output here.
+          su builder -c 'PKGDEST="$PWD" makepkg --clean --force --noconfirm'
           ls -l *.pkg.tar.zst
           for f in *.pkg.tar.zst; do
             sha256sum "$f" > "$f.sha256"
