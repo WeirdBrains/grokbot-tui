@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attachments and the file picker · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="">Install and download</a></li><li><a href="/docs/login/" class="">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="on">Attachments and the file picker</a></li><li><a href="/docs/images/" class="">Images and terminal graphics</a></li><li><a href="/docs/search/" class="">Searching messages</a></li><li><a href="/docs/notifications/" class="">Notifications</a></li><li><a href="/docs/browser/" class="">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="attachments-and-the-file-picker">Attachments and the file picker</h1>
+<p>Sending files, the attach button, downloads, and media playback.</p>
+<h2 id="attachments">Attachments</h2>
+<p><code>/attach &lt;path…&gt;</code> (alias <code>/file</code>) attaches files to your next prompt, up to 6. Tab completes
+paths (cycling replaces the path, it never appends), and pasting a file path attaches the file.
+Uploads start right away. Chips above the input show each file's icon, name, size and
+progress (✓ done, ✗ failed). Click a chip to preview an image, and click ✕ to remove it and
+abort its upload. <code>/attach remove &lt;n&gt;</code>, <code>/attach clear</code> and <code>/detach [n|all]</code> remove from the
+keyboard. Sending waits for uploads to finish. A failed upload keeps your prompt in the input.</p>
+<p>Any file type can be attached. The client checks sizes up front: images 25 MiB, video 1 GiB,
+everything else 250 MiB. The server has the final say and its refusal reason is shown. A bot
+that only takes files through the desktop app says so. Attachments need a Cursor session
+(<code>/login desktop</code> or <code>/login cursor</code>); plain gateway logins can't upload.</p>
+<p>Sent prompts show their files as <code>[🖼 name size ⤓]</code> chips. Click the name to open an image in
+the viewer, or ⤓ for the download modal. The link is resolved when you click and is never
+shown. The gateway transcript doesn't record attachments, so the chips only appear on prompts
+sent from this grokbot-tui. Theme parts: <code>attach_chip</code>, <code>attach_chip_error</code>.</p>
+<h2 id="downloads">Downloads</h2>
+<p>Bot replies with images or file links (<code>.pdf</code>, <code>.zip</code>, <code>.csv</code>…; not web pages) get a row of
+<code>[⤓] name</code> buttons (theme part <code>download_button</code>). Click one, run <code>/download [n|list]</code>
+(alias <code>/save</code>), or press vim <code>d</code> (<code>message.download</code>) to open the download modal. Its path
+is prefilled with <code>~/Downloads/&lt;name&gt;</code> (or <code>~/&lt;name&gt;</code> without a Downloads folder). Tab
+completes paths, and Down moves into a folder browser (arrows/hjkl, Enter/l opens a folder,
+h goes to the parent). Overwriting a file and creating missing folders are confirmed first.
+Remote files stream in the background into <code>&lt;name&gt;.part</code> and are renamed when done. Local
+files are copied. The size is capped by <code>downloads.max_mb</code> (default 25). The result shows as
+a notification. Theme parts: <code>download_path</code>, <code>download_dir</code>.</p>
+<h2 id="attach-button-1350">Attach button (1.35.0)</h2>
+<p>The <strong>[📎 Attach]</strong> button on the input box's top border starts <code>/attach</code> and lists files
+to pick (Tab completes paths). If you're mid-draft it keeps your text; paste a file path
+or use <code>/attach &lt;path&gt;</code> instead. Theme part <code>attach_button</code>.</p>
+<h2 id="video-gifs-and-music-1240">Video, GIFs and music (1.24.0)</h2>
+<p>Videos and animated GIFs play <strong>inside the bubble</strong>, scaled like images (capped at
+<code>images.inline_max_rows</code>), with a one-row bar under them: <strong>[▶]/[⏸]</strong> toggles playback,
+clicking the bar seeks, and the label shows elapsed/total time (GIFs: frame position).
+Clicking the picture opens the full-size player (Space play/pause, ←/→ seek 5 s, Home,
+Esc/q close). Music links and attachments get the same bar. Only one video or track plays
+at a time, and it pauses when scrolled out of view; GIFs loop on their own.</p>
+<table>
+<thead>
+<tr>
+<th>Build</th>
+<th>Decodes</th>
+<th>Download</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>standard</td>
+<td>GIF; H.264 MP4 (OpenH264, compiled in); MP3, AAC/M4A, FLAC, Vorbis, WAV. Other video codecs use a system <code>ffmpeg</code> if one is on PATH</td>
+<td><code>grokbot-tui-installer.sh/.ps1</code>, .deb/.rpm/.msi/.pkg, Homebrew, AUR</td>
+</tr>
+<tr>
+<td>-ffmpeg</td>
+<td>the above, plus FFmpeg linked in statically: nearly every codec and container, nothing to install</td>
+<td><code>grokbot-tui-ffmpeg-&lt;target&gt;.tar.xz/.zip</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>grokbot-tui-setup.sh</code> / <code>grokbot-tui-setup.ps1</code> (release assets) ask which build to
+install (<code>--variant standard|ffmpeg</code> / <code>-Variant</code> to skip the question).</p>
+<p>Prefs: <code>media.inline</code> (<code>on</code>), <code>media.fps</code> (<code>10</code>, 1–30), <code>media.decoder</code>
+(<code>auto</code>|<code>builtin</code>|<code>ffmpeg</code>|<code>system</code>), <code>media.gif_autoplay</code> (<code>on</code>). <code>/media
+pause|stop|decoders</code>. Theme part: <code>media_bar</code>. On Linux, sound needs ALSA (libasound2).</p><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/attachments.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>

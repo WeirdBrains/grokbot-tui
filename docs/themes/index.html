@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Themes and the theme editor · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="">Install and download</a></li><li><a href="/docs/login/" class="">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="">Attachments and the file picker</a></li><li><a href="/docs/images/" class="">Images and terminal graphics</a></li><li><a href="/docs/search/" class="">Searching messages</a></li><li><a href="/docs/notifications/" class="">Notifications</a></li><li><a href="/docs/browser/" class="">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="on">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="themes-and-the-theme-editor">Themes and the theme editor</h1>
+<p>The built-in themes, dark/light/system modes, theme files and the in-app editor. See the <a href="https://weirdbrains.github.io/grokbot-tui/themes/">theme gallery</a> for a screenshot of each.</p>
+<h2 id="themes">Themes</h2>
+<p>Every theme, including <code>default</code>, is a TOML file in <code>~/.grokbot-tui/themes/&lt;name&gt;.toml</code> (it follows
+<code>--data-dir</code>), and themes are read only from that folder: nothing is built into the binary and no
+system folder is searched. Each file has a <code>[dark]</code> and a <code>[light]</code> variant:
+a palette of 14 named colors and a style for each part of the screen.</p>
+<pre><code class="language-toml">schema = 1
+name = &quot;Default&quot;
+description = &quot;The original grokbot-tui look&quot;
+
+[dark.colors]
+text = 252                 # 0-255, &quot;#rrggbb&quot;, &quot;#rgb&quot;, a color name, or &quot;reset&quot; (terminal default)
+background = 234
+accent = &quot;cyan&quot;
+# … subtle, muted, header, warn, danger, ok, on_accent, modal_text, modal_background,
+#   logo_dark, logo_light
+
+[dark.styles]              # fg, bg, border (boxes only), bold, italic, underline, reverse, dim
+brand = { fg = &quot;@on_accent&quot;, bg = &quot;@accent&quot;, bold = true }   # &quot;@name&quot; = a palette color
+panel_focused = { fg = &quot;@text&quot;, border = &quot;@accent&quot; }
+# …
+
+[light.colors]
+# …
+</code></pre>
+<ul>
+<li><strong>Where <code>default.toml</code> comes from:</strong> on first run, when your themes folder has no themes,
+  grokbot-tui downloads the repo's <a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/themes/default.toml"><code>themes/default.toml</code></a> from the git tag
+  matching its version
+  (<code>https://raw.githubusercontent.com/WeirdBrains/grokbot-tui/v&lt;version&gt;/themes/default.toml</code>),
+  checks that it's a valid theme, saves it there and shows a notice. This works the same for every
+  install method. Startup never waits for it: plain terminal colors until it arrives, and it gives
+  up after 5 seconds. Offline or failed: plain colors plus a notice; <code>/theme init</code> tries again. Your
+  files are never overwritten. <strong>Opt out</strong> with <code>GROKBOT_TUI_NO_THEME_DOWNLOAD=1</code> or
+  <code>/prefs set ui.theme_download false</code>.</li>
+<li><strong>Missing or broken theme:</strong> grokbot-tui uses your terminal's own colors (highlights stay visible
+  via reverse video), shows a notice saying why, and marks the header <code>‹name: missing›</code> /
+  <code>‹name: broken›</code>. A broken file is never overwritten without asking. Partial files are fine:
+  missing colors use the terminal default, missing parts use the starter rule, a missing variant
+  copies the other, and each problem is listed once (as are unknown keys and a missing <code>schema</code>
+  line). Files over 64 KiB are refused before they're read, and a newer <code>schema</code> is refused.</li>
+<li><strong>Saving</strong> is atomic (a temp file in the same folder, then a rename) and private: theme files are
+  <code>0600</code> and a new themes folder is <code>0700</code> (Windows keeps its default permissions).</li>
+<li><strong>Picking (<code>F5</code>):</strong> moving through the list previews each theme live; <code>Enter</code> keeps it, <code>Esc</code>
+  goes back. <code>--theme &lt;name&gt;</code> picks one for a single run without saving it (a missing or broken
+  theme stops before the UI starts); <code>--list-themes</code> prints the list and exits.</li>
+<li><strong><code>/theme export &lt;name&gt; [path]</code></strong> copies a theme file (exact text) to
+  <code>&lt;data dir&gt;/exports/&lt;name&gt;-&lt;UTC time&gt;.toml</code>, or to the path given (a folder gets <code>&lt;name&gt;.toml</code>).
+  It never overwrites.</li>
+<li><strong><code>/theme init [name|all]</code></strong> downloads <code>&lt;name&gt;.toml</code> from the release's <code>themes/</code> folder the same
+  way (default <code>default</code>; <code>all</code> = every shipped theme, currently just <code>default</code>). Existing files
+  are kept. With downloading off it writes the minimal starter instead. <code>--list-themes</code> and
+  <code>--theme</code> also fetch the default first when the folder is empty (waiting up to 3 s).
+  <code>GROKBOT_TUI_THEME_URL</code> replaces the download address (<code>&lt;url&gt;&lt;name&gt;.toml</code>).</li>
+<li><strong><code>/theme starter [name]</code></strong> always writes the minimal starter: every part is mapped to a palette
+  role (title → <code>@accent</code>, errors → <code>@danger</code>, …) but every color is the terminal default. Set the
+  colors in the editor.</li>
+<li><strong>Editor (<code>Shift-F5</code> or <code>/theme edit [name]</code>):</strong> the palette and every part on the left, a live
+  preview of the app on the right (drawn by the real UI code with your unsaved changes, plus sample
+  chat entries and modals). The selected color or part is marked in reverse video in the preview
+  (<code>h</code> toggles; the preview title says when the part isn't on screen). <code>Tab</code> flips
+  dark/light, <code>Enter</code>/<code>e</code> edits (hex, 0-255, a name or <code>@palette</code>), <code>p</code> opens the color picker (tabs: 16 colors, the 216-color cube, 24 grays, <code>@palette</code> refs),
+  <code>r</code>/<code>R</code> revert the item/everything, <code>s</code> saves (applied immediately if it's the theme in use),
+  <code>d</code> duplicates, <code>n</code> creates a starter theme, <code>x</code> deletes (asks first; <code>Ctrl-D</code>/<code>Ctrl-N</code>/<code>Ctrl-X</code>
+  work too), <code>t</code> opens another theme and <code>[</code>/<code>]</code> step to the previous/next one, <code>Esc</code> (or
+  <code>Shift-F5</code>) closes (asks about unsaved changes). Text/background pairs below a 3:1 WCAG contrast
+  ratio get a warning, and <code>⚠</code> marks them in the list. Mouse clicks work on the list, tabs, fields and palette.</li>
+</ul>
+<h3 id="responsiveness">Responsiveness</h3>
+<p>The screen never waits on the network. Every gateway call runs on a tokio task and posts its result back over a channel.
+Results that arrive after an account switch or logout are discarded.</p>
+<p>Only the <strong>active bot</strong> is polled (<code>getAgentTranscriptTail</code>, last 100 entries):
+- after a send: about every 1 s, backing off to 8 s while waiting for the reply ("… is replying" spinner in the body title, up to 5 min);
+- otherwise: every 1 s, backing off to 15 s when nothing changes or on errors. The visible feed is re-read from local SQLite every 100 ms (no network).</p><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/themes.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>

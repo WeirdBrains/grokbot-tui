@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logging in and accounts · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="">Install and download</a></li><li><a href="/docs/login/" class="on">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="">Attachments and the file picker</a></li><li><a href="/docs/images/" class="">Images and terminal graphics</a></li><li><a href="/docs/search/" class="">Searching messages</a></li><li><a href="/docs/notifications/" class="">Notifications</a></li><li><a href="/docs/browser/" class="">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="logging-in-and-accounts">Logging in and accounts</h1>
+<p>Signing in the same way the Grok Bot desktop app does: with your <strong>Cursor account session</strong>
+(saved under the app's data dir), not with dashboard API keys (<code>grok_</code> / <code>crsr_</code> / <code>xai-</code>).</p>
+<h2 id="authentication">Authentication</h2>
+<p>All methods are per account and stored in SQLite (see below).</p>
+<ol>
+<li><strong>Gateway token</strong> — <code>/login gateway &lt;url&gt;</code>, then paste the token. grokbot-tui checks the URL against the allowlist,
+   then validates the credential with <code>listAgents</code> (the gateway has no "who am I" call). It is saved only if that succeeds.</li>
+<li>
+<p><strong>Cursor access token</strong> — <code>/login cursor</code>, then paste the token. grokbot-tui calls
+   <code>POST https://api2.cursor.sh/aiserver.v1.GrokBotService/EnsureSandBox</code> to get a gateway URL, token and
+   extra headers (e.g. <code>x-anyrun-network-token</code>). The Cursor token is stored too, so when the gateway answers
+   <strong>401</strong> grokbot-tui re-exchanges once, retries, and saves the new session.
+   Dashboard / inference API keys (<code>grok_…</code>, <code>crsr_…</code>, <code>xai-…</code>) are rejected locally
+   before EnsureSandBox: they authenticate Cursor Admin/Cloud Agents or xAI inference,
+   not the Grok Bot companion gateway. Prefer <code>/login desktop</code>.</p>
+</li>
+<li>
+<p><strong>Desktop app Cursor session (recommended)</strong> — Sign in with Cursor in the Grok Bot desktop app
+   (browser), then <code>/login desktop [entry]</code> (or bare <code>/login</code> when session files exist).
+   <code>/login desktop open</code> launches the app when installed. grokbot-tui reads the desktop app's
+   saved session only when you run this command, mirroring grok-bot-cli's <code>app-session.js</code>.
+   It prefers <code>gateway-descriptor.json</code> from the app data dir:
+   - Linux: <code>$XDG_CONFIG_HOME/Grok Bot</code> or <code>~/.config/Grok Bot</code>;
+   - macOS: <code>~/Library/Application Support/Grok Bot</code>;
+   - Windows: <code>%APPDATA%\Grok Bot</code> (Roaming). If that folder has no session files,
+     grokbot-tui also checks <code>%LOCALAPPDATA%\Grok Bot</code>.</p>
+</li>
+</ol>
+<p>Both descriptor formats are supported: v1 <code>{version, encrypted}</code> and v2 <code>{version: 2, entries}</code>. When a v2 file has
+   several entries, grokbot-tui lists them and you choose one with <code>/login desktop &lt;entry&gt;</code>. The payload is Chromium Safe Storage:
+   - Linux <code>v11</code>: the password comes from <code>secret-tool lookup xdg:schema chrome_libsecret_os_crypt_password_v2 application 'Grok Bot'</code>;
+   - Linux <code>v10</code>: the fixed <code>peanuts</code> password;
+   - macOS: Keychain item <code>Grok Bot Safe Storage</code>, PBKDF2-SHA1 (<code>saltysalt</code>, 1003 rounds) and AES-128-CBC;
+   - Windows: the DPAPI-protected key in <code>Local State</code> and AES-256-GCM.</p>
+<p>The decrypted <code>{baseUrl, token, headers?}</code> must pass the host allowlist and is validated with <code>listAgents</code>.
+   It is then saved to the active account with method <code>desktop</code>. If the gateway later answers <strong>401</strong>, grokbot-tui re-reads the
+   desktop session once automatically, for that account only. grokbot-tui never reads the desktop session in any other code path.
+   You get clear errors when the app isn't installed, you aren't signed in, or <code>secret-tool</code> is missing. Tokens are never printed or logged.</p>
+<p><strong>Fallback when there is no <code>gateway-descriptor.json</code>:</strong> some desktop builds only write <code>sand-secrets.json</code>.
+   In that case <code>/login desktop</code> decrypts the <code>cursor-accounts</code> field (Chromium Safe Storage, same scheme as above),
+   takes the Cursor access token, and exchanges it via EnsureSandBox exactly like <code>/login cursor</code>. The Cursor token
+   itself is <strong>not</strong> stored — method stays <code>desktop</code> and a 401 re-reads <code>sand-secrets.json</code>. With several Cursor
+   accounts, grokbot-tui lists them as <code>1) &lt;keyprefix&gt;…</code> and you pick with <code>/login desktop &lt;number&gt;</code> (tip: <code>/account add</code>
+   first so each maps to its own grokbot-tui account). <code>local-exec-file-key</code>, <code>cursor-machine-id</code>, Cookies and <code>~/.grokbot/</code>
+   are never read.</p>
+<p><strong>Host allowlist.</strong> Credentials are only sent to:
+- gateway: <code>https</code> on <code>cursor.sh</code>, <code>cursor.com</code>, <code>*.cursor.sh</code>, <code>*.cursor.com</code>, <code>*.cursorvm.com</code>;
+- EnsureSandBox backend (gets the Cursor token): <code>https</code> on <code>*.cursor.sh</code> / <code>*.cursor.com</code> only, never <code>*.cursorvm.com</code>.</p>
+<p>Loopback gateways (<code>localhost</code>, <code>127.0.0.1</code>, <code>::1</code>) are allowed only with <code>GROKBOT_ALLOW_LOCAL_GATEWAY=1</code>. URLs containing userinfo are always rejected.
+Redirects are never followed, requests time out after 30 s, responses are capped at 2 MiB, and tokens are redacted from error messages.</p>
+<p><strong>Environment</strong> (each applies only to the account selected at startup: <code>--account</code> / <code>GROKBOT_TUI_ACCOUNT</code> / last active):</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GROKBOT_TUI_TOKEN</code></td>
+<td><strong>Gateway token</strong> override; never saved. After <code>/account use</code> switches away, that account's stored login is used</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_GATEWAY_URL</code></td>
+<td>Gateway URL for the token above (else the account's stored gateway URL)</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_GATEWAY_HEADERS</code></td>
+<td>Optional JSON object of extra gateway headers</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_CURSOR_API_BASE_URL</code></td>
+<td>Override the EnsureSandBox backend (still must be <code>*.cursor.sh</code> / <code>*.cursor.com</code>)</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_CURSOR_CLIENT_VERSION</code></td>
+<td>Override <code>x-cursor-client-version</code> (else pref <code>cursor.client_version</code>, else detect installed Grok Bot, else <code>0.70.2</code>)</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_CURSOR_CLIENT_TYPE</code></td>
+<td>Override <code>x-cursor-client-type</code> (default <code>sand</code>)</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_SAND_BOX_NAMESPACE</code></td>
+<td>Override <code>x-sand-box-namespace</code> (default <code>prod</code>)</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_ALLOW_LOCAL_GATEWAY</code></td>
+<td><code>1</code> to permit loopback gateways (development)</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_MAX_RESPONSE_BYTES</code></td>
+<td>Cap on one gateway response body in bytes (default 64 MiB)</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_APP_DIR</code></td>
+<td>Grok Bot desktop app install directory, for client version detection</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_NO_THEME_DOWNLOAD</code></td>
+<td><code>1</code> = never download the default theme (see <a href="/docs/themes/#themes">Themes</a>)</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_THEME_URL</code></td>
+<td>Download themes from this URL base instead of the release tag (<code>&lt;url&gt;&lt;name&gt;.toml</code>; used by the tests)</td>
+</tr>
+<tr>
+<td><code>GROKBOT_TUI_ACCOUNT</code></td>
+<td>Starting account alias</td>
+</tr>
+</tbody>
+</table>
+<p><code>GROKBOT_TUI_ALLOW_LOCAL_GATEWAY</code> and <code>GROKBOT_TUI_APP_DIR</code> are forwarded at startup to
+<code>GROKBOT_ALLOW_LOCAL_GATEWAY</code> and <code>GROKBOT_APP_DIR</code>, the names the <code>grokbot_api</code> library reads (setting the
+library names directly also works).</p>
+<p><strong>Older names.</strong> Before 1.2.0 these variables started with <code>GB_</code> (e.g. <code>GB_GROKBOT_TOKEN</code>,
+<code>GB_ACCOUNT</code>). Every <code>GB_*</code> name still works as a fallback: at startup grokbot-tui copies its value to the
+matching <code>GROKBOT_TUI_*</code> name when that one isn't set, so the new name wins when both are set.</p>
+<h2 id="accounts">Accounts</h2>
+<p>Several <strong>strictly separate accounts</strong> (e.g. <code>personal</code> plus work accounts). Each has its own alias, login
+(gateway URL, token, headers, method, Cursor token), bot list, chat transcripts, per-bot memory, and account preferences.</p>
+<ul>
+<li>Start-up account: <code>--account &lt;alias&gt;</code>, then <code>GROKBOT_TUI_ACCOUNT</code>, then the last active account, then <code>default</code>.</li>
+<li>Switch with <code>/account use &lt;alias&gt;</code> or click the <code>@alias</code> header.</li>
+<li>Removing an account deletes all of its rows (FK <code>ON DELETE CASCADE</code>).</li>
+</ul>
+<h2 id="send-vs-login">Send vs login</h2>
+<p><code>/login desktop</code> uses the same session class the desktop app stores (gateway-descriptor or
+EnsureSandBox from sand-secrets). The Grok Bot desktop app itself talks to the gateway with that
+same EnsureSandBox session: the box's <code>gatewayUrl</code>, <code>Bearer &lt;gatewayToken&gt;</code>, and
+<code>x-anyrun-network-token</code> (or <code>x-anyrun-port-token</code> on port-token boxes). There is no separate,
+"non-Sandbox" login the TUI could mint instead.</p>
+<p>If <code>listAgents</code> works but <code>sendPrompt</code> returns <strong>502 "Sand box session may not make this request
+on this endpoint"</strong> (older wording: "A Sand box session is not permitted on this endpoint"), that
+is a server-side restriction on that session class. The message was not accepted; grokbot-tui
+says so and does not report "Delivery unknown". Repeating <code>/login desktop</code> or <code>/login cursor</code>
+will not mint a different kind of session. Send from the desktop app for now; see
+<code>/help troubleshooting</code>.</p>
+<p>Chat reads that fail with <strong>500 <code>[deadline_exceeded]</code></strong> are the gateway's own timeout, not an
+expired login: grokbot-tui retries once, keeps the saved chat on screen and keeps polling with
+backoff. Only 401/417 mean "log in again".</p><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/login.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Built-in browser and SSH · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="">Install and download</a></li><li><a href="/docs/login/" class="">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="">Attachments and the file picker</a></li><li><a href="/docs/images/" class="">Images and terminal graphics</a></li><li><a href="/docs/search/" class="">Searching messages</a></li><li><a href="/docs/notifications/" class="">Notifications</a></li><li><a href="/docs/browser/" class="on">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="built-in-browser-and-ssh">Built-in browser and SSH</h1>
+<p>The text-mode web browser, link handling and running over SSH.</p>
+<h2 id="built-in-browser-and-ssh_1">Built-in browser and SSH</h2>
+<p>Links open in a built-in text browser by default (<code>links.open_with = "builtin"</code>; set it to
+<code>"system"</code>, use <code>/links builtin|system|toggle</code> or the <strong>Web</strong> menu to change it). Ctrl/Alt-click
+or vim NORMAL <code>x</code> uses the other opener. <code>/browse [url]</code> (alias <code>/web</code>, vim NORMAL <code>b</code>, menu
+<strong>Web → browse</strong>) opens it directly; Tab completes URLs visited this session.</p>
+<p>The browser is in-process and works the same on Linux, macOS and Windows: no JavaScript, no
+cookies, redirects followed, 5 MiB / 20 s limits. HTML is rendered as styled text with numbered
+<code>[n]</code> links; images become <code>[🖼 alt]</code> placeholders that open the image viewer; plain text,
+markdown and JSON render as text; anything else offers download (<code>d</code>) or the system app (<code>o</code>).
+Keys: <code>e</code>/Ctrl-L/<code>:</code> edit the URL, j/k arrows PgUp/PgDn g/G Ctrl-d/u and the wheel scroll,
+Tab/Shift-Tab select links, Enter or a click follows, a number then Enter jumps, H/L or
+Alt-←/→ go back/forward, <code>r</code> reloads, <code>/</code> <code>n</code> <code>N</code> search, <code>o</code> opens in the system browser,
+<code>y</code> copies the URL, Esc/<code>q</code> closes.</p>
+<p>OSC 8 hyperlinks that your terminal makes clickable are opened by the terminal itself, so they
+always go to the system browser.</p>
+<p>Over SSH (detected from <code>SSH_CONNECTION</code>, <code>SSH_CLIENT</code>, <code>SSH_TTY</code>, or a parent <code>sshd</code> on Linux;
+<code>GROKBOT_TUI_FORCE_SSH=0|1</code> overrides) the header shows <strong>SSH</strong> and links always use the
+built-in browser (<code>links.ssh_behavior = "builtin"</code>, the default; <code>"respect_pref"</code> follows
+<code>links.open_with</code>). Anything that would launch an app on the remote machine (browser <code>o</code>,
+<code>/open</code>, Ctrl-click, the image viewer's <code>o</code>) warns first and runs only if repeated within 5 s.
+Settings rows that open the Grok Bot app (<code>grokbot://app/v1/settings?id=…</code>) show a built-in
+browser page with the deep link instead (Grok Bot has no web settings URL) and copy the link
+to your local clipboard over OSC 52, so you can open it where Grok Bot is installed.</p>
+<p>Theme parts: <code>browser_frame</code>, <code>browser_url</code>, <code>browser_link_number</code>, <code>browser_heading</code>,
+<code>browser_status</code>, <code>ssh_indicator</code>.</p><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/browser.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>

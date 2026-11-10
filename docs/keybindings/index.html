@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keybindings, commands and vim mode · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="">Install and download</a></li><li><a href="/docs/login/" class="">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="">Attachments and the file picker</a></li><li><a href="/docs/images/" class="">Images and terminal graphics</a></li><li><a href="/docs/search/" class="">Searching messages</a></li><li><a href="/docs/notifications/" class="">Notifications</a></li><li><a href="/docs/browser/" class="">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="on">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="keybindings-commands-and-vim-mode">Keybindings, commands and vim mode</h1>
+<p>Default keys, slash commands, custom keymaps and the opt-in vim-like keys. The full key list is in the in-app help (<code>/help keys</code>, also in the <a href="/docs/reference/help/#keys">help reference</a>).</p>
+<h2 id="vim-like-keys-opt-in">Vim-like keys (opt-in)</h2>
+<p><code>/keymap vim</code> (or pref <code>ui.keys=vim</code>) enables NORMAL / INSERT / COMMAND / VISUAL modes
+with a mode badge on the input. Bindings live in <code>~/.grokbot-tui/keymap.toml</code>
+(<code>/keymap reload</code> after editing). Default stays classic. See <code>docs/vim-mode-plan.md</code>.</p>
+<h2 id="commands">Commands</h2>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/help [cmd]</code> (<code>/h</code>, <code>/?</code>)</td>
+<td>List commands or show one</td>
+</tr>
+<tr>
+<td><code>/login gateway [url]</code></td>
+<td>Log in the active account with a gateway URL plus gateway token (token prompt is masked)</td>
+</tr>
+<tr>
+<td><code>/login cursor</code></td>
+<td>Log in with a Cursor access token (masked), exchanged via EnsureSandBox</td>
+</tr>
+<tr>
+<td><code>/login desktop [entry]</code></td>
+<td>Opt-in: log in with the Grok Bot desktop app's saved session (see Authentication)</td>
+</tr>
+<tr>
+<td><code>/logout</code></td>
+<td>Delete this account's stored credential and clear the session. Chats and memory are kept. (The gateway has no revoke call.)</td>
+</tr>
+<tr>
+<td><code>/whoami</code></td>
+<td>Show the account's login details (method, gateway, header names, whether a Cursor token is stored, env override)</td>
+</tr>
+<tr>
+<td><code>/search &lt;words&gt;</code> (<code>/find</code>)</td>
+<td>Search all locally cached messages and attachments across bots (also Ctrl-F); Enter jumps to the message</td>
+</tr>
+<tr>
+<td><code>/bots</code></td>
+<td>Refresh and list all bots, including hidden ones and groups</td>
+</tr>
+<tr>
+<td><code>/bot &lt;name\|id&gt;</code> (<code>/use</code>)</td>
+<td>Switch to a bot's chat</td>
+</tr>
+<tr>
+<td><code>/open [n\|list]</code> (<code>/img</code>)</td>
+<td>Open the newest image (then link) from the bot's replies in the system viewer (<code>xdg-open</code>, <code>open</code>, or the Windows URL handler; vim <code>o</code>). <code>list</code> numbers them</td>
+</tr>
+<tr>
+<td><code>/react &lt;emoji\|:code:&gt; [n]</code></td>
+<td>Toggle a reaction pill on the newest bot message (<code>n</code>=2 the one before; vim <code>r</code>). Local only: the Grok Bot API has no reaction endpoint</td>
+</tr>
+<tr>
+<td><code>/history [query]</code> (<code>/prompts</code>)</td>
+<td>Browse and fuzzy-search your saved prompts; Enter puts one in the input. <code>/history clear</code> forgets them (confirmed)</td>
+</tr>
+<tr>
+<td><code>/reload</code> (<code>/transcript</code>)</td>
+<td>Reload the active bot's full transcript from the gateway</td>
+</tr>
+<tr>
+<td><code>/account</code> (<code>/acct</code>)</td>
+<td>List accounts (<code>*</code> = active)</td>
+</tr>
+<tr>
+<td><code>/account add &lt;alias&gt;</code></td>
+<td>Create an account</td>
+</tr>
+<tr>
+<td><code>/account use &lt;alias&gt;</code></td>
+<td>Switch account: reloads login, bots, chats, top bar</td>
+</tr>
+<tr>
+<td><code>/account rename &lt;old&gt; &lt;new&gt;</code></td>
+<td>Rename an account</td>
+</tr>
+<tr>
+<td><code>/account remove &lt;alias&gt;</code></td>
+<td>Delete an account and all its data; you confirm by typing the alias (the active account can't be removed)</td>
+</tr>
+<tr>
+<td><code>/prefs</code> (<code>/pref</code>)</td>
+<td>List preferences; <code>/prefs get &lt;key&gt;</code>, <code>/prefs set &lt;key&gt; &lt;value&gt;</code></td>
+</tr>
+<tr>
+<td><code>/theme [dark\|light\|system]</code> (<code>/mode</code>)</td>
+<td>Switch dark/light mode; bare <code>/theme</code> cycles (also <code>F4</code> or a header click)</td>
+</tr>
+<tr>
+<td><code>/theme use [name]</code></td>
+<td>Switch theme (also <code>/theme &lt;name&gt;</code>); no name: pick list (also <code>F5</code>)</td>
+</tr>
+<tr>
+<td><code>/theme list</code> · <code>/theme reload</code></td>
+<td>List theme files (<code>●</code> = in use; broken files say why) · re-read them after editing by hand</td>
+</tr>
+<tr>
+<td><code>/theme edit [name]</code></td>
+<td>Open the theme editor (also <code>Shift-F5</code>)</td>
+</tr>
+<tr>
+<td><code>/theme init [name\|all]</code></td>
+<td>Download a shipped theme from the release (else write the minimal starter; never overwrites)</td>
+</tr>
+<tr>
+<td><code>/theme starter [name]</code></td>
+<td>Write a minimal starter theme (no download; never overwrites)</td>
+</tr>
+<tr>
+<td><code>/theme delete &lt;name&gt;</code></td>
+<td>Delete a theme file (confirm in a pick list)</td>
+</tr>
+<tr>
+<td><code>/theme export &lt;name&gt; [path]</code></td>
+<td>Copy a theme file out (default <code>&lt;data dir&gt;/exports/&lt;name&gt;-&lt;UTC time&gt;.toml</code>; never overwrites)</td>
+</tr>
+<tr>
+<td><code>/memory</code> (<code>/mem</code>)</td>
+<td>The active bot's local memory notes; <code>/memory add &lt;key&gt; &lt;value&gt;</code>, <code>/memory clear [key]</code></td>
+</tr>
+<tr>
+<td><code>/quit</code> (<code>/q</code>, <code>/exit</code>)</td>
+<td>Exit</td>
+</tr>
+</tbody>
+</table>
+<p>Commands live in a registry in <code>src/commands.rs</code>.</p><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/keybindings.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>

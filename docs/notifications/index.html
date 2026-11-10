@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notifications · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="">Install and download</a></li><li><a href="/docs/login/" class="">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="">Attachments and the file picker</a></li><li><a href="/docs/images/" class="">Images and terminal graphics</a></li><li><a href="/docs/search/" class="">Searching messages</a></li><li><a href="/docs/notifications/" class="on">Notifications</a></li><li><a href="/docs/browser/" class="">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="notifications">Notifications</h1>
+<p>Grok Bot notifications, the notification menu, toasts and rules.</p>
+<h2 id="grok-bot-notifications-1340">Grok Bot notifications (1.34.0)</h2>
+<p>The header <strong>🔔</strong> shows how many Grok Bot notifications are unread. Click it, press
+<strong>Alt-b</strong>, run <code>/notifications</code>, or press <code>N</code> in vim mode to open the page.</p>
+<ul>
+<li><strong>Where they come from:</strong> Grok Bot system notices in a chat (<code>kind: notice</code>), new
+  messages and "waiting for you" in bots you aren't viewing (from the bot list refresh),
+  and pending cards. The gateway has no notifications or usage API, so <strong>low credits /
+  usage</strong> notifications are derived from notice or message text that mentions running out
+  of usage or credits; they open Settings → Usage &amp; Billing.</li>
+<li><strong>Toasts</strong> appear as small boxes in the top-right corner. Click one to open its context
+  (the chat, the card, or Settings) and mark it read. <strong>[x]</strong> or the timeout
+  (<code>notifications.toast_timeout_secs</code>, default 20) only hides the toast: it stays unread.</li>
+<li><strong>Toast keys (1.35.0):</strong> <strong>Alt-x</strong> closes the newest toast and <strong>Alt-Shift-x</strong> closes all
+  of them; like the <code>[x]</code>, they stay unread. <strong>Alt-o</strong> opens the newest one and marks it
+  read, like clicking it. These are plain Alt keys, so they work over SSH and tmux without
+  the kitty protocol. Rebind them with the keymap actions <code>notifications.dismiss_toast</code>,
+  <code>notifications.dismiss_all_toasts</code> and <code>notifications.open_toast</code>.</li>
+<li><strong>Page:</strong> newest first. Enter opens, <code>m</code> toggles read, <code>a</code> marks all read, <code>c</code> or
+  <strong>[Clear all]</strong> clears after a confirm dialog over the list (y / Enter or [Yes]; n, Esc or [No] cancels). <code>/notifications read</code> and <code>/notifications clear</code> do
+  the same from the prompt. Read state and clearing are stored on this computer (per
+  account); the API has no way to clear on the server.</li>
+</ul>
+<h2 id="notifications-menu-bar-tooltips">Notifications, menu bar, tooltips</h2>
+<p>Toasts honour <code>~/.grokbot-tui/notify-rules.toml</code> and <code>/notify</code> (dnd / per-kind). They never
+jump the chat scroll. <strong>F10</strong> opens the menu bar. Hover shows a short, muted tooltip after about a second; any click dismisses it.</p><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/notifications.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>

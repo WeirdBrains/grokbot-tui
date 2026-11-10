@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install and download · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="on">Install and download</a></li><li><a href="/docs/login/" class="">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="">Attachments and the file picker</a></li><li><a href="/docs/images/" class="">Images and terminal graphics</a></li><li><a href="/docs/search/" class="">Searching messages</a></li><li><a href="/docs/notifications/" class="">Notifications</a></li><li><a href="/docs/browser/" class="">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="install-and-download">Install and download</h1>
+<p>How to get grokbot-tui on Linux, macOS and Windows, and how to start it.</p>
+<h2 id="downloads-by-os">Downloads by OS</h2>
+<p>Every <a href="https://github.com/WeirdBrains/grokbot-tui/releases/latest">release</a> has these
+files; the links below always point at the latest one.</p>
+<table>
+<thead>
+<tr>
+<th>OS</th>
+<th>file</th>
+<th>how</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux, macOS (installer)</td>
+<td><a href="https://github.com/WeirdBrains/grokbot-tui/releases/latest/download/grokbot-tui-installer.sh"><code>grokbot-tui-installer.sh</code></a></td>
+<td><code>curl --proto '=https' --tlsv1.2 -LsSf https://github.com/WeirdBrains/grokbot-tui/releases/latest/download/grokbot-tui-installer.sh \| sh</code></td>
+</tr>
+<tr>
+<td>Windows (installer)</td>
+<td><a href="https://github.com/WeirdBrains/grokbot-tui/releases/latest/download/grokbot-tui-installer.ps1"><code>grokbot-tui-installer.ps1</code></a></td>
+<td><code>powershell -ExecutionPolicy Bypass -c "irm https://github.com/WeirdBrains/grokbot-tui/releases/latest/download/grokbot-tui-installer.ps1 \| iex"</code></td>
+</tr>
+<tr>
+<td>Windows (MSI)</td>
+<td><a href="https://github.com/WeirdBrains/grokbot-tui/releases/latest/download/grokbot-tui-x86_64-pc-windows-msvc.msi"><code>grokbot-tui-x86_64-pc-windows-msvc.msi</code></a></td>
+<td>double-click; zip: <a href="https://github.com/WeirdBrains/grokbot-tui/releases/latest/download/grokbot-tui-x86_64-pc-windows-msvc.zip"><code>…windows-msvc.zip</code></a></td>
+</tr>
+<tr>
+<td>macOS Apple silicon</td>
+<td><a href="https://github.com/WeirdBrains/grokbot-tui/releases/latest/download/grokbot-tui-aarch64-apple-darwin.pkg"><code>grokbot-tui-aarch64-apple-darwin.pkg</code></a></td>
+<td>unsigned pkg; or <a href="https://github.com/WeirdBrains/grokbot-tui/releases/latest/download/grokbot-tui-aarch64-apple-darwin.tar.xz"><code>.tar.xz</code></a></td>
+</tr>
+<tr>
+<td>macOS Intel</td>
+<td><a href="https://github.com/WeirdBrains/grokbot-tui/releases/latest/download/grokbot-tui-x86_64-apple-darwin.pkg"><code>grokbot-tui-x86_64-apple-darwin.pkg</code></a></td>
+<td>unsigned pkg; or <a href="https://github.com/WeirdBrains/grokbot-tui/releases/latest/download/grokbot-tui-x86_64-apple-darwin.tar.xz"><code>.tar.xz</code></a></td>
+</tr>
+<tr>
+<td>Linux x86_64</td>
+<td><a href="https://github.com/WeirdBrains/grokbot-tui/releases/latest/download/grokbot-tui-x86_64-unknown-linux-gnu.tar.xz"><code>grokbot-tui-x86_64-unknown-linux-gnu.tar.xz</code></a></td>
+<td><code>.deb</code>/<code>.rpm</code> (<code>grokbot-tui_&lt;ver&gt;-1_amd64.deb</code>, <code>grokbot-tui-&lt;ver&gt;-1.x86_64.rpm</code>) on the release page</td>
+</tr>
+<tr>
+<td>Linux aarch64</td>
+<td><a href="https://github.com/WeirdBrains/grokbot-tui/releases/latest/download/grokbot-tui-aarch64-unknown-linux-gnu.tar.xz"><code>grokbot-tui-aarch64-unknown-linux-gnu.tar.xz</code></a></td>
+<td><code>.deb</code>/<code>.rpm</code> (<code>arm64</code> / <code>aarch64</code>) on the release page</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>-ffmpeg</code> archives (<code>grokbot-tui-ffmpeg-&lt;target&gt;…</code>) add video playback with FFmpeg
+linked in. Each file has a <code>.sha256</code> next to it, and <code>sha256.sum</code> lists them all.</p>
+<p>After installing, run <code>grokbot-tui --mock</code> to try the UI offline, then <code>grokbot-tui</code> and
+<a href="/docs/login/">log in</a>. <code>man grokbot-tui</code> (from the <code>.deb</code>/<code>.rpm</code> or <code>make install</code>) lists every
+flag and environment variable.</p>
+<h2 id="shell-completions-1410">Shell completions (1.41.0)</h2>
+<p>grokbot-tui completes its flags and subcommands (including <code>mcp serve|token|config</code> and
+<code>completions</code>) in bash, zsh, fish, PowerShell and elvish. The scripts are generated from
+the CLI definitions. Release archives carry them in a top-level <code>completions/</code> folder
+and a test keeps them current
+(<code>UPDATE_COMPLETIONS=1 cargo test completions</code> rewrites them). In the app: <code>/help completions</code>.</p>
+<p>Installed automatically:</p>
+<table>
+<thead>
+<tr>
+<th>package</th>
+<th>bash</th>
+<th>zsh</th>
+<th>fish</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.deb</code></td>
+<td><code>/usr/share/bash-completion/completions/grokbot-tui</code></td>
+<td><code>/usr/share/zsh/vendor-completions/_grokbot-tui</code></td>
+<td><code>/usr/share/fish/vendor_completions.d/grokbot-tui.fish</code></td>
+</tr>
+<tr>
+<td><code>.rpm</code>, AUR (<code>grokbot-tui</code>, <code>grokbot-tui-bin</code>)</td>
+<td><code>/usr/share/bash-completion/completions/grokbot-tui</code></td>
+<td><code>/usr/share/zsh/site-functions/_grokbot-tui</code></td>
+<td><code>/usr/share/fish/vendor_completions.d/grokbot-tui.fish</code></td>
+</tr>
+<tr>
+<td><code>make install</code> / <code>install-local.sh</code></td>
+<td><code>PREFIX/share/bash-completion/completions/grokbot-tui</code></td>
+<td><code>PREFIX/share/zsh/site-functions/_grokbot-tui</code></td>
+<td><code>PREFIX/share/fish/vendor_completions.d/grokbot-tui.fish</code></td>
+</tr>
+</tbody>
+</table>
+<p>The release archives (<code>.tar.xz</code>, <code>.zip</code>) carry all five scripts in
+<code>completions/</code>. With the shell installers, MSI, <code>.pkg</code> or Homebrew, print the
+script for your shell yourself:</p>
+<pre><code class="language-sh">source &lt;(grokbot-tui completions bash)                                   # bash: add to ~/.bashrc
+grokbot-tui completions zsh &gt; ~/.zfunc/_grokbot-tui                       # zsh: fpath=(~/.zfunc $fpath) before compinit
+grokbot-tui completions fish &gt; ~/.config/fish/completions/grokbot-tui.fish
+grokbot-tui completions elvish &gt; ~/.config/elvish/lib/grokbot-tui.elv     # then `use grokbot-tui` in rc.elv
+</code></pre>
+<pre><code class="language-powershell">grokbot-tui completions powershell | Out-String | Invoke-Expression      # add to $PROFILE
+</code></pre>
+<p>Note for zsh with <code>.deb</code>: Debian's zsh reads <code>/usr/share/zsh/vendor-completions</code>; run
+<code>compinit</code> again (or start a new shell) after installing.</p>
+<h2 id="install">Install</h2>
+<p>Prebuilt packages are attached to each <a href="https://github.com/WeirdBrains/grokbot-tui/releases">GitHub Release</a>
+(see <a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md">PACKAGING.md</a> for how releases are made and what is published where):</p>
+<ul>
+<li><strong>Shell installer (macOS/Linux):</strong> the <code>grokbot-tui-installer.sh</code> command shown in the release notes</li>
+<li><strong>PowerShell (Windows):</strong> the <code>grokbot-tui-installer.ps1</code> command shown in the release notes</li>
+<li><strong>Windows:</strong> <code>grokbot-tui-x86_64-pc-windows-msvc.msi</code> · <strong>macOS:</strong> <code>grokbot-tui-&lt;arch&gt;.pkg</code> (unsigned)</li>
+<li><strong>Debian/Ubuntu:</strong> <code>sudo apt install ./grokbot-tui_&lt;ver&gt;-1_&lt;arch&gt;.deb</code></li>
+<li><strong>Fedora:</strong> <code>sudo dnf install ./grokbot-tui-&lt;ver&gt;-1.&lt;arch&gt;.rpm</code></li>
+<li><strong>Arch Linux (local package):</strong> download the <code>grokbot-tui-bin-&lt;ver&gt;-1-&lt;arch&gt;.pkg.tar.zst</code>
+  from the release page (when present), then:</li>
+<li>verify (optional): <code>gpg --verify grokbot-tui-bin-&lt;ver&gt;-1-&lt;arch&gt;.pkg.tar.zst.asc grokbot-tui-bin-&lt;ver&gt;-1-&lt;arch&gt;.pkg.tar.zst</code></li>
+<li>install: <code>sudo pacman -U ./grokbot-tui-bin-&lt;ver&gt;-1-&lt;arch&gt;.pkg.tar.zst</code></li>
+<li>update: repeat with a newer file; pacman replaces the installed version</li>
+<li>uninstall: <code>sudo pacman -R grokbot-tui-bin</code> (or <code>grokbot-tui</code> for the source-built package)</li>
+<li><strong>Homebrew, AUR, winget:</strong> once published (see PACKAGING.md), <code>brew install WeirdBrains/tap/grokbot-tui</code>,
+  <code>yay -S grokbot-tui-bin</code>, <code>winget install WeirdBrains.grokbot-tui</code></li>
+<li><strong>From source:</strong> <code>make install</code> from a checkout (see <a href="/docs/install/#install-from-a-local-checkout">Install from a local checkout</a>)</li>
+</ul>
+<h3 id="install-from-a-local-checkout">Install from a local checkout</h3>
+<p>These build the code in front of you and copy the result into place. Nothing is
+fetched from crates.io as an install, and no prebuilt binary is downloaded. Building
+still needs a Rust toolchain (<code>cargo</code>/<code>rustc</code>, from rustup or your distro), plus
+<code>libasound2-dev</code>/<code>alsa-lib-devel</code> on Linux.</p>
+<pre><code class="language-sh">make                         # build (release)
+make install                 # install to ~/.local (or /usr/local as root)
+make install PREFIX=/opt/gbt # any prefix; DESTDIR=... for staged/package installs
+make install FFMPEG=1        # -ffmpeg variant (FFmpeg built and linked statically)
+make uninstall               # same PREFIX/DESTDIR as the install
+make vendor &amp;&amp; make install OFFLINE=1   # vendor crates once, then build fully offline
+</code></pre>
+<p>Without <code>make</code>, run the script directly: <code>./install-local.sh [--prefix DIR] [--destdir DIR]
+[--ffmpeg] [--vendor] [--offline] [--no-build] [--uninstall]</code>. On Windows:
+<code>.\install-local.ps1 [-Prefix DIR] [-Ffmpeg] [-Vendor] [-Offline] [-Uninstall]</code> (default
+<code>%LOCALAPPDATA%\Programs\grokbot-tui</code>, added to your user PATH; <code>-Ffmpeg</code> needs vcpkg FFmpeg).</p>
+<p>The install puts the binary in <code>PREFIX/bin</code>, docs and <code>THIRD_PARTY.md</code> in
+<code>PREFIX/share/doc/grokbot-tui</code>, the licence in <code>PREFIX/share/licenses/grokbot-tui</code>, and
+the example themes, keymap and notify rules in <code>PREFIX/share/grokbot-tui</code>. Uninstall
+removes only those; your settings and history stay.</p>
+<h2 id="run">Run</h2>
+<pre><code class="language-sh">cargo run -- --mock                        # offline: fake bots, delayed echo replies
+cargo run                                  # real gateway
+make install                               # builds and installs the `grokbot-tui` binary
+grokbot-tui --data-dir /tmp/gbtest         # different data directory (holds context.db)
+grokbot-tui --account work                 # start in an account (or GROKBOT_TUI_ACCOUNT=work)
+grokbot-tui --theme solar                  # use a theme for this run only (not saved)
+grokbot-tui --list-themes                  # list the theme files (● = in use) and exit
+</code></pre>
+<p>In mock mode any token logs in except <code>bad</code>. Sending <code>reject</code> simulates a 4xx and <code>unknown</code> simulates a 5xx after the prompt has landed.</p><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/install.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Website · grokbot-tui docs</title>
+<meta name="description" content="A terminal UI for Grok Bot">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<header class="top"><a class="brand" href="/"><span class="tag">grokbot-tui</span></a>
+<nav><a href="/" class="">Home</a><a href="/themes/" class="">Themes</a><a href="/docs/" class="on">Docs</a><a href="/#download">Download</a><a href="https://github.com/WeirdBrains/grokbot-tui">GitHub</a></nav></header>
+<main class="docs"><aside><a href="/docs/"><b>All docs</b></a><h4>Getting started</h4><ul><li><a href="/docs/install/" class="">Install and download</a></li><li><a href="/docs/login/" class="">Logging in and accounts</a></li></ul><h4>Using it</h4><ul><li><a href="/docs/chats/" class="">Chats and bots</a></li><li><a href="/docs/team-bots/" class="">Team bots and groups</a></li><li><a href="/docs/attachments/" class="">Attachments and the file picker</a></li><li><a href="/docs/images/" class="">Images and terminal graphics</a></li><li><a href="/docs/search/" class="">Searching messages</a></li><li><a href="/docs/notifications/" class="">Notifications</a></li><li><a href="/docs/browser/" class="">Built-in browser and SSH</a></li><li><a href="/docs/themes/" class="">Themes and the theme editor</a></li><li><a href="/docs/keybindings/" class="">Keybindings, commands and vim mode</a></li><li><a href="/docs/settings/" class="">Settings</a></li><li><a href="/docs/mcp/" class="">MCP server</a></li></ul><h4>Reference</h4><ul><li><a href="/docs/config/" class="">Configuration and environment variables</a></li><li><a href="/docs/reference/help/" class="">In-app help reference</a></li><li><a href="/docs/data-and-privacy/" class="">Data directory and privacy</a></li><li><a href="/docs/troubleshooting/" class="">Troubleshooting</a></li></ul><h4>Project</h4><ul><li><a href="/docs/development/" class="">Development</a></li><li><a href="/docs/website/" class="on">Website</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/PACKAGING.md" class="">Packaging and releases</a></li><li><a href="https://github.com/WeirdBrains/grokbot-tui/blob/main/CHANGELOG.md" class="">Changelog</a></li></ul></aside><article><h1 id="website">Website</h1>
+<p>The site at <a href="https://weirdbrains.github.io/grokbot-tui/">https://weirdbrains.github.io/grokbot-tui/</a> is static HTML built from this
+repository: a front page (hero screenshot, features, downloads, screenshots), a theme
+gallery with a screenshot of every built-in theme in dark and light, and these docs as
+pages under <code>/docs/</code>. GitHub Pages serves it from the <code>gh-pages</code> branch, the same flow as
+Muninn's site.</p>
+<table>
+<thead>
+<tr>
+<th>file</th>
+<th>what</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>site/build.py</code></td>
+<td>builds the site into <code>target/site/</code> (front page, <code>/themes/</code>, <code>/docs/&lt;slug&gt;/</code>)</td>
+</tr>
+<tr>
+<td><code>site/check.py</code></td>
+<td>checks a build: every page, every internal link and image resolves</td>
+</tr>
+<tr>
+<td><code>site/style.css</code></td>
+<td>the layout and colours (the default theme's dark palette)</td>
+</tr>
+<tr>
+<td><code>site/shots.tsv</code></td>
+<td>the screenshot list (name, caption), written by <code>scripts/screenshots.sh</code></td>
+</tr>
+<tr>
+<td><code>site/screenshots/</code></td>
+<td>the PNGs (1524x864, 256 colours)</td>
+</tr>
+<tr>
+<td><code>scripts/screenshots.sh</code></td>
+<td>regenerates the screenshots</td>
+</tr>
+</tbody>
+</table>
+<p>Every <code>docs/**/*.md</code> except <code>docs/historical/</code> is published: <code>docs/README.md</code> is <code>/docs/</code>,
+<code>docs/search.md</code> is <code>/docs/search/</code>, <code>docs/reference/help.md</code> is
+<code>/docs/reference/help/</code>. Links between docs become links between pages; links to other
+files in the repository (the man page, <code>CHANGELOG.md</code>, …) go to GitHub. Each page has an
+"Edit this page on GitHub" link. The pages are generated from <code>docs/</code> on every build, so
+they never drift.</p>
+<h2 id="building">Building</h2>
+<p>Needs Python 3 with the <code>markdown</code> package (<code>python3-markdown</code> on Debian/Ubuntu, or
+<code>pip install --user markdown</code>). Nothing else; the Rust build and the release workflows
+never run it.</p>
+<pre><code class="language-sh">python3 site/build.py          # -&gt; target/site/
+python3 site/check.py          # links and images
+python3 -m http.server -d target/site 8080   # preview at http://localhost:8080/grokbot-tui/ (see below)
+</code></pre>
+<p>The site is built for the <code>/grokbot-tui/</code> path prefix (<code>BASE</code> in <code>build.py</code>). For a local
+preview, <code>python3 site/build.py --base /</code> builds it for the server root instead.</p>
+<h2 id="screenshots">Screenshots</h2>
+<p><code>scripts/screenshots.sh</code> redoes every screenshot. It runs the ignored test
+<code>app::screenshots::site_screenshots</code>, which drives the TUI with the offline <code>--mock</code> API
+in a temp data dir (never <code>~/.grokbot-tui</code>, never a real account or message) and renders
+each screen (via ratatui's <code>TestBackend</code>) to an HTML grid of coloured cells. Headless
+Chromium turns each page into a PNG (no window opens) and ImageMagick shrinks it into
+<code>site/screenshots/</code>; <code>site/shots.tsv</code> is rewritten. It needs <code>chromium</code> and <code>magick</code>.</p>
+<p>The shots: the chat with the bot list on the left and the attachments bar pulled out on
+the right, the same chat with that bar tucked away, search, help, the theme picker, and
+every theme in <code>themes/</code> in dark and light. Run it whenever a view or a theme changes,
+then rebuild and redeploy the site. To add a shot, add a <code>s.shot(...)</code> call in
+<code>src/screenshots.rs</code>.</p>
+<h2 id="deploying">Deploying</h2>
+<p>The <code>gh-pages</code> branch holds only the built site and <code>.nojekyll</code>. To deploy after a change:</p>
+<pre><code class="language-sh">python3 site/build.py &amp;&amp; python3 site/check.py
+git worktree add /tmp/gbt-pages gh-pages
+rsync -a --delete --exclude .git --exclude CNAME --exclude .nojekyll target/site/ /tmp/gbt-pages/
+git -C /tmp/gbt-pages add -A
+git -C /tmp/gbt-pages commit -m &quot;site: build of main $(git rev-parse --short HEAD)&quot;
+git -C /tmp/gbt-pages push origin gh-pages
+git worktree remove /tmp/gbt-pages
+</code></pre>
+<p>Pages rebuilds within a minute or two
+(<code>gh api repos/WeirdBrains/grokbot-tui/pages/builds/latest</code>). Pages is set to "Deploy
+from a branch: <code>gh-pages</code> / root"; the repository's homepage points at the site.</p>
+<p>First-time setup (already done): create an orphan <code>gh-pages</code> branch with the build and
+<code>.nojekyll</code>, push it, then
+<code>gh api -X POST repos/WeirdBrains/grokbot-tui/pages -f 'source[branch]=gh-pages' -f 'source[path]=/'</code>.</p>
+<h2 id="adding-a-custom-domain-later">Adding a custom domain later</h2>
+<ol>
+<li>DNS: a <code>CNAME</code> record from the subdomain (e.g. <code>grokbot-tui.weirdbrains.com</code>) to
+   <code>weirdbrains.github.io</code> (DNS only, no proxy). For an apex domain use GitHub's A records
+   (185.199.108.153, 185.199.109.153, 185.199.110.153, 185.199.111.153) instead.</li>
+<li>Build with <code>python3 site/build.py --base /</code> (the site moves from <code>/grokbot-tui/</code> to the
+   root) and add a <code>CNAME</code> file containing the domain to the <code>gh-pages</code> branch (the deploy
+   above keeps it).</li>
+<li><code>gh api -X PUT repos/WeirdBrains/grokbot-tui/pages -f cname=grokbot-tui.weirdbrains.com</code>,
+   then turn on "Enforce HTTPS" once GitHub has issued the certificate.</li>
+<li>Change <code>BASE</code> in <code>site/build.py</code>, the homepage in <code>Cargo.toml</code>, the links in
+   <code>README.md</code> and <code>docs/</code>, and <code>gh repo edit --homepage</code>.</li>
+</ol><p class="edit"><a href="https://github.com/WeirdBrains/grokbot-tui/edit/main/docs/website.md">Edit this page on GitHub</a></p></article></main>
+<footer>grokbot-tui 1.41.6 · GPL-3.0-or-later · unofficial client for Grok Bot ·
+<a href="https://github.com/WeirdBrains/grokbot-tui">source</a> · <a href="https://github.com/WeirdBrains/grokbot-tui/releases">releases</a> · <a href="/docs/">docs</a></footer>
+</body></html>
