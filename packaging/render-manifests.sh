@@ -8,7 +8,7 @@
 #   SOURCE_DIR    top-level directory inside the release's source.tar.gz
 #   OUT_DIR       output directory (aur/<pkg>/PKGBUILD, winget/manifests/...)
 #
-# The license comes from Cargo.toml; identity values from packaging/identity.env.
+# The license comes from [package].license in Cargo.toml; identity values from packaging/identity.env.
 # Fails if a checksum is missing or any @PLACEHOLDER@ is left unfilled.
 set -euo pipefail
 
@@ -23,8 +23,16 @@ root=$(cd "$here/.." && pwd)
 # shellcheck source=SCRIPTDIR/identity.env
 source "$here/identity.env"
 
-license=$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" |
-  jq -r '.packages[] | select(.name == "grokbot-tui") | .license')
+# Read [package].license from Cargo.toml directly so this script does not need
+# a Rust toolchain (the Arch package job runs in a minimal pacman container).
+license=$(awk '
+  $0 == "[package]" { inpkg=1; next }
+  inpkg && /^\[/ { exit }
+  inpkg && $1 == "license" {
+    split($0, parts, "\"")
+    if (length(parts) >= 2) { print parts[2]; exit }
+  }
+' "$root/Cargo.toml")
 [[ -n $license && $license != null ]] || { echo "no license in Cargo.toml" >&2; exit 1; }
 
 sha() {

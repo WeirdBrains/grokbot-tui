@@ -77,15 +77,18 @@ jobs:
       - name: Install tooling (pacman)
         shell: bash
         run: |
-          # pacman 7+ sandboxes downloads with Landlock. GitHub's container
-          # runtime rejects that ("Operation not permitted" / "switching to
-          # sandbox user 'alpm' failed"), which is typical on the ARM image.
-          if pacman --help 2>&1 | grep -q -- '--disable-sandbox' \
-             && ! grep -q '^DisableSandbox' /etc/pacman.conf; then
-            printf '\n# Required in GitHub Actions containers (Landlock is blocked).\nDisableSandbox\n' >> /etc/pacman.conf
+          # pacman 7+ sandboxes downloads with Landlock and DownloadUser=alpm.
+          # GitHub's container runtime rejects that. Do not call pacman first:
+          # even `pacman --help` can fail the same way and skip setup.
+          # menci's image comments DisableSandboxFilesystem/Syscalls; official
+          # images often have a combined DisableSandbox already enabled.
+          sed -i -E 's/^[[:space:]]*DownloadUser[[:space:]]*=/#DownloadUser =/' /etc/pacman.conf
+          sed -i -E 's/^#(DisableSandbox(Filesystem|Syscalls)?)$/\1/' /etc/pacman.conf
+          if ! grep -qE '^DisableSandbox' /etc/pacman.conf; then
+            printf '\nDisableSandbox\n' >> /etc/pacman.conf
           fi
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm --needed git curl jq binutils fakeroot base-devel namcap gnupg github-cli
+          pacman --disable-sandbox -Syu --noconfirm
+          pacman --disable-sandbox -S --noconfirm --needed git curl jq binutils fakeroot base-devel namcap gnupg github-cli
 
       - name: Read tag and version from the dist plan
         id: plan
