@@ -153,6 +153,9 @@ pub struct Page {
     pub area: Rect,
     pub rows: Vec<(Rect, usize)>,
     pub clear_area: Rect,
+    /// The confirm dialog's [Yes] / [No] buttons (zero when it is not shown).
+    pub confirm_yes: Rect,
+    pub confirm_no: Rect,
 }
 
 #[derive(Debug, Default)]
@@ -573,6 +576,16 @@ impl App {
             self.close_notifications();
             return;
         }
+        if p.confirm_clear {
+            // The confirm dialog is modal: [Yes] clears, anything else cancels.
+            p.confirm_clear = false;
+            if p.confirm_yes.contains(at) {
+                self.inbox.clear_all();
+                self.inbox_save();
+                self.info("Notifications cleared (on this computer; the API has no clear).".into());
+            }
+            return;
+        }
         if p.clear_area.contains(at) && !self.inbox.items.is_empty() {
             p.confirm_clear = true;
             return;
@@ -602,6 +615,11 @@ pub fn draw_toasts(f: &mut Frame, app: &mut App) {
     app.inbox.toast_areas.clear();
     app.inbox.toast_rows = 0;
     if area.width < TOAST_W + 2 || area.height < TOAST_H + 4 {
+        return;
+    }
+    // While the Clear-all confirm is open it is modal: no toasts (or toast clicks)
+    // over it.
+    if app.inbox.page.as_ref().is_some_and(|p| p.confirm_clear) {
         return;
     }
     let ids: Vec<String> = app
@@ -662,8 +680,91 @@ pub fn draw_toasts(f: &mut Frame, app: &mut App) {
     let _ = start;
 }
 
-/// The notifications page.
+/// The notifications page. Its Clear-all confirm is drawn separately by
+/// [`draw_page_confirm`], after toasts, so nothing can cover it.
 pub fn draw_page(f: &mut Frame, app: &mut App) {
+    draw_page_body(f, app);
+}
+
+/// The Clear-all confirm dialog, centered over the notifications list. Called last
+/// (after toasts) so it is always on top while it is open.
+pub fn draw_page_confirm(f: &mut Frame, app: &mut App) {
+    let total = app.inbox.items.len();
+    let Some(p) = app.inbox.page.as_mut() else {
+        return;
+    };
+    if p.confirm_clear {
+        let (yes, no) = draw_clear_confirm(f, p.area, total);
+        p.confirm_yes = yes;
+        p.confirm_no = no;
+    } else {
+        p.confirm_yes = Rect::default();
+        p.confirm_no = Rect::default();
+    }
+}
+
+/// A small modal centered over the notifications list: the question and [Yes] / [No].
+/// Returns the button areas for mouse hits.
+fn draw_clear_confirm(f: &mut Frame, over: Rect, total: usize) -> (Rect, Rect) {
+    let q = format!(
+        "Clear all {total} notification{} on this computer?",
+        if total == 1 { "" } else { "s" }
+    );
+    let note = "This cannot be undone (the Grok Bot API has no clear).";
+    let (yes, no) = (" [ Yes · y ] ", " [ No · n/Esc ] ");
+    let text_w = q.chars().count().max(note.chars().count()) as u16;
+    let w = (text_w + 4).min(over.width).max(12);
+    let h = 7u16.min(over.height);
+    let r = Rect::new(
+        over.x + over.width.saturating_sub(w) / 2,
+        over.y + over.height.saturating_sub(h) / 2,
+        w,
+        h,
+    );
+    f.render_widget(Clear, r);
+    let block = Block::new()
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .title(" Clear all notifications ")
+        .style(theme::toast(crate::notify::NoticeKind::Warning))
+        .border_style(theme::toast(crate::notify::NoticeKind::Warning));
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+    f.render_widget(
+        Paragraph::new(vec![
+            Line::from(q),
+            Line::from(Span::styled(note, theme::key_hint())),
+        ])
+        .wrap(Wrap { trim: true }),
+        Rect::new(
+            inner.x + 1,
+            inner.y,
+            inner.width.saturating_sub(2),
+            2.min(inner.height),
+        ),
+    );
+    let by = inner.bottom().saturating_sub(1);
+    let (yw, nw) = (yes.chars().count() as u16, no.chars().count() as u16);
+    let bx = inner.x + inner.width.saturating_sub(yw + nw + 1) / 2;
+    let yes_r = Rect::new(bx, by, yw.min(inner.width), 1);
+    let no_r = Rect::new(
+        (bx + yw + 1).min(inner.right()),
+        by,
+        nw.min(inner.right().saturating_sub(bx + yw + 1)),
+        1,
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(yes, theme::settings_button())),
+        yes_r,
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(no, theme::settings_button())),
+        no_r,
+    );
+    (yes_r, no_r)
+}
+
+fn draw_page_body(f: &mut Frame, app: &mut App) {
     let full = f.area();
     let w = full.width.saturating_sub(4).min(100);
     let h = full.height.saturating_sub(2);
@@ -697,11 +798,7 @@ pub fn draw_page(f: &mut Frame, app: &mut App) {
         clear.len() as u16,
         1,
     );
-    let head = if p.confirm_clear {
-        "Clear all notifications on this computer? y/n".to_string()
-    } else {
-        "From Grok Bot: notices, new messages, waiting bots, cards, usage. Stored locally.".into()
-    };
+    let head = "From Grok Bot: notices, new messages, waiting bots, cards, usage. Stored locally.";
     f.render_widget(
         Paragraph::new(Span::styled(head, theme::key_hint())),
         Rect::new(
@@ -808,6 +905,63 @@ mod tests {
     }
 
     #[test]
+    fn clear_all_confirm_is_a_modal_on_top_of_the_list() {
+        let (_rt, mut app, _d) = ready();
+        let bot = other_bot(&app);
+        for m in ["m1", "m2", "m3"] {
+            app.inbox_signals(vec![BotSignal {
+                bot_id: bot.clone(),
+                unread: 1,
+                awaiting: false,
+                last_message_id: Some(m.to_string()),
+                preview: Some(format!("preview {m}")),
+            }]);
+            std::thread::sleep(Duration::from_millis(3));
+        }
+        app.open_notifications();
+        let before = screen(&mut app);
+        assert!(before.contains("preview m2"), "{before}");
+        key(&mut app, KeyCode::Char('c'));
+        let s = screen(&mut app);
+        let lines: Vec<&str> = s.lines().collect();
+        let q = lines
+            .iter()
+            .position(|l| l.contains("Clear all 3 notifications on this computer?"))
+            .unwrap_or_else(|| panic!("confirm question not visible:\n{s}"));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("[ Yes · y ]") && l.contains("[ No · n/Esc ]")),
+            "{s}"
+        );
+        // Not jammed into the page header (row 0 of the page is the border, row 1 the header).
+        let header = lines
+            .iter()
+            .position(|l| l.contains("[Clear all]"))
+            .unwrap();
+        assert!(
+            q > header + 1,
+            "confirm must sit over the list, not in the header:\n{s}"
+        );
+        // It covers the list: the question row is drawn where list rows were, and the
+        // modal's title is on screen.
+        assert!(s.contains("Clear all notifications"), "{s}");
+        let yes = app.inbox.page.as_ref().unwrap().confirm_yes;
+        assert!(yes.width > 0, "yes button area recorded");
+        // Clicking [No] cancels; nothing is cleared.
+        let no = app.inbox.page.as_ref().unwrap().confirm_no;
+        app.notifications_click(no.x, no.y);
+        assert_eq!(app.inbox.items.len(), 3);
+        assert!(!screen(&mut app).contains("on this computer?"));
+        // Clicking [Yes] clears.
+        key(&mut app, KeyCode::Char('c'));
+        screen(&mut app);
+        let yes = app.inbox.page.as_ref().unwrap().confirm_yes;
+        app.notifications_click(yes.x + 1, yes.y);
+        assert!(app.inbox.items.is_empty());
+    }
+
+    #[test]
     fn usage_text_is_detected() {
         assert!(is_usage_text("Your Grok Bot usage ran out."));
         assert!(is_usage_text("You're low on credits"));
@@ -911,7 +1065,7 @@ mod tests {
         assert!(screen(&mut app).contains("· read"));
         assert_eq!(app.inbox.unread(), 1);
         key(&mut app, KeyCode::Char('c'));
-        assert!(screen(&mut app).contains("Clear all notifications on this computer? y/n"));
+        assert!(screen(&mut app).contains("Clear all 2 notifications on this computer?"));
         key(&mut app, KeyCode::Char('y'));
         assert!(app.inbox.items.is_empty());
         // Cleared ones don't come back.

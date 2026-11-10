@@ -213,10 +213,46 @@ fn attachments_from_content(content: Option<&serde_json::Value>) -> Vec<Attachme
 
 /// A 502 (or similar) whose body says a Sandbox session cannot call `sendPrompt`.
 /// That is a server-side session-type restriction, not an uncertain delivery.
+///
+/// Matches both gateway wordings seen so far: "A Sand box session is not permitted on
+/// this endpoint" (≤ 1.41.5) and "Sand box session may not make this request on this
+/// endpoint" (Nov 2026), plus close variants ("sandbox session" … "may not" /
+/// "this endpoint" / "not allowed").
 pub fn sandbox_send_blocked(err: &gw::Error) -> bool {
     let msg = err.to_string().to_ascii_lowercase();
     (msg.contains("sand box session") || msg.contains("sandbox session"))
-        && msg.contains("not permitted")
+        && (msg.contains("not permitted")
+            || msg.contains("may not")
+            || msg.contains("not allowed")
+            || msg.contains("this endpoint"))
+}
+
+/// A read failure worth one quiet retry and no re-login advice: a gateway 5xx (e.g.
+/// `500 [deadline_exceeded] the operation timed out` from `getAgentTranscriptTail`),
+/// a client-side timeout or network error. Never true for 401/417 (expired session)
+/// or a Sandbox-session refusal.
+pub fn transient_read_error(err: &gw::Error) -> bool {
+    if err.is_unauthorized() || sandbox_send_blocked(err) {
+        return false;
+    }
+    match err {
+        gw::Error::Http { status, .. } => (500..600).contains(status),
+        gw::Error::Transport { .. } => true,
+        _ => {
+            let m = err.to_string().to_ascii_lowercase();
+            m.contains("deadline_exceeded") || m.contains("timed out")
+        }
+    }
+}
+
+/// The error came from the gateway's own deadline (`[deadline_exceeded]`) rather than
+/// this client's request timeout.
+pub fn server_deadline(err: &gw::Error) -> bool {
+    err.status().is_some_and(|s| s >= 500)
+        && err
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("deadline_exceeded")
 }
 
 fn as_truthy(v: &serde_json::Value) -> Option<bool> {
@@ -1960,6 +1996,55 @@ mod tests {
             message: "bad gateway".into(),
         };
         assert!(!sandbox_send_blocked(&ok));
+        let new_wording = gw::Error::Http {
+            method: "sendPrompt".into(),
+            status: 502,
+            message: "Sand box session may not make this request on this endpoint.".into(),
+        };
+        assert!(sandbox_send_blocked(&new_wording));
+        let variant = gw::Error::Http {
+            method: "sendPrompt".into(),
+            status: 403,
+            message: "Sandbox session not allowed here".into(),
+        };
+        assert!(sandbox_send_blocked(&variant));
+        let unrelated_endpoint = gw::Error::Http {
+            method: "sendPrompt".into(),
+            status: 502,
+            message: "upstream may not be reachable on this endpoint".into(),
+        };
+        assert!(!sandbox_send_blocked(&unrelated_endpoint));
+    }
+
+    #[test]
+    fn transient_read_error_covers_gateway_deadline_not_auth() {
+        let deadline = gw::Error::Http {
+            method: "getAgentTranscriptTail".into(),
+            status: 500,
+            message: "[deadline_exceeded] the operation timed out".into(),
+        };
+        assert!(transient_read_error(&deadline));
+        assert!(server_deadline(&deadline));
+        let client_timeout = gw::Error::Transport {
+            method: "getAgentTranscriptTail".into(),
+            message: "timed out".into(),
+        };
+        assert!(transient_read_error(&client_timeout));
+        assert!(!server_deadline(&client_timeout));
+        for status in [401, 417, 404] {
+            let e = gw::Error::Http {
+                method: "getAgentTranscriptTail".into(),
+                status,
+                message: String::new(),
+            };
+            assert!(!transient_read_error(&e), "{status}");
+        }
+        let sandbox = gw::Error::Http {
+            method: "sendPrompt".into(),
+            status: 502,
+            message: "Sand box session may not make this request on this endpoint.".into(),
+        };
+        assert!(!transient_read_error(&sandbox));
     }
 
     #[test]

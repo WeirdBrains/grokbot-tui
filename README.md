@@ -494,7 +494,7 @@ animation (reduced motion). Theme parts: `loading` (frame and message) and `spin
 ## Notifications, menu bar, tooltips
 
 Toasts honour `~/.grokbot-tui/notify-rules.toml` and `/notify` (dnd / per-kind). They never
-jump the chat scroll. **F10** opens the menu bar. Hover shows a short tooltip after a delay.
+jump the chat scroll. **F10** opens the menu bar. Hover shows a short, muted tooltip after about a second; any click dismisses it.
 
 ## Vim-like keys (opt-in)
 

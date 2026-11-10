@@ -22,6 +22,22 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 - Release: flatten GPG `.asc` files before uploading the signatures artifact so
   `gh release create artifacts/*` does not try to upload a nested `artifacts/`
   directory.
+- Send: the gateway's newer refusal wording, "Sand box session may not make this
+  request on this endpoint", is recognised as a Sandbox-session block (1.41.5 only
+  matched "not permitted", so it showed the raw error and then a misleading
+  "Delivery unknown"). It no longer polls `promptAcceptanceStatus`, says the message
+  was not accepted, and explains that the desktop app uses the same EnsureSandBox
+  session class, so re-login will not help.
+- Chat: `getAgentTranscriptTail` 500 `[deadline_exceeded]`, other gateway 5xx and
+  client timeouts are treated as transient. The read is retried once; on chat load
+  they no longer raise the "Could not load the chat" modal with `/login` advice, and
+  the notice says it is not a login problem while polling backs off.
+- Notifications: the Clear-all confirm is a modal dialog centered over the list
+  (with clickable [Yes] / [No]) instead of text squeezed into the page header.
+- Tooltips: any mouse click (any button, anywhere) dismisses a visible or pending
+  tooltip. The hover delay is 900 ms (was 400 ms) so tips no longer flash while the
+  pointer passes over controls, and the `tooltip` style is muted (`@subtle` text on
+  `@header`, `@muted` border) in the built-in and shipped themes.
 - Send: sandbox `sendPrompt` 502 diagnosis no longer recommends re-login with
   `/login desktop` or `/login cursor` as a fix (those sessions are Sandbox-
   oriented). Login alone does not mint a non-Sandbox session.

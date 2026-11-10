@@ -495,10 +495,11 @@ pub fn starter_style(slot_index: usize) -> StyleSpec {
             fg: Some(r(c::ON_ACCENT)),
             ..StyleSpec::default()
         }),
+        // Muted on purpose: a hint, not a modal (subtle text on the header shade).
         s::TOOLTIP => StyleSpec {
-            fg: Some(r(c::MODAL_TEXT)),
-            bg: Some(r(c::MODAL_BACKGROUND)),
-            border: Some(r(c::ACCENT)),
+            fg: Some(r(c::SUBTLE)),
+            bg: Some(r(c::HEADER)),
+            border: Some(r(c::MUTED)),
             ..StyleSpec::default()
         },
         s::LOADING => StyleSpec {

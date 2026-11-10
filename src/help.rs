@@ -789,11 +789,17 @@ No bots — create one in the desktop app, then /bots.
 A deleted bot still in the sidebar — /refresh rebuilds from listAgents (deleted /
   archived agents and profile.isHiddenFromSidebar are dropped). If it still appears,
   the gateway is still listing it.
-'sendPrompt failed: 502 A Sand box session is not permitted on this endpoint'
-  The gateway refused sendPrompt for a Sandbox-typed session. listAgents may still
-  work. /login desktop and /login cursor both produce Sandbox-oriented sessions, so
-  repeating them usually will not fix send. Check whether the Grok Bot desktop app
-  can send to the same bot. grokbot-tui will not treat it as 'Delivery unknown'.
+sendPrompt 502 'Sand box session may not make this request on this endpoint'
+  (older wording: 'A Sand box session is not permitted on this endpoint')
+  A server-side refusal: the gateway refused sendPrompt for a Sandbox-typed session
+  and the message was not accepted. listAgents may still work. /login desktop and
+  /login cursor mint the same EnsureSandBox session class the Grok Bot desktop app
+  uses, so repeating them usually will not fix send. Send from the desktop app for
+  now. grokbot-tui will not treat it as 'Delivery unknown'.
+'getAgentTranscriptTail failed: 500 [deadline_exceeded] the operation timed out'
+  The gateway's own deadline ran out reading the chat (server-side, not a login
+  problem). grokbot-tui retries once, keeps the saved chat on screen and keeps
+  polling with backoff. /reload retries now; no re-login is needed.
   Dashboard API keys (grok_/crsr_/xai-) cannot log in for chat — see /help login-cursor.
 Notices flooding the chat — they live in a scrollable panel of at most 7 rows
   under the chat (click it, then ↑↓ / PgUp / PgDn / wheel). They never push the

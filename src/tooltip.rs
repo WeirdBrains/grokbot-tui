@@ -10,7 +10,9 @@ use ratatui::widgets::{Clear, Paragraph};
 use std::time::{Duration, Instant};
 
 /// How long the pointer must sit still on a control before the tip shows.
-pub const HOVER_DELAY: Duration = Duration::from_millis(400);
+/// Long enough that passing the pointer over a control does not flash a tip (1.41.6:
+/// was 400 ms).
+pub const HOVER_DELAY: Duration = Duration::from_millis(900);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tip {
@@ -201,7 +203,15 @@ mod tests {
         let r = Rect::new(0, 0, 5, 1);
         assert!(!s.pointer(Some((Hit::ThemeSwitch, r)), t0));
         assert!(s.tip.is_none());
+        assert!(
+            HOVER_DELAY >= Duration::from_millis(800),
+            "tips must not flash on pass-over"
+        );
         assert!(!s.tick(t0 + Duration::from_millis(100), tip_for));
+        // The old 400 ms delay is no longer enough.
+        assert!(!s.tick(t0 + Duration::from_millis(500), tip_for));
+        assert!(s.tip.is_none());
+        assert!(!s.tick(t0 + HOVER_DELAY - Duration::from_millis(1), tip_for));
         assert!(s.tick(t0 + HOVER_DELAY + Duration::from_millis(1), tip_for));
         assert!(s.tip.is_some());
         assert!(s.dismiss());

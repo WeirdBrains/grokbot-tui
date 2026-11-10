@@ -91,7 +91,7 @@ notification_unread = { fg = "@accent", bold = true }
 notification_read = { fg = "@muted" }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
-tooltip = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
+tooltip = { fg = "@subtle", bg = "@header", border = "@muted" }
 loading = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
 spinner = { fg = "@accent", bold = true }
 toast = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
@@ -206,7 +206,7 @@ notification_unread = { fg = "@accent", bold = true }
 notification_read = { fg = "@muted" }
 menu_bar = { fg = "@text" }
 menu_active = { fg = "@on_accent", bg = "@accent", bold = true }
-tooltip = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
+tooltip = { fg = "@subtle", bg = "@header", border = "@muted" }
 loading = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }
 spinner = { fg = "@accent", bold = true }
 toast = { fg = "@modal_text", bg = "@modal_background", border = "@accent" }

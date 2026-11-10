@@ -640,6 +640,13 @@ fn handle_event(app: &mut App, ev: Event) -> bool {
         return true;
     }
     if let Event::Mouse(m) = &ev
+        && matches!(m.kind, MouseEventKind::Down(_))
+    {
+        // Any click (any button, anywhere, even on a toast) dismisses a visible or
+        // pending tooltip.
+        app.tooltip.dismiss();
+    }
+    if let Event::Mouse(m) = &ev
         && matches!(m.kind, MouseEventKind::Down(MouseButton::Left))
         && app.inbox_toast_click(m.column, m.row)
     {
@@ -2149,6 +2156,35 @@ mod event_batch_tests {
         assert_eq!(app.input, "x");
         assert_eq!(app.pending_clipboard.as_deref(), Some("x"));
         assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn any_mouse_click_dismisses_tooltips() {
+        use crate::tooltip::{HOVER_DELAY, Hit, tip_for};
+        use std::time::{Duration, Instant};
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (mut app, _d) = test_app(&rt);
+        let r = ratatui::layout::Rect::new(0, 0, 5, 1);
+        for button in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
+            let t0 = Instant::now();
+            app.tooltip.pointer(Some((Hit::ThemeSwitch, r)), t0);
+            assert!(
+                app.tooltip
+                    .tick(t0 + HOVER_DELAY + Duration::from_millis(1), tip_for)
+            );
+            assert!(app.tooltip.tip.is_some());
+            handle_event(&mut app, mouse(MouseEventKind::Down(button), 60, 20));
+            assert!(
+                app.tooltip.tip.is_none(),
+                "{button:?} click must dismiss the tip"
+            );
+            // A pending (not yet shown) tip is dropped too.
+            let t1 = Instant::now();
+            app.tooltip.pointer(Some((Hit::ThemeSwitch, r)), t1);
+            handle_event(&mut app, mouse(MouseEventKind::Down(button), 60, 20));
+            assert!(!app.tooltip.tick(t1 + HOVER_DELAY * 2, tip_for));
+            assert!(app.tooltip.tip.is_none());
+        }
     }
 
     #[test]

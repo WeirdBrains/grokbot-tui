@@ -21,11 +21,11 @@ The header **🔔** shows how many Grok Bot notifications are unread. Click it, 
   the kitty protocol. Rebind them with the keymap actions `notifications.dismiss_toast`,
   `notifications.dismiss_all_toasts` and `notifications.open_toast`.
 - **Page:** newest first. Enter opens, `m` toggles read, `a` marks all read, `c` or
-  **[Clear all]** clears (asks first). `/notifications read` and `/notifications clear` do
+  **[Clear all]** clears after a confirm dialog over the list (y / Enter or [Yes]; n, Esc or [No] cancels). `/notifications read` and `/notifications clear` do
   the same from the prompt. Read state and clearing are stored on this computer (per
   account); the API has no way to clear on the server.
 
 ## Notifications, menu bar, tooltips
 
 Toasts honour `~/.grokbot-tui/notify-rules.toml` and `/notify` (dnd / per-kind). They never
-jump the chat scroll. **F10** opens the menu bar. Hover shows a short tooltip after a delay.
+jump the chat scroll. **F10** opens the menu bar. Hover shows a short, muted tooltip after about a second; any click dismisses it.

@@ -571,6 +571,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     crate::inbox::draw_toasts(f, app);
     draw_toasts(f, app);
+    // Modal: the notifications Clear-all confirm sits above the list and any toasts.
+    if app.inbox.page.is_some() {
+        crate::inbox::draw_page_confirm(f, app);
+    }
     if let Some(tip) = app.tooltip.tip.clone() {
         crate::tooltip::paint(f, &tip, app.tooltip.tip_at, f.area());
     }

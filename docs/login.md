@@ -92,7 +92,18 @@ Several **strictly separate accounts** (e.g. `personal` plus work accounts). Eac
 ## Send vs login
 
 `/login desktop` uses the same session class the desktop app stores (gateway-descriptor or
-EnsureSandBox from sand-secrets). If `listAgents` works but `sendPrompt` returns
-**502 A Sandbox session is not permitted on this endpoint**, that is a server-side restriction
-on that session class — repeating `/login desktop` will not mint a different kind of session.
-Check whether the desktop app can send to the same bot; see `/help troubleshooting`.
+EnsureSandBox from sand-secrets). The Grok Bot desktop app itself talks to the gateway with that
+same EnsureSandBox session: the box's `gatewayUrl`, `Bearer <gatewayToken>`, and
+`x-anyrun-network-token` (or `x-anyrun-port-token` on port-token boxes). There is no separate,
+"non-Sandbox" login the TUI could mint instead.
+
+If `listAgents` works but `sendPrompt` returns **502 "Sand box session may not make this request
+on this endpoint"** (older wording: "A Sand box session is not permitted on this endpoint"), that
+is a server-side restriction on that session class. The message was not accepted; grokbot-tui
+says so and does not report "Delivery unknown". Repeating `/login desktop` or `/login cursor`
+will not mint a different kind of session. Send from the desktop app for now; see
+`/help troubleshooting`.
+
+Chat reads that fail with **500 `[deadline_exceeded]`** are the gateway's own timeout, not an
+expired login: grokbot-tui retries once, keeps the saved chat on screen and keeps polling with
+backoff. Only 401/417 mean "log in again".

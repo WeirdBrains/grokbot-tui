@@ -175,6 +175,38 @@ pub fn real_desktop_lister() -> DesktopLister {
 /// Text for a desktop-session error. grokbot_api describes `AMBIGUOUS_ENTRIES` without naming
 /// any app's commands, so point the user at grokbot-tui's own: `/login desktop <name|number>`, and
 /// `/account add` when several desktop Cursor accounts exist.
+/// Pause before the single retry of a transcript read that failed transiently.
+pub const TRANSIENT_READ_RETRY: Duration = Duration::from_millis(1200);
+
+/// Run a read-only gateway call; on a transient failure (gateway 5xx such as
+/// `[deadline_exceeded]`, client timeout, network error) wait briefly and try once more.
+/// Reads are idempotent, so this never duplicates anything.
+async fn read_with_retry<T, F, Fut>(f: F) -> gw::Result<T>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = gw::Result<T>>,
+{
+    match f().await {
+        Err(e) if crate::api::transient_read_error(&e) => {
+            tokio::time::sleep(TRANSIENT_READ_RETRY).await;
+            f().await
+        }
+        r => r,
+    }
+}
+
+/// Notice text for a chat refresh that failed transiently: no re-login advice.
+fn transient_chat_text(e: &gw::Error) -> String {
+    let why = if crate::api::server_deadline(e) {
+        "the gateway timed out reading this chat (server-side deadline_exceeded, not a login problem)"
+    } else {
+        "the gateway is not answering right now (temporary; not a login problem)"
+    };
+    format!(
+        "Could not refresh chat: {e} — {why}. Showing the saved chat; grokbot-tui keeps retrying with backoff. /reload retries now."
+    )
+}
+
 fn desktop_error_text(e: &gw::Error) -> String {
     match e {
         gw::Error::Desktop { code, message } if code == "AMBIGUOUS_ENTRIES" => {
@@ -252,11 +284,7 @@ pub fn try_open_desktop_app_for_signin() -> Result<String, String> {
         gw::desktop::Platform::Macos => dir.clone(),
         gw::desktop::Platform::Windows => {
             let exe = dir.join("Grok Bot.exe");
-            if exe.is_file() {
-                exe
-            } else {
-                dir.clone()
-            }
+            if exe.is_file() { exe } else { dir.clone() }
         }
         gw::desktop::Platform::Linux => {
             let mut found = None;
@@ -1246,7 +1274,7 @@ impl App {
         self.poll.limit = POLL_LIMIT;
         self.spawn(async move {
             api.bind_viewer_session(&bot, session.as_deref());
-            let result = api.transcript(&bot, limit).await;
+            let result = read_with_retry(|| api.transcript(&bot, limit)).await;
             Event::Transcript {
                 epoch,
                 bot,
@@ -1679,6 +1707,10 @@ impl App {
                 }) {
                     match &result {
                         Ok(_) => self.loading_done(),
+                        // A transient gateway failure (e.g. 500 deadline_exceeded) is not a
+                        // login problem: drop the overlay, keep the saved chat on screen and
+                        // let the notice below explain; polling retries with backoff.
+                        Err(e) if crate::api::transient_read_error(e) => self.loading_done(),
                         Err(e) => self.loading_fail(format!("Could not load the chat: {e}")),
                     }
                 }
@@ -1733,6 +1765,8 @@ impl App {
                         }
                         let msg = if e.is_unauthorized() {
                             "Gateway rejected the session (401/417, usually expired). Run /login desktop (or your login method) again → /help troubleshooting".to_string()
+                        } else if crate::api::transient_read_error(&e) {
+                            transient_chat_text(&e)
                         } else {
                             format!("Could not refresh chat: {e}")
                         };
@@ -1780,7 +1814,7 @@ impl App {
                             Entry {
                                 kind: EntryKind::Error,
                                 text: format!(
-                                    "Send failed: {e} The gateway classified this session as Sandbox and refused sendPrompt (listAgents can still work). /login desktop and /login cursor both produce Sandbox-oriented sessions, so repeating them usually will not help. Prefer checking whether the Grok Bot desktop app can send to this bot; see /help troubleshooting. The message was not accepted."
+                                    "Send failed: {e} This is a server-side refusal: the gateway classified this session as Sandbox and refused sendPrompt (listAgents can still work). The message was not accepted, so nothing was delivered. /login desktop and /login cursor both mint the same EnsureSandBox session class the Grok Bot desktop app uses, so repeating them usually will not help. Send from the Grok Bot desktop app for now; see /help troubleshooting."
                                 ),
                             },
                         );
@@ -2607,7 +2641,7 @@ impl App {
         let epoch = self.epoch;
         self.spawn(async move {
             api.bind_viewer_session(&bot, session.as_deref());
-            let result = api.transcript_history(&bot, HISTORY_LIMIT).await;
+            let result = read_with_retry(|| api.transcript_history(&bot, HISTORY_LIMIT)).await;
             Event::Transcript {
                 epoch,
                 bot,
@@ -6103,7 +6137,10 @@ pub mod tests {
 
     #[test]
     fn desktop_cred_source_labels() {
-        assert_eq!(DesktopCredSource::GatewayDescriptor.label_tag(), "descriptor");
+        assert_eq!(
+            DesktopCredSource::GatewayDescriptor.label_tag(),
+            "descriptor"
+        );
         assert_eq!(DesktopCredSource::SandSecrets.label_tag(), "sand");
         assert_eq!(
             DesktopCredSource::parse("gateway-descriptor"),
@@ -6416,6 +6453,139 @@ pub mod tests {
     }
 
     #[test]
+    fn sandbox_session_may_not_wording_is_not_unknown_delivery() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let server = rt.block_on(MockServer::start());
+        rt.block_on(async {
+            Mock::given(path("/api/listAgents"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(json!([{"id": "a1", "name": "A"}])),
+                )
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/sendPrompt"))
+                .respond_with(ResponseTemplate::new(502).set_body_json(json!({
+                    "error": "Sand box session may not make this request on this endpoint."
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/getAgentTranscriptTail"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"entries": []})))
+                .mount(&server)
+                .await;
+        });
+        let (mut app, _d) = real_app(&rt, &server);
+        type_line(&mut app, &format!("/login gateway {}", server.uri()));
+        type_line(&mut app, "gw");
+        settle(&mut app);
+        type_line(&mut app, "hello there");
+        settle(&mut app);
+        let t = texts(&app).join("\n");
+        assert!(t.contains("Send failed"), "{t}");
+        assert!(
+            t.contains("not permitted") || t.contains("server-side"),
+            "{t}"
+        );
+        assert!(
+            !t.contains("Delivery unknown"),
+            "sandbox 502 must not look like an uncertain send: {t}"
+        );
+        assert!(
+            t.contains("Sandbox") || t.contains("sandbox") || t.contains("/login desktop"),
+            "{t}"
+        );
+        assert!(t.contains("server-side"), "{t}");
+        assert!(t.contains("not accepted"), "{t}");
+        assert!(
+            !t.contains("Re-login with /login desktop (recommended)"),
+            "must not recommend desktop re-login as the sandbox-502 fix: {t}"
+        );
+        let pending = app.store.messages("a1").unwrap();
+        assert!(
+            pending.iter().all(|m| m
+                .remote_id
+                .as_deref()
+                .is_none_or(|r| r.starts_with("pending:"))),
+            "a refused send must never be marked delivered"
+        );
+    }
+
+    #[test]
+    fn transcript_deadline_retries_once_and_recovers_quietly() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let server = rt.block_on(MockServer::start());
+        rt.block_on(async {
+            Mock::given(path("/api/listAgents"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(json!([{"id": "a1", "name": "A"}])),
+                )
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/getAgentTranscriptTail"))
+                .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+                    "error": "[deadline_exceeded] the operation timed out"
+                })))
+                .up_to_n_times(1)
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/getAgentTranscriptTail"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"entries": [
+                    {"id": "e2", "kind": "send-message", "message": {"type": "text", "content": "still here"}}]})))
+                .mount(&server)
+                .await;
+        });
+        let (mut app, _d) = real_app(&rt, &server);
+        type_line(&mut app, &format!("/login gateway {}", server.uri()));
+        type_line(&mut app, "gw");
+        settle(&mut app);
+        settle(&mut app);
+        let t = texts(&app).join("\n");
+        assert!(t.contains("still here"), "retry should load the chat: {t}");
+        assert!(!t.contains("Could not refresh chat"), "{t}");
+        assert!(
+            app.loading.as_ref().is_none_or(|l| l.error.is_none()),
+            "no failure modal after a recovered deadline"
+        );
+    }
+
+    #[test]
+    fn transcript_deadline_is_not_a_login_problem() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let server = rt.block_on(MockServer::start());
+        rt.block_on(async {
+            Mock::given(path("/api/listAgents"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(json!([{"id": "a1", "name": "A"}])),
+                )
+                .mount(&server)
+                .await;
+            Mock::given(path("/api/getAgentTranscriptTail"))
+                .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+                    "error": "[deadline_exceeded] the operation timed out"
+                })))
+                .mount(&server)
+                .await;
+        });
+        let (mut app, _d) = real_app(&rt, &server);
+        type_line(&mut app, &format!("/login gateway {}", server.uri()));
+        type_line(&mut app, "gw");
+        settle(&mut app);
+        settle(&mut app);
+        assert!(
+            app.loading.as_ref().is_none_or(|l| l.error.is_none()),
+            "a gateway deadline must not raise the 'Could not load the chat' login modal"
+        );
+        let t = texts(&app).join("\n");
+        assert!(t.contains("Could not refresh chat"), "{t}");
+        assert!(t.contains("not a login problem"), "{t}");
+        assert!(
+            !t.contains("/login"),
+            "no re-login advice for a deadline: {t}"
+        );
+    }
+
+    #[test]
     fn cursor_login_rejects_dashboard_keys_without_ensure_sandbox() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let server = rt.block_on(async {
@@ -6450,7 +6620,10 @@ pub mod tests {
             app.store.load_login().unwrap().is_none(),
             "dashboard key must not be persisted"
         );
-        assert!(app.api.is_none(), "must not create a client from a dashboard key");
+        assert!(
+            app.api.is_none(),
+            "must not create a client from a dashboard key"
+        );
 
         type_line(&mut app, "/login cursor");
         settle(&mut app);
