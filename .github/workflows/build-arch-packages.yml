@@ -77,6 +77,13 @@ jobs:
       - name: Install tooling (pacman)
         shell: bash
         run: |
+          # pacman 7+ sandboxes downloads with Landlock. GitHub's container
+          # runtime rejects that ("Operation not permitted" / "switching to
+          # sandbox user 'alpm' failed"), which is typical on the ARM image.
+          if pacman --help 2>&1 | grep -q -- '--disable-sandbox' \
+             && ! grep -q '^DisableSandbox' /etc/pacman.conf; then
+            printf '\n# Required in GitHub Actions containers (Landlock is blocked).\nDisableSandbox\n' >> /etc/pacman.conf
+          fi
           pacman -Syu --noconfirm
           pacman -S --noconfirm --needed git curl jq binutils fakeroot base-devel namcap gnupg github-cli
 
@@ -107,7 +114,9 @@ jobs:
           VERSION: ${{ steps.plan.outputs.version }}
         shell: bash
         run: |
-          srcdir=$(tar -tzf source.tar.gz | head -1 | cut -d/ -f1)
+          # Don't use tar | head under pipefail: head closes the pipe and tar
+          # exits 141, failing the step.
+          srcdir=$(set +o pipefail; tar -tzf source.tar.gz | head -1 | cut -d/ -f1)
           bash packaging/render-manifests.sh "$TAG" "$VERSION" checksums "$srcdir" out
           ls -lR out/aur
 
